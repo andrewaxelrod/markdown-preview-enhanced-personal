@@ -10,21 +10,21 @@ The original project README is preserved in git at `git show baseline-0.8.32:REA
 
 ## Usage
 
-| Action | Shortcut |
-| ------ | -------- |
-| Open preview to the side | `⌘K V` |
-| Open preview in a full tab | `⌘⇧V` |
-| Open locked preview to the side | `⌘K ⇧L` |
-| Run the code chunk at the cursor | `⇧⏎` |
-| Run all code chunks | `⌃⇧⏎` |
+| Action                           | Shortcut |
+| -------------------------------- | -------- |
+| Open preview to the side         | `⌘K V`   |
+| Open preview in a full tab       | `⌘⇧V`    |
+| Open locked preview to the side  | `⌘K ⇧L`  |
+| Run the code chunk at the cursor | `⇧⏎`     |
+| Run all code chunks              | `⌃⇧⏎`    |
 
 ## Identity
 
-| | |
-| --- | --- |
-| Extension ID | `andrew.markdown-preview-enhanced-personal` |
-| Upstream ID | `shd101wyy.markdown-preview-enhanced` |
-| Baseline | tag `baseline-0.8.32` |
+|                    |                                                                                |
+| ------------------ | ------------------------------------------------------------------------------ |
+| Extension ID       | `andrew.markdown-preview-enhanced-personal`                                    |
+| Upstream ID        | `shd101wyy.markdown-preview-enhanced`                                          |
+| Baseline           | tag `baseline-0.8.32`                                                          |
 | Settings namespace | `markdown-preview-enhanced.*` — **unchanged**, so existing settings carry over |
 
 Only `name`, `displayName`, and `publisher` differ from upstream. Nothing in `src/` resolves
@@ -51,7 +51,7 @@ git diff --stat baseline-0.8.32   # just the file list
 - Node.js (developed against v24) and pnpm 10.28.0, activated by `corepack enable pnpm`
   (the version is pinned by the `packageManager` field — do not use npm or yarn)
 - VS Code. If the `code` CLI is not on your PATH, run
-  *Shell Command: Install 'code' command in PATH* from the command palette, or use the
+  _Shell Command: Install 'code' command in PATH_ from the command palette, or use the
   full path: `/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code`
 
 ## Build and install
@@ -65,7 +65,7 @@ code --install-extension markdown-preview-enhanced-personal-*.vsix --force
 
 Then run **Developer: Reload Window** in VS Code.
 
-`pnpm install` warns about *Ignored build scripts* (esbuild, sharp, fsevents, …) — expected
+`pnpm install` warns about _Ignored build scripts_ (esbuild, sharp, fsevents, …) — expected
 under pnpm 10; those packages ship prebuilt platform binaries.
 
 ## Development loop
@@ -88,15 +88,15 @@ Note: `.husky/pre-commit` runs `npx lint-staged`. It is dormant until the next
 
 ## Where things live
 
-| Path | Purpose |
-| ---- | ------- |
-| `src/extension.ts` | Entry point for desktop VS Code (Node) |
-| `src/extension-web.ts` | Entry point for VS Code for the Web |
-| `src/extension-common.ts` | Activation logic shared by both entry points |
-| `src/preview-provider.ts` | Webview panel provider for the live preview |
-| `src/config.ts` | Maps VS Code settings onto crossnote's `NotebookConfig` |
-| `build.js` | esbuild config for both bundles, plus WASM/worker asset copying |
-| `gulpfile.js` | Copies crossnote's styles/webview/dependencies into `./crossnote` |
+| Path                      | Purpose                                                           |
+| ------------------------- | ----------------------------------------------------------------- |
+| `src/extension.ts`        | Entry point for desktop VS Code (Node)                            |
+| `src/extension-web.ts`    | Entry point for VS Code for the Web                               |
+| `src/extension-common.ts` | Activation logic shared by both entry points                      |
+| `src/preview-provider.ts` | Webview panel provider for the live preview                       |
+| `src/config.ts`           | Maps VS Code settings onto crossnote's `NotebookConfig`           |
+| `build.js`                | esbuild config for both bundles, plus WASM/worker asset copying   |
+| `gulpfile.js`             | Copies crossnote's styles/webview/dependencies into `./crossnote` |
 
 Rendering itself lives in the [crossnote](https://github.com/shd101wyy/crossnote) dependency,
 not here — this repo is the VS Code wrapper around it. [AGENTS.md](AGENTS.md) has deeper

@@ -1,6 +1,6 @@
 {
-  "name": "markdown-preview-enhanced",
-  "displayName": "%displayName%",
+  "name": "markdown-preview-enhanced-personal",
+  "displayName": "Markdown Preview Enhanced (Personal)",
   "version": "0.8.32",
   "description": "%description%",
   "categories": [
@@ -20,7 +20,7 @@
     "gabyx",
     "mavaddat"
   ],
-  "publisher": "shd101wyy",
+  "publisher": "andrew",
   "packageManager": "pnpm@10.28.0",
   "main": "./out/native/extension.js",
   "browser": "./out/web/extension.js",

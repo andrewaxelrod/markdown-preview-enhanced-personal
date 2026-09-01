@@ -1,90 +1,110 @@
-<h1 align="center"> Markdown Preview Enhanced </h1>
+# Markdown Preview Enhanced (Personal)
 
-![intro](https://user-images.githubusercontent.com/1908863/28495106-30b3b15e-6f09-11e7-8eb6-ca4ca001ab15.png)
+A personal fork of [shd101wyy/vscode-markdown-preview-enhanced](https://github.com/shd101wyy/vscode-markdown-preview-enhanced),
+branched from upstream `develop` at **v0.8.32**. It is published under its own extension
+identity so a Marketplace release of the original can never auto-update over local changes.
 
-<div align="center">
+Upstream feature documentation still applies in full:
+**[markdown-preview-enhanced docs](https://shd101wyy.github.io/markdown-preview-enhanced/)**.
+The original project README is preserved in git at `git show baseline-0.8.32:README.md`.
 
-[English](https://shd101wyy.github.io/markdown-preview-enhanced/#/) · [简体中文](https://shd101wyy.github.io/markdown-preview-enhanced/#/zh-cn/) · [繁體中文](https://shd101wyy.github.io/markdown-preview-enhanced/#/zh-tw/) · [日本語](https://shd101wyy.github.io/markdown-preview-enhanced/#/ja-jp/) · [한국어](https://shd101wyy.github.io/markdown-preview-enhanced/#/ko-kr/) · [Français](https://shd101wyy.github.io/markdown-preview-enhanced/#/fr-fr/) · [Español](https://shd101wyy.github.io/markdown-preview-enhanced/#/es-es/) · [Português](https://shd101wyy.github.io/markdown-preview-enhanced/#/pt-br/) · [Nederlands](https://shd101wyy.github.io/markdown-preview-enhanced/#/nl-nl/) · [Türkçe](https://shd101wyy.github.io/markdown-preview-enhanced/#/tr-tr/)
+## Usage
 
-</div>
+| Action | Shortcut |
+| ------ | -------- |
+| Open preview to the side | `⌘K V` |
+| Open preview in a full tab | `⌘⇧V` |
+| Open locked preview to the side | `⌘K ⇧L` |
+| Run the code chunk at the cursor | `⇧⏎` |
+| Run all code chunks | `⌃⇧⏎` |
 
-<div align="center">
+## Identity
 
-[VS Code](https://marketplace.visualstudio.com/items?itemName=shd101wyy.markdown-preview-enhanced) · [VS Code for the Web](https://vscode.dev)
+| | |
+| --- | --- |
+| Extension ID | `andrew.markdown-preview-enhanced-personal` |
+| Upstream ID | `shd101wyy.markdown-preview-enhanced` |
+| Baseline | tag `baseline-0.8.32` |
+| Settings namespace | `markdown-preview-enhanced.*` — **unchanged**, so existing settings carry over |
 
-</div>
+Only `name`, `displayName`, and `publisher` differ from upstream. Nothing in `src/` resolves
+its own extension ID, and `build.js` does not embed the name or version, so the rebrand is
+inert at runtime.
 
-## Supporting this project
+Do not install the upstream extension alongside this one — identical command IDs and the
+`markdown-preview-enhanced` custom-editor `viewType` would collide.
 
-Markdown Preview Enhanced is an open source project released under the [University of Illinois/NCSA Open Source License](LICENSE.md). Its ongoing development is made possible thanks to the support by these awesome [backers](https://shd101wyy.github.io/markdown-preview-enhanced/#/backers). You can help make this project better by [supporting us on GitHub Sponsors](https://github.com/sponsors/shd101wyy), [PayPal](https://shd101wyy.github.io/markdown-preview-enhanced/#/paypal), or [微信支付 Wechat Pay](https://shd101wyy.github.io/markdown-preview-enhanced/#/wechat). Thank you!
+## What's different from upstream
 
-## Sponsors
+See [CHANGELOG.personal.md](CHANGELOG.personal.md). Upstream's own history is in
+[CHANGELOG.md](CHANGELOG.md), left untouched so it never conflicts on a rebase.
 
-<a href="https://github.com/sponsors/shd101wyy">
-  <img src="https://github.blog/wp-content/uploads/2019/05/mona-heart-featured.png?" width="200"></a><br>
+To see every local change as a diff:
 
-These [GitHub Sponsors](https://github.com/sponsors/shd101wyy#sponsors) and [Backers](https://shd101wyy.github.io/markdown-preview-enhanced/#/backers) help push this project forward 🎉.
+```bash
+git diff baseline-0.8.32          # full diff against pristine upstream 0.8.32
+git diff --stat baseline-0.8.32   # just the file list
+```
 
-## Introduction
+## Prerequisites
 
-Markdown Preview Enhanced is an extension that provides you with many useful functionalities such as automatic scroll sync, [math typesetting](https://shd101wyy.github.io/markdown-preview-enhanced/#/math), [mermaid](https://shd101wyy.github.io/markdown-preview-enhanced/#/diagrams?id=mermaid), [PlantUML](https://shd101wyy.github.io/markdown-preview-enhanced/#/diagrams?id=plantuml), [WebSequenceDiagrams](https://www.websequencediagrams.com), [pandoc](https://shd101wyy.github.io/markdown-preview-enhanced/#/pandoc), PDF export, [code chunk](https://shd101wyy.github.io/markdown-preview-enhanced/#/code-chunk), [presentation writer](https://rawgit.com/shd101wyy/markdown-preview-enhanced/master/docs/presentation-intro.html), etc. A lot of its ideas are inspired by [Markdown Preview Plus](https://github.com/atom-community/markdown-preview-plus) and [RStudio Markdown](http://rmarkdown.rstudio.com/).
+- Node.js (developed against v24) and pnpm 10.28.0, activated by `corepack enable pnpm`
+  (the version is pinned by the `packageManager` field — do not use npm or yarn)
+- VS Code. If the `code` CLI is not on your PATH, run
+  *Shell Command: Install 'code' command in PATH* from the command palette, or use the
+  full path: `/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code`
 
-Feel free to ask questions, post issues, submit pull request, and request new features.
+## Build and install
 
-For more information about this project and how to use this extension, please check out our documentation ⬇︎
+```bash
+pnpm install --frozen-lockfile
+pnpm build          # gulp copies crossnote assets -> ./crossnote, esbuild bundles -> ./out
+npx @vscode/vsce package --no-dependencies
+code --install-extension markdown-preview-enhanced-personal-*.vsix --force
+```
 
-## Privacy
+Then run **Developer: Reload Window** in VS Code.
 
-**This extension does not collect, transmit, or share your data with any external service.** The core preview, scroll sync, math typesetting, diagram rendering, and all editor features run entirely on your local machine. No telemetry, no tracking, no phone-home.
+`pnpm install` warns about *Ignored build scripts* (esbuild, sharp, fsevents, …) — expected
+under pnpm 10; those packages ship prebuilt platform binaries.
 
-- **Markdown content** — rendered locally; never leaves your machine.
-- **Math (KaTeX/MathJax)** — typeset locally or via a CDN JavaScript library you configure (default: jsdelivr).
-- **Diagrams (Mermaid, Graphviz, Vega, WaveDrom, D2, TikZ)** — rendered locally using bundled or system-installed tools.
-- **PlantUML** — rendered via your own PlantUML server (`plantumlServer` config) or a local `.jar` file. Unless explicitly configured to use `kroki.io`, no diagram data is sent to any remote service.
-- **Image upload (imgur, sm.ms, qiniu)** — opt-in only. Requires you to manually trigger the upload and configure API credentials.
-- **Pandoc / ebook / PDF export** — uses locally installed tools; no data is uploaded.
+## Development loop
 
-If you have any questions about data handling, please [open an issue](https://github.com/shd101wyy/vscode-markdown-preview-enhanced/issues).
+Press **F5** in VS Code to launch an Extension Development Host running the working tree
+directly (via `--extensionDevelopmentPath`), with `pnpm watch` rebuilding on save. Reload the
+host window to pick up a rebuild. Repackage and reinstall only when you want the change in
+your everyday editor.
 
-## Documentation
+```bash
+pnpm watch          # esbuild in watch mode
+pnpm test           # mocha unit tests
+pnpm check:all      # eslint + prettier
+pnpm fix:all        # autofix both
+```
 
-To check out the documentation, visit
+Note: `.husky/pre-commit` runs `npx lint-staged`. It is dormant until the next
+`pnpm install` wires up the hooks; after that, commits lint and reformat staged files.
+`git commit --no-verify` skips it.
 
-- [English](https://shd101wyy.github.io/markdown-preview-enhanced/#/)
-- [简体中文](https://shd101wyy.github.io/markdown-preview-enhanced/#/zh-cn/)
-- [繁體中文](https://shd101wyy.github.io/markdown-preview-enhanced/#/zh-tw/)
-- [日本語](https://shd101wyy.github.io/markdown-preview-enhanced/#/ja-jp/)
-- [한국어](https://shd101wyy.github.io/markdown-preview-enhanced/#/ko-kr/)
-- [Français](https://shd101wyy.github.io/markdown-preview-enhanced/#/fr-fr/)
-- [Español](https://shd101wyy.github.io/markdown-preview-enhanced/#/es-es/)
-- [Português](https://shd101wyy.github.io/markdown-preview-enhanced/#/pt-br/)
-- [Nederlands](https://shd101wyy.github.io/markdown-preview-enhanced/#/nl-nl/)
-- [Türkçe](https://shd101wyy.github.io/markdown-preview-enhanced/#/tr-tr/)
+## Where things live
 
-Contact me if you are willing to help translate the documentation :)
+| Path | Purpose |
+| ---- | ------- |
+| `src/extension.ts` | Entry point for desktop VS Code (Node) |
+| `src/extension-web.ts` | Entry point for VS Code for the Web |
+| `src/extension-common.ts` | Activation logic shared by both entry points |
+| `src/preview-provider.ts` | Webview panel provider for the live preview |
+| `src/config.ts` | Maps VS Code settings onto crossnote's `NotebookConfig` |
+| `build.js` | esbuild config for both bundles, plus WASM/worker asset copying |
+| `gulpfile.js` | Copies crossnote's styles/webview/dependencies into `./crossnote` |
 
-## Keybindings
-
-> The <kbd>cmd</kbd> key for _Windows_ is <kbd>ctrl</kbd>.
-
-| Shortcuts                                                      | Functionality                   |
-| -------------------------------------------------------------- | ------------------------------- |
-| <kbd>cmd-k v</kbd> or <kbd>ctrl-k v</kbd>                      | Open preview to the Side        |
-| <kbd>cmd-shift-v</kbd> or <kbd>ctrl-shift-v</kbd>              | Open preview                    |
-| <kbd>cmd-k shift-l</kbd> or <kbd>ctrl-k shift-l</kbd>          | Open locked preview to the Side |
-| <kbd>cmd-k cmd-shift-l</kbd> or <kbd>ctrl-k ctrl-shift-l</kbd> | Toggle preview lock             |
-| <kbd>ctrl-shift-s</kbd>                                        | Sync preview / Sync source      |
-| <kbd>shift-enter</kbd>                                         | Run Code Chunk                  |
-| <kbd>ctrl-shift-enter</kbd>                                    | Run all Code Chunks             |
-| <kbd>cmd-=</kbd> or <kbd>cmd-shift-=</kbd>                     | Preview zoom in                 |
-| <kbd>cmd--</kbd> or <kbd>cmd-shift-\_</kbd>                    | Preview zoom out                |
-| <kbd>cmd-0</kbd>                                               | Preview reset zoom              |
-| <kbd>esc</kbd>                                                 | Toggle sidebar TOC              |
-
-## Changelog
-
-Please check the [Releases](https://github.com/shd101wyy/vscode-markdown-preview-enhanced/releases) page of this project.
+Rendering itself lives in the [crossnote](https://github.com/shd101wyy/crossnote) dependency,
+not here — this repo is the VS Code wrapper around it. [AGENTS.md](AGENTS.md) has deeper
+architecture notes, including how to add a new setting and how to work against a local
+crossnote build.
 
 ## License
 
-[University of Illinois/NCSA Open Source License](LICENSE.md)
+Upstream code is under the
+[University of Illinois/NCSA Open Source License](LICENSE.md); local changes inherit it.
+If this fork is ever published, it must not reuse upstream's Marketplace identity or branding.

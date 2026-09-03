@@ -50,7 +50,19 @@ type VSCodeMPEConfigKey =
   | 'd2Sketch'
   | 'aiTranslationProvider'
   | 'aiTranslationModel'
-  | 'aiTranslationAutoUpdate';
+  | 'aiTranslationAutoUpdate'
+  | 'readAloudEnabled'
+  | 'readAloudClickToRead'
+  | 'readAloudProvider'
+  | 'elevenLabsVoiceId'
+  | 'elevenLabsModelId'
+  | 'kokoroVoice'
+  | 'readAloudSpeed'
+  | 'readAloudHighlightTheme'
+  | 'readAloudConfirmAbove'
+  | 'readAloudCacheSizeMB'
+  | 'elevenLabsBaseUrl'
+  | 'kokoroBaseUrl';
 
 type ConfigKey = keyof NotebookConfig | VSCodeMPEConfigKey;
 

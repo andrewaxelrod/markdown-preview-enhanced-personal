@@ -37,7 +37,7 @@
     "run-in-browser:watch": "node build.js --web-dev && concurrently \"vscode-test-web --browser none --extensionDevelopmentPath=. ${SERVE_DIR:-.}\" \"npx http-server ./crossnote -p 6789 --cors\" \"node build.js --watch\"",
     "run-in-vscode-dev": "npx serve --cors -l 5000 --ssl-cert $HOME/certs/localhost.pem --ssl-key $HOME/certs/localhost-key.pem",
     "test": "pnpm test:unit",
-    "test:unit": "mocha --ui tdd --reporter spec test/find-fragment-target-line.test.js test/block-id-helpers.test.js test/rank-by-closeness.test.js",
+    "test:unit": "mocha --ui tdd --reporter spec test/find-fragment-target-line.test.js test/block-id-helpers.test.js test/rank-by-closeness.test.js test/read-aloud/word-spans.test.js test/read-aloud/chunker.test.js test/read-aloud/speakable.test.js test/read-aloud/sent-log.test.js test/read-aloud/error-mapping.test.js test/read-aloud/messages.test.js test/read-aloud/cache.test.js test/read-aloud/block-eligibility.test.js test/read-aloud/text-extraction.test.js test/read-aloud/selection.test.js test/read-aloud/click-to-read.test.js test/read-aloud/elevenlabs-client.test.js test/read-aloud/reading-decoration.test.js test/read-aloud/kokoro-client.test.js test/read-aloud/kokoro-alignment.test.js",
     "vscode:prepublish": "pnpm install --frozen-lockfile && pnpm build",
     "watch": "gulp copy-files && gulp clean-out && node build.js --watch"
   },
@@ -178,6 +178,46 @@
       {
         "command": "markdown-preview-enhanced.showOriginalTranslation",
         "title": "%markdown-preview-enhanced.showOriginalTranslation.title%"
+      },
+      {
+        "command": "markdown-preview-enhanced.readAloud.setApiKey",
+        "title": "%markdown-preview-enhanced.readAloud.setApiKey.title%",
+        "enablement": "!isWeb"
+      },
+      {
+        "command": "markdown-preview-enhanced.readAloud.clearApiKey",
+        "title": "%markdown-preview-enhanced.readAloud.clearApiKey.title%",
+        "enablement": "!isWeb"
+      },
+      {
+        "command": "markdown-preview-enhanced.readAloud.readSelection",
+        "title": "%markdown-preview-enhanced.readAloud.readSelection.title%",
+        "enablement": "!isWeb"
+      },
+      {
+        "command": "markdown-preview-enhanced.readAloud.togglePlayPause",
+        "title": "%markdown-preview-enhanced.readAloud.togglePlayPause.title%",
+        "enablement": "!isWeb"
+      },
+      {
+        "command": "markdown-preview-enhanced.readAloud.stop",
+        "title": "%markdown-preview-enhanced.readAloud.stop.title%",
+        "enablement": "!isWeb"
+      },
+      {
+        "command": "markdown-preview-enhanced.readAloud.chooseVoice",
+        "title": "%markdown-preview-enhanced.readAloud.chooseVoice.title%",
+        "enablement": "!isWeb"
+      },
+      {
+        "command": "markdown-preview-enhanced.readAloud.clearCache",
+        "title": "%markdown-preview-enhanced.readAloud.clearCache.title%",
+        "enablement": "!isWeb"
+      },
+      {
+        "command": "markdown-preview-enhanced.readAloud.showLog",
+        "title": "%markdown-preview-enhanced.readAloud.showLog.title%",
+        "enablement": "!isWeb"
       }
     ],
     "configuration": {
@@ -834,6 +874,102 @@
           "description": "%markdown-preview-enhanced.aiTranslationAutoUpdate.description%",
           "default": false,
           "type": "boolean"
+        },
+        "markdown-preview-enhanced.readAloudEnabled": {
+          "description": "%markdown-preview-enhanced.readAloudEnabled.description%",
+          "default": true,
+          "type": "boolean"
+        },
+        "markdown-preview-enhanced.readAloudClickToRead": {
+          "description": "%markdown-preview-enhanced.readAloudClickToRead.description%",
+          "default": true,
+          "type": "boolean"
+        },
+        "markdown-preview-enhanced.readAloudProvider": {
+          "description": "%markdown-preview-enhanced.readAloudProvider.description%",
+          "default": "kokoro",
+          "type": "string",
+          "enum": [
+            "kokoro",
+            "elevenlabs"
+          ],
+          "enumDescriptions": [
+            "%markdown-preview-enhanced.readAloudProvider.enumDescriptions.0%",
+            "%markdown-preview-enhanced.readAloudProvider.enumDescriptions.1%"
+          ]
+        },
+        "markdown-preview-enhanced.elevenLabsVoiceId": {
+          "description": "%markdown-preview-enhanced.elevenLabsVoiceId.description%",
+          "default": "",
+          "type": "string"
+        },
+        "markdown-preview-enhanced.elevenLabsModelId": {
+          "description": "%markdown-preview-enhanced.elevenLabsModelId.description%",
+          "default": "eleven_flash_v2_5",
+          "type": "string",
+          "enum": [
+            "eleven_multilingual_v2",
+            "eleven_flash_v2_5",
+            "eleven_v3"
+          ],
+          "enumDescriptions": [
+            "%markdown-preview-enhanced.elevenLabsModelId.enumDescriptions.0%",
+            "%markdown-preview-enhanced.elevenLabsModelId.enumDescriptions.1%",
+            "%markdown-preview-enhanced.elevenLabsModelId.enumDescriptions.2%"
+          ]
+        },
+        "markdown-preview-enhanced.kokoroVoice": {
+          "description": "%markdown-preview-enhanced.kokoroVoice.description%",
+          "default": "af_heart",
+          "type": "string"
+        },
+        "markdown-preview-enhanced.readAloudSpeed": {
+          "description": "%markdown-preview-enhanced.readAloudSpeed.description%",
+          "default": 1,
+          "type": "number",
+          "minimum": 0.25,
+          "maximum": 4
+        },
+        "markdown-preview-enhanced.readAloudHighlightTheme": {
+          "description": "%markdown-preview-enhanced.readAloudHighlightTheme.description%",
+          "default": "blue",
+          "type": "string",
+          "enum": [
+            "blue",
+            "orange",
+            "yellow",
+            "green"
+          ],
+          "enumDescriptions": [
+            "%markdown-preview-enhanced.readAloudHighlightTheme.enumDescriptions.0%",
+            "%markdown-preview-enhanced.readAloudHighlightTheme.enumDescriptions.1%",
+            "%markdown-preview-enhanced.readAloudHighlightTheme.enumDescriptions.2%",
+            "%markdown-preview-enhanced.readAloudHighlightTheme.enumDescriptions.3%"
+          ]
+        },
+        "markdown-preview-enhanced.readAloudConfirmAbove": {
+          "description": "%markdown-preview-enhanced.readAloudConfirmAbove.description%",
+          "default": 5000,
+          "type": "integer",
+          "minimum": 0
+        },
+        "markdown-preview-enhanced.readAloudCacheSizeMB": {
+          "description": "%markdown-preview-enhanced.readAloudCacheSizeMB.description%",
+          "default": 100,
+          "type": "integer",
+          "minimum": 1
+        },
+        "markdown-preview-enhanced.elevenLabsBaseUrl": {
+          "description": "%markdown-preview-enhanced.elevenLabsBaseUrl.description%",
+          "default": "https://api.elevenlabs.io",
+          "type": "string",
+          "scope": "machine"
+        },
+        "markdown-preview-enhanced.kokoroBaseUrl": {
+          "description": "%markdown-preview-enhanced.kokoroBaseUrl.description%",
+          "default": "http://127.0.0.1:8880",
+          "type": "string",
+          "scope": "machine"
         }
       }
     },
@@ -888,6 +1024,21 @@
         "command": "markdown-preview-enhanced.syncPreview",
         "key": "ctrl+shift+s",
         "when": "editorLangId =~ /^(markdown|quarto|prompt|instructions|chatagent|skill)$/"
+      },
+      {
+        "command": "markdown-preview-enhanced.readAloud.readSelection",
+        "key": "alt+r",
+        "when": "activeWebviewPanelId == 'markdown-preview-enhanced' || activeCustomEditorId == 'markdown-preview-enhanced'"
+      },
+      {
+        "command": "markdown-preview-enhanced.readAloud.togglePlayPause",
+        "key": "alt+space",
+        "when": "activeWebviewPanelId == 'markdown-preview-enhanced' || activeCustomEditorId == 'markdown-preview-enhanced'"
+      },
+      {
+        "command": "markdown-preview-enhanced.readAloud.stop",
+        "key": "alt+escape",
+        "when": "activeWebviewPanelId == 'markdown-preview-enhanced' || activeCustomEditorId == 'markdown-preview-enhanced'"
       }
     ],
     "menus": {
@@ -933,9 +1084,9 @@
     ]
   },
   "dependencies": {
+    "@earendil-works/pi-ai": "^0.83.0",
     "@types/crypto-js": "^4.1.2",
     "@types/vfile": "^3.0.2",
-    "@earendil-works/pi-ai": "^0.83.0",
     "async-mutex": "^0.4.0",
     "crossnote": "0.9.32",
     "crypto-js": "^4.2.0"
@@ -944,7 +1095,7 @@
     "@eslint/js": "^10",
     "@types/mocha": "^5.2.5",
     "@types/node": "^25.6.0",
-    "@types/vscode": "1.70.0",
+    "@types/vscode": "1.82.0",
     "@typescript-eslint/eslint-plugin": "^8",
     "@typescript-eslint/parser": "^8",
     "@vscode/test-web": "^0.0.80",
@@ -955,6 +1106,7 @@
     "gulp": "^4.0.2",
     "http-server": "^14.1.1",
     "husky": "^9.1.7",
+    "jsdom": "23.2.0",
     "lint-staged": "^16.4.0",
     "mocha": "^6.1.4",
     "prettier": "^3",
@@ -966,7 +1118,7 @@
     "webpack-cli": "^5.1.4"
   },
   "engines": {
-    "vscode": "^1.70.0"
+    "vscode": "^1.82.0"
   },
   "pnpm": {
     "overrides": {

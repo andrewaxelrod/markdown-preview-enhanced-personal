@@ -10,3 +10,9 @@ pnpm-debug.log*
 .mimosa
 .v2c
 .video_agent
+# Local secrets (ElevenLabs key for the read-aloud work) - never commit
+.env
+.env.*
+!.env.example
+# Read-aloud sent-text log written next to previewed documents
+logs/

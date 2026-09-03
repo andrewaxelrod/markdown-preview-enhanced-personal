@@ -24,3 +24,7 @@ prettier.config.js
 .eslintrc.js
 .husky
 gulpfile.js
+.env
+.env.*
+install.sh
+logs/**

@@ -3,6 +3,18 @@ import { PreviewMode, utility } from 'crossnote';
 import { SHA256 } from 'crypto-js';
 import * as vscode from 'vscode';
 import { setAiTranslatorContext, promptAndStoreApiKey } from './ai-translator';
+import { ReadAloudController } from './read-aloud/controller';
+import { readAloudLog } from './read-aloud/log';
+import {
+  parseCancelArgs,
+  parsePlayingArgs,
+  parseSetSpeedArgs,
+  parseSynthesizeArgs,
+} from './read-aloud/messages';
+import {
+  otherMpeSettingsAffected,
+  readAloudSettingsAffected,
+} from './read-aloud/settings';
 import { WikilinkCompletionProvider } from './block-id-completion-provider';
 import { WikilinkHoverProvider } from './wikilink-hover-provider';
 import {
@@ -15,7 +27,11 @@ import { findFragmentTargetLine } from './find-fragment-target-line';
 import { pasteImageFile, uploadImageFile } from './image-helper';
 import NotebooksManager from './notebooks-manager';
 import { PreviewCustomEditorProvider } from './preview-custom-editor-provider';
-import { PreviewProvider, getPreviewUri } from './preview-provider';
+import {
+  PreviewProvider,
+  getAllPreviewProviders,
+  getPreviewUri,
+} from './preview-provider';
 import { GraphViewProvider } from './graph-view-provider';
 import {
   createMissingMarkdownNote,
@@ -25,6 +41,7 @@ import {
   getTopVisibleLine,
   getWorkspaceFolderUri,
   isMarkdownFile,
+  isVSCodeWebExtension,
 } from './utils';
 import * as path from 'path';
 
@@ -54,6 +71,35 @@ export async function initExtensionCommon(context: vscode.ExtensionContext) {
     );
   }
   PreviewProvider.notebooksManager = notebooksManager;
+
+  // Read aloud (ElevenLabs). The controller owns the host-side job machine and
+  // reaches the previews only through these three hooks.
+  const readAloud = ReadAloudController.init(context, {
+    isWebBuild: isVSCodeWebExtension(),
+    getSinkFor: async (uri) => {
+      const provider = await getPreviewContentProvider(uri);
+      return { post: (message) => provider.postMessageToPreview(uri, message) };
+    },
+    postToAll: async (message, exceptSourceUri) => {
+      // In single-preview mode every provider addresses the same static panel,
+      // so one provider posts the message exactly once.
+      const providers =
+        getPreviewMode() === PreviewMode.SinglePreview
+          ? getAllPreviewProviders().slice(0, 1)
+          : getAllPreviewProviders();
+      await Promise.all(
+        providers.map((provider) =>
+          provider.postMessageToAllPreviews(message, exceptSourceUri),
+        ),
+      );
+    },
+    refreshAllPreviews: () => {
+      getAllPreviewProviders().forEach((provider) =>
+        provider.refreshAllPreviews(),
+      );
+    },
+  });
+  context.subscriptions.push(readAloud);
 
   function getCurrentWorkingDirectory() {
     const activeEditor = vscode.window.activeTextEditor;
@@ -378,6 +424,7 @@ export async function initExtensionCommon(context: vscode.ExtensionContext) {
       return;
     }
     previewProvider.updateMarkdown(sourceUri);
+    void readAloud.sendConfig(sourceUri);
   }
 
   /**
@@ -1091,7 +1138,19 @@ export async function initExtensionCommon(context: vscode.ExtensionContext) {
       //   'onDidChangeConfiguration: ',
       //   event.affectsConfiguration('markdown-preview-enhanced'),
       // );
-      if (event.affectsConfiguration('markdown-preview-enhanced')) {
+      if (!event.affectsConfiguration('markdown-preview-enhanced')) {
+        return;
+      }
+      // `updateAllNotebooksConfig` reloads every preview webview, which would
+      // kill read-aloud playback every time the speed (or voice) setting is
+      // persisted mid-play. Changes that touch only read-aloud keys therefore
+      // go to the controller instead; `readAloudEnabled` is the one key that
+      // still refreshes, because the script injection itself has to change.
+      const readAloudKeys = readAloudSettingsAffected(event);
+      if (readAloudKeys.length > 0) {
+        void readAloud.onSettingsChanged(readAloudKeys);
+      }
+      if (readAloudKeys.length === 0 || otherMpeSettingsAffected(event)) {
         notebooksManager.updateAllNotebooksConfig();
       }
     }),
@@ -1702,6 +1761,150 @@ export async function initExtensionCommon(context: vscode.ExtensionContext) {
       'markdown-preview-enhanced.setAiTranslationApiKey',
       async () => {
         await promptAndStoreApiKey();
+      },
+    ),
+  );
+
+  // ---------------------------------------------------------------------------
+  // Read aloud (ElevenLabs) — palette commands (spec §4.2) and the
+  // `_crossnote.readAloud*` handlers the webview dispatches through the
+  // allowlist in preview-provider.ts (spec F13).
+  // ---------------------------------------------------------------------------
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      'markdown-preview-enhanced.readAloud.setApiKey',
+      async () => {
+        await readAloud.setApiKeyCommand();
+      },
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      'markdown-preview-enhanced.readAloud.clearApiKey',
+      async () => {
+        await readAloud.clearApiKeyCommand();
+      },
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      'markdown-preview-enhanced.readAloud.readSelection',
+      async () => {
+        await readAloud.control('readSelection');
+      },
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      'markdown-preview-enhanced.readAloud.togglePlayPause',
+      async () => {
+        await readAloud.control('togglePlayPause');
+      },
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      'markdown-preview-enhanced.readAloud.stop',
+      async () => {
+        await readAloud.control('stop');
+      },
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      'markdown-preview-enhanced.readAloud.chooseVoice',
+      async () => {
+        await readAloud.chooseVoiceCommand();
+      },
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      'markdown-preview-enhanced.readAloud.clearCache',
+      async () => {
+        await readAloud.clearCacheCommand();
+      },
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      'markdown-preview-enhanced.readAloud.showLog',
+      () => {
+        readAloud.showLogCommand();
+      },
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      '_crossnote.readAloudSynthesize',
+      async (...args: unknown[]) => {
+        const request = parseSynthesizeArgs(args);
+        if (!request) {
+          readAloudLog('dropped invalid readAloudSynthesize message');
+          await readAloud.rejectSynthesize(args);
+          return;
+        }
+        await readAloud.synthesize(request);
+      },
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      '_crossnote.readAloudCancel',
+      (...args: unknown[]) => {
+        const request = parseCancelArgs(args);
+        if (!request) {
+          readAloudLog('dropped invalid readAloudCancel message');
+          return;
+        }
+        readAloud.cancel(request);
+      },
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      '_crossnote.readAloudPlaying',
+      (...args: unknown[]) => {
+        const request = parsePlayingArgs(args);
+        if (!request) {
+          readAloudLog('dropped invalid readAloudPlaying message');
+          return;
+        }
+        readAloud.playing(request);
+      },
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      '_crossnote.readAloudSetSpeed',
+      async (...args: unknown[]) => {
+        const rate = parseSetSpeedArgs(args);
+        if (rate === undefined) {
+          readAloudLog('dropped invalid readAloudSetSpeed message');
+          return;
+        }
+        await readAloud.setSpeed(rate);
+      },
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      '_crossnote.readAloudOpenSetup',
+      async () => {
+        await readAloud.openSetup();
       },
     ),
   );

@@ -12,6 +12,8 @@ import {
 import { getMPEConfig } from './config';
 import { hashBlock, splitMarkdownBlocks } from './markdown-blocks';
 import NotebooksManager from './notebooks-manager';
+import { ReadAloudController } from './read-aloud/controller';
+import { readReadAloudSettings } from './read-aloud/settings';
 import {
   getCrossnoteVersion,
   getPreviewMode,
@@ -72,6 +74,20 @@ utility.useExternalAddFileProtocolFunction((filePath, preview) => {
 const WORKSPACE_PREVIEW_PROVIDER_MAP: Map<string, PreviewProvider> = new Map();
 
 /**
+ * Webview commands whose first argument is a `sourceUri` string that must
+ * match the panel's current target before the command is dispatched. This is
+ * the `updateMarkdown` identity check generalised to the read-aloud commands
+ * that also carry a `sourceUri` (spec F13; `readAloudSetSpeed` and
+ * `readAloudOpenSetup` carry none and are validated by type only).
+ */
+const SOURCE_URI_GUARDED_COMMANDS: Set<string> = new Set([
+  'updateMarkdown',
+  'readAloudSynthesize',
+  'readAloudCancel',
+  'readAloudPlaying',
+]);
+
+/**
  * Commands the webview is allowed to dispatch to the extension host.
  * Any command received from the webview that is not in this set is
  * silently dropped.  This prevents a compromised webview from invoking
@@ -100,6 +116,11 @@ const WEBVIEW_MESSAGE_COMMANDS: Set<string> = new Set([
   'pandocExport',
   'pasteImageFile',
   'princeExport',
+  'readAloudCancel',
+  'readAloudOpenSetup',
+  'readAloudPlaying',
+  'readAloudSetSpeed',
+  'readAloudSynthesize',
   'refreshPreview',
   'revealLine',
   'restoreOriginal',
@@ -163,6 +184,19 @@ function buildPreviewCSP(panel: vscode.WebviewPanel): string {
     // (file:// natively, https:// in the web extension).
     `base-uri ${cspSource} https: file:`,
   ].join('; ');
+}
+
+/**
+ * Escape a string for use inside a double-quoted HTML attribute value in the
+ * `head` string handed to `generateHTMLTemplateForPreview`.
+ */
+function escapeHtmlAttribute(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/'/g, '&#39;');
 }
 
 export function getAllPreviewProviders(): PreviewProvider[] {
@@ -472,6 +506,22 @@ export class PreviewProvider {
     inputStringOverride?: string;
   }): Promise<void> {
     const previewMode = getPreviewMode();
+
+    // In single-preview mode (the default) the panel is reused across files, so
+    // `onDidDispose` never fires on a file switch. Cancel the read-aloud job of
+    // the previous target here, synchronously and before the render `await`, so
+    // an initPreview that a newer request later overtakes has still cancelled it.
+    const previousSingleTarget =
+      previewMode === PreviewMode.SinglePreview
+        ? PreviewProvider.singlePreviewPanelSourceUriTarget?.toString()
+        : undefined;
+    if (previousSingleTarget && previousSingleTarget !== sourceUri.toString()) {
+      ReadAloudController.getIfInitialized()?.cancelForSource(
+        previousSingleTarget,
+        'preview switched',
+      );
+    }
+
     let previewPanel: vscode.WebviewPanel;
     const previews = this.getPreviews(sourceUri);
     if (
@@ -585,7 +635,7 @@ export class PreviewProvider {
                 ? PreviewProvider.singlePreviewPanelSourceUriTarget
                 : sourceUri;
             if (
-              command === 'updateMarkdown' &&
+              SOURCE_URI_GUARDED_COMMANDS.has(command) &&
               (typeof args[0] !== 'string' ||
                 !expectedSourceUri ||
                 Uri.parse(args[0]).toString() !== expectedSourceUri.toString())
@@ -601,6 +651,13 @@ export class PreviewProvider {
         // unregister previewPanel.
         previewPanel.onDidDispose(
           () => {
+            ReadAloudController.getIfInitialized()?.cancelForSource(
+              (getPreviewMode() === PreviewMode.SinglePreview
+                ? PreviewProvider.singlePreviewPanelSourceUriTarget
+                : sourceUri
+              )?.toString() ?? sourceUri.toString(),
+              'preview disposed',
+            );
             PreviewProvider.singlePreviewLocked = false;
             this.destroyPreview(sourceUri);
             this.destroyEngine(sourceUri);
@@ -658,6 +715,45 @@ export class PreviewProvider {
         head = `<link rel="stylesheet" href="${lightboxCssUri}"><script defer src="${lightboxJsUri}"></script>`;
       }
 
+      // Read aloud (ElevenLabs): inject the classifier, the player script and
+      // its stylesheet only into the live preview — never into an export — and
+      // only on the desktop build (spec F14, D2). The scripts are deliberately
+      // NOT deferred: `media/read-aloud.js` memoises `acquireVsCodeApi` during
+      // head parsing so that it and crossnote's `preview.js` share the single
+      // instance the webview API allows.
+      const readAloud = ReadAloudController.getIfInitialized();
+      if (
+        !isVSCodeWebExtension() &&
+        readAloud &&
+        readReadAloudSettings().enabled
+      ) {
+        const readAloudCssUri = previewPanel.webview.asWebviewUri(
+          vscode.Uri.joinPath(
+            this.context.extensionUri,
+            'media',
+            'read-aloud.css',
+          ),
+        );
+        const readAloudCoreUri = previewPanel.webview.asWebviewUri(
+          vscode.Uri.joinPath(
+            this.context.extensionUri,
+            'media',
+            'read-aloud-core.js',
+          ),
+        );
+        const readAloudJsUri = previewPanel.webview.asWebviewUri(
+          vscode.Uri.joinPath(
+            this.context.extensionUri,
+            'media',
+            'read-aloud.js',
+          ),
+        );
+        const readAloudConfig = escapeHtmlAttribute(
+          JSON.stringify(readAloud.buildInitialConfig()),
+        );
+        head += `<link rel="stylesheet" href="${readAloudCssUri}"><script src="${readAloudCoreUri}"></script><script src="${readAloudJsUri}" data-config="${readAloudConfig}"></script>`;
+      }
+
       const html = await engine.generateHTMLTemplateForPreview({
         inputString,
         config: {
@@ -703,6 +799,13 @@ export class PreviewProvider {
       ) {
         return;
       }
+      // Replacing the webview HTML tears down the player, so stop any job that
+      // is still running for this same file (a refresh or a settings-driven
+      // reload; the file-switch case was already cancelled at the top).
+      ReadAloudController.getIfInitialized()?.cancelForSource(
+        sourceUri.toString(),
+        'preview reloaded',
+      );
       previewPanel.webview.html = html;
     } catch (error) {
       vscode.window.showErrorMessage(String(error));
@@ -758,6 +861,48 @@ export class PreviewProvider {
         } catch (error) {
           console.error(error);
         }
+      }
+    }
+  }
+
+  /**
+   * Post a message to every preview panel this provider owns, optionally
+   * skipping the panel that represents `exceptSourceUri`.
+   *
+   * Mirrors `getPreviews`: in single-preview mode there is exactly one panel,
+   * so the single panel is the only target and `this.previewMaps` is never
+   * iterated. That map is append-only in that mode (`addPreviewToMap` runs on
+   * every `initPreview`, including the panel-reuse path, while
+   * `deletePreviewFromMap` is only reached from the multi-preview branch), so
+   * after previewing A and then B it still holds an entry for A pointing at the
+   * same panel — iterating it and skipping only B would post to the very
+   * webview that just started playing.
+   */
+  public async postMessageToAllPreviews(
+    message: { command: string; [key: string]: any }, // TODO: Define a type for message.
+    exceptSourceUri?: string,
+  ) {
+    const targets: Set<vscode.WebviewPanel> = new Set();
+    if (getPreviewMode() === PreviewMode.SinglePreview) {
+      const panel = PreviewProvider.singlePreviewPanel;
+      const target = PreviewProvider.singlePreviewPanelSourceUriTarget;
+      if (panel && target?.toString() !== exceptSourceUri) {
+        targets.add(panel);
+      }
+    } else {
+      for (const [sourceUriString, previews] of this.previewMaps) {
+        if (sourceUriString === exceptSourceUri) {
+          continue;
+        }
+        previews.forEach((preview) => targets.add(preview));
+      }
+    }
+
+    for (const preview of targets) {
+      try {
+        await preview.webview.postMessage(message);
+      } catch (error) {
+        console.error(error);
       }
     }
   }

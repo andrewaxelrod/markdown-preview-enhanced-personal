@@ -19,8 +19,8 @@ Categories: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Security`.
   by a Kokoro-FastAPI server. Free, offline, no key, nothing leaves the machine.
   - A play button on every readable block (paragraphs, headings h1–h6, blockquotes, lists
     including task lists with the checkbox unspoken, admonition-style containers with visible
-    text), a player bar with play/pause, stop, elapsed/total time, the block label, the voice
-    and 0.25x–4x speed (`HTMLMediaElement.playbackRate`, never re-synthesised), and word-by-word
+    text), a control panel with play/pause, ±10 s, volume and 0.25x–4x speed
+    (`HTMLMediaElement.playbackRate`, never re-synthesised), and word-by-word
     highlighting from the server's own timestamps. Code fences, code chunks, diagrams (mermaid,
     PlantUML, WaveDrom, Vega, D2, …), display math, images, embeds, tables, the TOC and footnote
     definitions are skipped at any depth.
@@ -85,25 +85,65 @@ Categories: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Security`.
   - Settings: `markdown-preview-enhanced.readAloudEnabled` (default `true`),
     `readAloudClickToRead` (`true`), `kokoroVoice` (`af_heart`; `+` blends allowed),
     `kokoroBaseUrl` (`http://127.0.0.1:8880`, machine scope; plain http on localhost only),
-    `readAloudSpeed` (0.25–4, default 1), `readAloudHighlightTheme`, `readAloudCacheSizeMB`.
+    `readAloudSpeed` (0.25–4, default 1), `readAloudVolume` (0–1, default 1),
+    `readAloudHighlightTheme`, `readAloudCacheSizeMB`.
     Changes to any of them except `readAloudEnabled` apply live without reloading the preview.
   - Commands: `markdown-preview-enhanced.readAloud.readSelection` (`Alt+R`),
     `.togglePlayPause` (`Alt+Space`), `.stop` (`Alt+Esc`), `.chooseVoice` (QuickPick over
-    `GET /v1/audio/voices` with grade, language and gender), `.clearCache`, `.showLog`; the
-    player bar's voice button opens _Read aloud setup_ with **Check Kokoro Server**
-    (`GET /health` plus the voice count).
+    `GET /v1/audio/voices` with grade, language and gender), `.clearCache`, `.showLog`,
+    `.setup` (_Read aloud setup_ with **Check Kokoro Server**, `GET /health` plus the voice
+    count).
   - Messages: webview → host `readAloudSynthesize` `[sourceUri, requestId, text, { kind,
 blockId?, blocks? }]`, `readAloudCancel`, `readAloudPlaying`, `readAloudSetSpeed`,
-    `readAloudOpenSetup`; host → webview `readAloudAudio` (with `blockIndex`), `readAloudError`,
-    `readAloudConfig`, `readAloudControl`. Every payload is validated in
+    `readAloudSetVolume`, `readAloudOpenSetup`; host → webview `readAloudAudio` (with
+    `blockIndex`), `readAloudError`, `readAloudConfig`, `readAloudControl`. Every payload is validated in
     `src/read-aloud/messages.ts` before the controller sees it.
   - Files: `src/read-aloud/*.ts` (controller, chunker, speakable, cache, messages, settings,
     error mapping, log, Kokoro client, types, voices, alignment, word spans),
     `media/read-aloud{,-core}.js` and `media/read-aloud.css` (webview, injected through the
     preview `head` like the lightbox), `src/types/intl-segmenter.d.ts`, `install.sh` (build,
-    package and install the `.vsix` in one step), and fourteen mocha suites under
+    package and install the `.vsix` in one step), and fifteen mocha suites under
     `test/read-aloud/` wired into `test:unit`, among them `continuous-read.test.js` for the
-    joined extraction and the re-render remap. devDependency `jsdom@23.2.0`.
+    joined extraction and the re-render remap and `control-panel.test.js` for the panel. devDependency `jsdom@23.2.0`.
+
+  - **Control panel** (F3, revised 2026-09-03): the player bar is now a rounded panel floating
+    at the bottom centre of the preview, on screen whenever read aloud is enabled, with seven
+    controls — volume, a voice-model placeholder, −10 s, a filled play/pause button, +10 s, the
+    speed and a close ×. The progress of the read is traced along the top edge of the panel, and
+    _Loading…_, _Paused_, _Finished_ and errors appear above it so the panel's shape never
+    changes with the length of a message. Its light or dark palette comes from the preview
+    background, like the reading decoration, not from the VS Code colour theme.
+    - **Volume**: a slider popover, 0–100 %, applied to the audio element live and persisted in
+      the new `markdown-preview-enhanced.readAloudVolume` setting (webview → host
+      `readAloudSetVolume`, the mirror of `readAloudSetSpeed`). The glyph follows the level. The
+      silent-wav unlock (see _Fixed_ below) is always played at full volume, because Chromium
+      counts a volume of 0 as muted and a muted `play()` grants no permission.
+    - **Speed**: a slider popover in the same style, replacing the select-plus-number-field pair;
+      the button shows the current rate. `[` and `]` still step through the eleven stops. The
+      speed label and both popover value boxes have a fixed width: the panel is centred on the
+      viewport, so a label that grew with the value (`1×` → `1.15×`) shifted the whole pill on
+      every tick of the slider. Neither slider has its value written back into it while it is
+      being dragged, and neither carries a focus box — the focus ring sits on the thumb, and a
+      popover opened with the mouse does not take focus at all.
+    - **±10 s**: both skips stay inside the block being read, which is also the only block whose
+      audio the memory rule keeps. A rewind that would land before the block's first word
+      restarts the block; a forward that would land past its last synthesised word does nothing
+      and the button greys out. A paused read stays paused at the new position.
+    - **Play with nothing loaded** reads from the first block still on screen to the end of the
+      document, so the panel — and `Alt+Space` — can start a read on their own.
+    - **Close** stops the read and puts the panel away until the next one starts.
+    - The voice button is gone with the rest of the bar; _Read aloud setup_ has its own palette
+      command, **Markdown Preview Enhanced: Read Aloud Setup**.
+  - **One reading rhythm for the whole canvas** (`.mpe-ra-canvas`): the 2.0 line height that used
+    to be applied to the block being read moved to the whole preview at 1.85, together with even
+    spacing for paragraphs, lists, blockquotes, tables and headings. Starting a read no longer
+    reflows the block or pushes the rest of the document down — the pill's padding is cancelled
+    by a negative margin on both axes, so a decorated line occupies exactly the space the
+    undecorated one did (measured: identical block height and identical position of the next
+    heading). Everything is in `em`, so crossnote's zoom in / zoom out scales the canvas and its
+    decoration proportionally; the panel carries Tailwind's `fixed`, which crossnote's zoom
+    effect uses to keep it the same size on screen while the text zooms. The preview also gets
+    bottom padding while the panel is up, so it never covers the last lines.
 
 ### Changed
 

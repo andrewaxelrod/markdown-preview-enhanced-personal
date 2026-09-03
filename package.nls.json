@@ -143,6 +143,7 @@
   "markdown-preview-enhanced.kokoroVoice.description": "Kokoro voice id used for read aloud, e.g. af_heart (American English, female) or bm_george (British English, male). Blend voices with +, e.g. af_bella+af_sky. Run \"Choose Read Aloud Voice\" to pick from the server's list.",
   "markdown-preview-enhanced.kokoroBaseUrl.description": "Base URL of the Kokoro-FastAPI server. Plain http is accepted on localhost only; any other host must be https.",
   "markdown-preview-enhanced.readAloudSpeed.description": "Playback rate for read aloud (0.25–4). Applied with HTMLMediaElement.playbackRate; nothing is re-synthesized.",
+  "markdown-preview-enhanced.readAloudVolume.description": "Output volume for read aloud (0–1), set from the volume control on the player panel in the preview.",
   "markdown-preview-enhanced.readAloudHighlightTheme.description": "Colour theme for the read-aloud highlight: the rounded pills behind each line of the block being read and the box on the spoken word. The light or dark variant is chosen automatically from the preview theme's background.",
   "markdown-preview-enhanced.readAloudHighlightTheme.enumDescriptions.0": "Blue (default).",
   "markdown-preview-enhanced.readAloudHighlightTheme.enumDescriptions.1": "Orange.",
@@ -152,6 +153,7 @@
   "markdown-preview-enhanced.readAloud.readSelection.title": "Markdown Preview Enhanced: Read Aloud Selection",
   "markdown-preview-enhanced.readAloud.togglePlayPause.title": "Markdown Preview Enhanced: Read Aloud Play/Pause",
   "markdown-preview-enhanced.readAloud.stop.title": "Markdown Preview Enhanced: Stop Read Aloud",
+  "markdown-preview-enhanced.readAloud.setup.title": "Markdown Preview Enhanced: Read Aloud Setup",
   "markdown-preview-enhanced.readAloud.chooseVoice.title": "Markdown Preview Enhanced: Choose Read Aloud Voice",
   "markdown-preview-enhanced.readAloud.clearCache.title": "Markdown Preview Enhanced: Clear Read Aloud Cache",
   "markdown-preview-enhanced.readAloud.showLog.title": "Markdown Preview Enhanced: Show Read Aloud Log"

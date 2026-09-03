@@ -9,6 +9,7 @@ import {
   parseCancelArgs,
   parsePlayingArgs,
   parseSetSpeedArgs,
+  parseSetVolumeArgs,
   parseSynthesizeArgs,
 } from './read-aloud/messages';
 import {
@@ -1800,6 +1801,15 @@ export async function initExtensionCommon(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     vscode.commands.registerCommand(
+      'markdown-preview-enhanced.readAloud.setup',
+      async () => {
+        await readAloud.openSetup();
+      },
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
       'markdown-preview-enhanced.readAloud.chooseVoice',
       async () => {
         await readAloud.chooseVoiceCommand();
@@ -1878,6 +1888,20 @@ export async function initExtensionCommon(context: vscode.ExtensionContext) {
           return;
         }
         await readAloud.setSpeed(rate);
+      },
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      '_crossnote.readAloudSetVolume',
+      async (...args: unknown[]) => {
+        const level = parseSetVolumeArgs(args);
+        if (level === undefined) {
+          readAloudLog('dropped invalid readAloudSetVolume message');
+          return;
+        }
+        await readAloud.setVolume(level);
       },
     ),
   );

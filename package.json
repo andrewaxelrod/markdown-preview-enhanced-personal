@@ -37,7 +37,7 @@
     "run-in-browser:watch": "node build.js --web-dev && concurrently \"vscode-test-web --browser none --extensionDevelopmentPath=. ${SERVE_DIR:-.}\" \"npx http-server ./crossnote -p 6789 --cors\" \"node build.js --watch\"",
     "run-in-vscode-dev": "npx serve --cors -l 5000 --ssl-cert $HOME/certs/localhost.pem --ssl-key $HOME/certs/localhost-key.pem",
     "test": "pnpm test:unit",
-    "test:unit": "mocha --ui tdd --reporter spec test/find-fragment-target-line.test.js test/block-id-helpers.test.js test/rank-by-closeness.test.js test/read-aloud/word-spans.test.js test/read-aloud/chunker.test.js test/read-aloud/speakable.test.js test/read-aloud/error-mapping.test.js test/read-aloud/messages.test.js test/read-aloud/cache.test.js test/read-aloud/block-eligibility.test.js test/read-aloud/text-extraction.test.js test/read-aloud/selection.test.js test/read-aloud/click-to-read.test.js test/read-aloud/continuous-read.test.js test/read-aloud/player.test.js test/read-aloud/reading-decoration.test.js test/read-aloud/kokoro-client.test.js test/read-aloud/kokoro-alignment.test.js",
+    "test:unit": "mocha --ui tdd --reporter spec test/find-fragment-target-line.test.js test/block-id-helpers.test.js test/rank-by-closeness.test.js test/read-aloud/word-spans.test.js test/read-aloud/chunker.test.js test/read-aloud/speakable.test.js test/read-aloud/error-mapping.test.js test/read-aloud/messages.test.js test/read-aloud/cache.test.js test/read-aloud/block-eligibility.test.js test/read-aloud/text-extraction.test.js test/read-aloud/selection.test.js test/read-aloud/click-to-read.test.js test/read-aloud/continuous-read.test.js test/read-aloud/player.test.js test/read-aloud/control-panel.test.js test/read-aloud/reading-decoration.test.js test/read-aloud/kokoro-client.test.js test/read-aloud/kokoro-alignment.test.js",
     "vscode:prepublish": "pnpm install --frozen-lockfile && pnpm build",
     "watch": "gulp copy-files && gulp clean-out && node build.js --watch"
   },
@@ -192,6 +192,11 @@
       {
         "command": "markdown-preview-enhanced.readAloud.stop",
         "title": "%markdown-preview-enhanced.readAloud.stop.title%",
+        "enablement": "!isWeb"
+      },
+      {
+        "command": "markdown-preview-enhanced.readAloud.setup",
+        "title": "%markdown-preview-enhanced.readAloud.setup.title%",
         "enablement": "!isWeb"
       },
       {
@@ -886,6 +891,13 @@
           "type": "number",
           "minimum": 0.25,
           "maximum": 4
+        },
+        "markdown-preview-enhanced.readAloudVolume": {
+          "description": "%markdown-preview-enhanced.readAloudVolume.description%",
+          "default": 1,
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
         },
         "markdown-preview-enhanced.readAloudHighlightTheme": {
           "description": "%markdown-preview-enhanced.readAloudHighlightTheme.description%",

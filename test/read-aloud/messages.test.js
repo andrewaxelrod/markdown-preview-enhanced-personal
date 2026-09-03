@@ -380,6 +380,34 @@ suite('read-aloud/messages', function () {
     });
   });
 
+  suite('T-12 parseSetVolumeArgs and clampVolume', function () {
+    test('accepts a finite level inside [0, 1]', function () {
+      assert.strictEqual(messages.VOLUME_MIN, 0);
+      assert.strictEqual(messages.VOLUME_MAX, 1);
+      assert.strictEqual(messages.parseSetVolumeArgs([0]), 0);
+      assert.strictEqual(messages.parseSetVolumeArgs([0.4]), 0.4);
+      assert.strictEqual(messages.parseSetVolumeArgs([1]), 1);
+    });
+
+    test('rejects out of range, non-numbers and wrong arity', function () {
+      assert.strictEqual(messages.parseSetVolumeArgs([-0.01]), undefined);
+      assert.strictEqual(messages.parseSetVolumeArgs([1.01]), undefined);
+      assert.strictEqual(messages.parseSetVolumeArgs(['1']), undefined);
+      assert.strictEqual(messages.parseSetVolumeArgs([Number.NaN]), undefined);
+      assert.strictEqual(messages.parseSetVolumeArgs([]), undefined);
+      assert.strictEqual(messages.parseSetVolumeArgs([0.5, 0.5]), undefined);
+      assert.strictEqual(messages.parseSetVolumeArgs(0.5), undefined);
+    });
+
+    test('clampVolume is the settings-read path and does clamp', function () {
+      assert.strictEqual(messages.clampVolume(-2), 0);
+      assert.strictEqual(messages.clampVolume(9), 1);
+      assert.strictEqual(messages.clampVolume(0.65), 0.65);
+      assert.strictEqual(messages.clampVolume(Number.NaN), 1);
+      assert.strictEqual(messages.clampVolume('loud'), 1);
+    });
+  });
+
   suite('T-12 parsePlayingArgs', function () {
     test('accepts [sourceUri, requestId, chunkIndex]', function () {
       assert.deepStrictEqual(messages.parsePlayingArgs([URI, REQUEST_ID, 0]), {

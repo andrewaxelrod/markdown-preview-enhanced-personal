@@ -9,12 +9,13 @@ import {
 import { readAloudLog } from './log';
 import {
   clampSpeed,
+  clampVolume,
   normaliseHighlightTheme,
   type ReadAloudHighlightTheme,
 } from './messages';
 
 /**
- * Typed accessors for the seven `markdown-preview-enhanced.readAloud*` /
+ * Typed accessors for the eight `markdown-preview-enhanced.readAloud*` /
  * `kokoro*` settings (spec §4.1).
  *
  * They are ordinary VS Code settings read through `getMPEConfig`, deliberately
@@ -27,6 +28,7 @@ export const READ_ALOUD_SETTING_KEYS = [
   'readAloudClickToRead',
   'kokoroVoice',
   'readAloudSpeed',
+  'readAloudVolume',
   'readAloudHighlightTheme',
   'readAloudCacheSizeMB',
   'kokoroBaseUrl',
@@ -39,6 +41,7 @@ export interface ReadAloudSettings {
   clickToRead: boolean;
   kokoroVoice: string;
   speed: number;
+  volume: number;
   highlightTheme: ReadAloudHighlightTheme;
   cacheSizeMB: number;
   kokoroBaseUrl: string;
@@ -68,6 +71,7 @@ export function readReadAloudSettings(): ReadAloudSettings {
   const clickToReadRaw = getMPEConfig<boolean>('readAloudClickToRead');
   const kokoroVoiceRaw = getMPEConfig<string>('kokoroVoice');
   const speedRaw = getMPEConfig<number>('readAloudSpeed');
+  const volumeRaw = getMPEConfig<number>('readAloudVolume');
   const themeRaw = getMPEConfig<string>('readAloudHighlightTheme');
   const kokoroBaseUrlRaw = getMPEConfig<string>('kokoroBaseUrl');
 
@@ -96,6 +100,7 @@ export function readReadAloudSettings(): ReadAloudSettings {
     clickToRead: typeof clickToReadRaw === 'boolean' ? clickToReadRaw : true,
     kokoroVoice,
     speed: clampSpeed(typeof speedRaw === 'number' ? speedRaw : 1),
+    volume: clampVolume(typeof volumeRaw === 'number' ? volumeRaw : 1),
     highlightTheme: normaliseHighlightTheme(themeRaw),
     cacheSizeMB: readInteger('readAloudCacheSizeMB', 100, 1),
     kokoroBaseUrl,
@@ -138,4 +143,8 @@ export async function writeKokoroVoiceSetting(voiceId: string): Promise<void> {
 
 export async function writeSpeedSetting(rate: number): Promise<void> {
   await updateMPEConfig('readAloudSpeed', rate, true);
+}
+
+export async function writeVolumeSetting(level: number): Promise<void> {
+  await updateMPEConfig('readAloudVolume', level, true);
 }

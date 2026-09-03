@@ -62,9 +62,9 @@ after a start takes a few seconds while the model warms up; after that a one-or-
 first chunk is synthesised in well under a second on an M-series Mac and a ~700-character chunk
 in about a second and a half.
 
-In VS Code, the voice button in the player bar opens _Read aloud setup_, where **Check Kokoro
-Server** confirms the server answers and reports its voice count, and **Markdown Preview
-Enhanced: Choose Read Aloud Voice** lists every voice with its language and gender.
+In VS Code, **Markdown Preview Enhanced: Read Aloud Setup** opens _Read aloud setup_, where
+**Check Kokoro Server** confirms the server answers and reports its voice count, and **Markdown
+Preview Enhanced: Choose Read Aloud Voice** lists every voice with its language and gender.
 
 ### Settings and server behaviour
 
@@ -110,7 +110,7 @@ read with the math left out; the LaTeX is never spoken.
   before the current one ends and there is no gap at the boundary. One request is in flight at
   a time; Kokoro serialises on one GPU or CPU anyway.
 - The highlight pills and the play-button state move to the next block as its first chunk starts
-  playing, the player bar shows that block's label, and auto-scroll follows. The audio of a
+  playing, the panel's progress advances with it, and auto-scroll follows. The audio of a
   block that has finished is released; a 20-minute document is never held in memory in full.
 - Editing the document: if the block being read, or the next one when its turn comes, no longer
   exists with the same text, the read stops. An edit anywhere else does not interrupt it.
@@ -139,12 +139,37 @@ Select text in the preview and press the floating _Read aloud_ affordance or ⌥
 selection is read, across as many readable blocks as it covers. A selection inside code, a
 diagram or math is refused with a short inline hint.
 
-### Speed
+### The control panel
 
-The player bar offers 0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3 and 4, plus free entry of
-any value in the range 0.25x–4x. Speed is applied with `HTMLMediaElement.playbackRate` and
-`preservesPitch`, so it takes effect immediately mid-playback and never triggers
-re-synthesis. The chosen value persists in `markdown-preview-enhanced.readAloudSpeed`.
+A rounded panel floats at the bottom centre of the preview whenever read aloud is enabled, with
+seven controls, left to right:
+
+| Control          | What it does                                                                                                                                           |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Volume**       | Opens a slider, 0–100 %. Applies to the audio straight away and persists in `markdown-preview-enhanced.readAloudVolume`. The glyph follows the level.  |
+| **Voice model**  | A placeholder for the model chooser; it does nothing yet.                                                                                              |
+| **−10 s**        | Skips back ten seconds **inside the block being read**. Landing before its first word restarts the block rather than going back into the previous one. |
+| **Play / pause** | With nothing loaded, reads from the first block still on screen to the end of the document — the same read a play button in the gutter starts.         |
+| **+10 s**        | Skips forward ten seconds. Landing past the last synthesised word of the block does nothing, and the button greys out when that is the case.           |
+| **Speed**        | Shows the current rate and opens a slider, 0.25×–4×.                                                                                                   |
+| **Close**        | Stops the read and puts the panel away. The next read brings it back.                                                                                  |
+
+Progress through the read is traced along the top edge of the panel, and _Loading…_, _Paused_,
+_Finished_ and any error appear above it so the panel's own shape never changes. The panel keeps
+its size on screen when the preview is zoomed in or out; only the text scales.
+
+Speed is applied with `HTMLMediaElement.playbackRate` and `preservesPitch`, so it takes effect
+immediately mid-playback and never triggers re-synthesis. The chosen value persists in
+`markdown-preview-enhanced.readAloudSpeed`; <kbd>[</kbd> and <kbd>]</kbd> step through the stops
+0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3 and 4.
+
+### Reading rhythm
+
+While read aloud is on, the preview is set to one vertical rhythm — a 1.85 line height and even
+spacing between paragraphs, lists and headings — and the pills of the block being read are drawn
+inside it, with their padding cancelled by a negative margin. Starting a read therefore moves
+nothing: the text keeps its size, its line breaks and its position. Every measurement is in `em`,
+so zooming the preview scales the whole canvas, decoration included.
 
 ### Highlight theme
 
@@ -195,8 +220,8 @@ scripts from being injected at all.
 | Play/pause           | `⌥Space` / `Alt+Space` | same                                         |
 | Stop                 | `⌥Esc` / `Alt+Esc`     | same                                         |
 
-With the player bar focused, <kbd>Space</kbd> plays/pauses, <kbd>Esc</kbd> stops and
-<kbd>[</kbd>/<kbd>]</kbd> step through the speed stops.
+With the control panel focused, <kbd>Space</kbd> plays/pauses, <kbd>Esc</kbd> closes an open
+slider and otherwise stops, and <kbd>[</kbd>/<kbd>]</kbd> step through the speed stops.
 
 **On Windows, `Alt+Space` opens the window menu and `Alt+Esc` cycles windows** — the OS wins.
 Rebind those two commands in _Keyboard Shortcuts_ if you use Windows.

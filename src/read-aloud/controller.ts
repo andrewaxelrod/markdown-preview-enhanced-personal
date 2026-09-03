@@ -47,6 +47,7 @@ import type {
 import {
   readReadAloudSettings,
   writeSpeedSetting,
+  writeVolumeSetting,
   type ReadAloudSettingKey,
   type ReadAloudSettings,
 } from './settings';
@@ -329,6 +330,18 @@ export class ReadAloudController implements vscode.Disposable {
     }
   }
 
+  /** F13 `readAloudSetVolume`: the control panel's volume slider (F3). */
+  public async setVolume(level: number): Promise<void> {
+    if (this.guardWebBuild()) {
+      return;
+    }
+    try {
+      await writeVolumeSetting(level);
+    } catch (error) {
+      readAloudLog(`volume persist failed: ${String(error)}`);
+    }
+  }
+
   // ----------------------------------------------------------------- config
 
   /**
@@ -343,6 +356,7 @@ export class ReadAloudController implements vscode.Disposable {
       enabled: settings.enabled,
       clickToRead: settings.clickToRead,
       speed: settings.speed,
+      volume: settings.volume,
       voiceName: settings.kokoroVoice,
       modelId: KOKORO_MODEL_ID,
       highlightTheme: settings.highlightTheme,

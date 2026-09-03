@@ -26,6 +26,10 @@ export const REQUEST_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 export const SPEED_MIN = 0.25;
 export const SPEED_MAX = 4;
 
+/** F3 — the control panel's volume range, as `HTMLMediaElement.volume`. */
+export const VOLUME_MIN = 0;
+export const VOLUME_MAX = 1;
+
 /**
  * F4 — the four highlight palettes. Same list as `HIGHLIGHT_THEMES` in
  * media/read-aloud-core.js; the colours live in media/read-aloud.css.
@@ -116,6 +120,8 @@ export interface ReadAloudConfigMessage {
   /** F17 — a plain click on a word starts reading there. */
   clickToRead: boolean;
   speed: number;
+  /** F3 — the control panel's volume, 0 to 1. */
+  volume: number;
   voiceName: string;
   modelId: string;
   highlightTheme: ReadAloudHighlightTheme;
@@ -306,4 +312,31 @@ export function clampSpeed(rate: number): number {
     return 1;
   }
   return Math.min(SPEED_MAX, Math.max(SPEED_MIN, rate));
+}
+
+/**
+ * `readAloudSetVolume` -> `[level]` (F13), the mirror of `readAloudSetSpeed`:
+ * out of range is rejected, not clamped, because the panel's slider only ever
+ * offers 0 to 1.
+ */
+export function parseSetVolumeArgs(args: unknown): number | undefined {
+  if (!Array.isArray(args) || args.length !== 1) {
+    return undefined;
+  }
+  const level = args[0] as unknown;
+  if (typeof level !== 'number' || !Number.isFinite(level)) {
+    return undefined;
+  }
+  if (level < VOLUME_MIN || level > VOLUME_MAX) {
+    return undefined;
+  }
+  return level;
+}
+
+/** Clamp a volume read from the settings file, which the user can edit freely. */
+export function clampVolume(level: number): number {
+  if (typeof level !== 'number' || !Number.isFinite(level)) {
+    return 1;
+  }
+  return Math.min(VOLUME_MAX, Math.max(VOLUME_MIN, level));
 }

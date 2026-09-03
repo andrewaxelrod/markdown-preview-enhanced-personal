@@ -1,15 +1,114 @@
 /*
  * Read aloud (Kokoro) — preview styles (spec F1, F3, F4, F17; §6 Accessibility).
- * The controls take every colour from a VS Code theme variable so light, dark
- * and high-contrast themes all work. The reading decoration (F4) uses its
- * own four palettes instead, switched between their light and dark variants
- * by the preview background (`data-mpe-ra-scheme`, set on the preview root
- * by read-aloud.js next to `data-mpe-ra-theme`). forced-colors gets its own
- * overrides.
+ *
+ * Three layers:
+ *   1. The reading canvas (`.mpe-ra-canvas`): one vertical rhythm for the
+ *      whole preview, so a block looks exactly the same before, during and
+ *      after it is read. Everything is in `em`, so crossnote's zoom in / zoom
+ *      out (which sets `zoom` on <body>) scales it proportionally.
+ *   2. The reading decoration (F4), on its own four palettes, switched
+ *      between their light and dark variants by the preview background
+ *      (`data-mpe-ra-scheme`, set on the preview root by read-aloud.js next
+ *      to `data-mpe-ra-theme`).
+ *   3. The control panel (F3): a floating pill at the bottom centre with the
+ *      volume, voice model, −10 s, play/pause, +10 s, speed and close
+ *      controls. It takes its own light/dark palette from the same
+ *      `data-mpe-ra-scheme`, so it matches the page it floats over rather
+ *      than the surrounding VS Code theme.
+ *
+ * forced-colors gets its own overrides.
  */
 
 /* --------------------------------------------------------------------------
- * Highlight theme palettes (F4), in the style of a reader app: `pill` is
+ * 1. The reading canvas
+ *
+ * The pills of the block being read are inline boxes, so they need room
+ * between the lines; giving that room only to the block being read is what
+ * used to make the text jump the moment playback started. The rhythm below is
+ * therefore applied to the whole preview, not to `.mpe-ra-reading`, and the
+ * pill's own padding is cancelled by a negative margin on both axes so a
+ * decorated line occupies exactly the space the undecorated one did.
+ * ----------------------------------------------------------------------- */
+
+.markdown-preview.mpe-ra-canvas {
+  --mpe-ra-line-height: 1.85;
+  --mpe-ra-block-gap: 1.1em;
+  --mpe-ra-pill-pad-x: 0.25em;
+  --mpe-ra-pill-pad-y: 0.2em;
+  line-height: var(--mpe-ra-line-height);
+}
+
+.markdown-preview.mpe-ra-canvas p,
+.markdown-preview.mpe-ra-canvas li,
+.markdown-preview.mpe-ra-canvas dd,
+.markdown-preview.mpe-ra-canvas dt,
+.markdown-preview.mpe-ra-canvas blockquote,
+.markdown-preview.mpe-ra-canvas td,
+.markdown-preview.mpe-ra-canvas th,
+.markdown-preview.mpe-ra-canvas figcaption,
+.markdown-preview.mpe-ra-canvas .admonition,
+.markdown-preview.mpe-ra-canvas details {
+  line-height: var(--mpe-ra-line-height);
+}
+
+.markdown-preview.mpe-ra-canvas p,
+.markdown-preview.mpe-ra-canvas blockquote,
+.markdown-preview.mpe-ra-canvas ul,
+.markdown-preview.mpe-ra-canvas ol,
+.markdown-preview.mpe-ra-canvas dl,
+.markdown-preview.mpe-ra-canvas table,
+.markdown-preview.mpe-ra-canvas .admonition {
+  margin-top: 0;
+  margin-bottom: var(--mpe-ra-block-gap);
+}
+
+.markdown-preview.mpe-ra-canvas li {
+  margin: 0.2em 0;
+}
+
+/* A nested list or a paragraph inside a list item keeps the item tight. */
+.markdown-preview.mpe-ra-canvas li > p,
+.markdown-preview.mpe-ra-canvas li > ul,
+.markdown-preview.mpe-ra-canvas li > ol,
+.markdown-preview.mpe-ra-canvas blockquote > p:last-child {
+  margin-bottom: 0.35em;
+}
+
+.markdown-preview.mpe-ra-canvas h1,
+.markdown-preview.mpe-ra-canvas h2,
+.markdown-preview.mpe-ra-canvas h3,
+.markdown-preview.mpe-ra-canvas h4,
+.markdown-preview.mpe-ra-canvas h5,
+.markdown-preview.mpe-ra-canvas h6 {
+  line-height: 1.3;
+  margin-top: 1.6em;
+  margin-bottom: 0.55em;
+}
+
+.markdown-preview.mpe-ra-canvas > :first-child {
+  margin-top: 0;
+}
+
+/* Code and diagrams keep the theme's own metrics. */
+.markdown-preview.mpe-ra-canvas pre,
+.markdown-preview.mpe-ra-canvas pre code,
+.markdown-preview.mpe-ra-canvas .code-chunk pre,
+.markdown-preview.mpe-ra-canvas .mermaid,
+.markdown-preview.mpe-ra-canvas .katex-display {
+  line-height: normal;
+}
+
+.markdown-preview.mpe-ra-canvas pre {
+  line-height: 1.5;
+}
+
+/* Room for the control panel so it never covers the last lines (F3). */
+.markdown-preview.mpe-ra-panel {
+  padding-bottom: 6rem;
+}
+
+/* --------------------------------------------------------------------------
+ * 2a. Highlight theme palettes (F4), in the style of a reader app: `pill` is
  * the line background, `word` the spoken word, `text` the prose colour
  * inside a pill.
  * ----------------------------------------------------------------------- */
@@ -63,38 +162,33 @@
 }
 
 /* --------------------------------------------------------------------------
- * Reading decoration (F4): the block being read
+ * 2b. Reading decoration (F4): the block being read
  *
  * read-aloud.js wraps every run of inline content in `.mpe-ra-pill`;
  * box-decoration-break: clone turns that into one rounded pill per rendered
- * line. The spoken word is wrapped in `.mpe-ra-word`. Horizontal padding is
- * cancelled by a negative margin so the text does not move when a read
- * starts and line breaks stay where they were. Geometry is the Reader's:
- * 2em line pitch, pills about 1.55em tall, 0.25em side padding.
+ * line. The spoken word is wrapped in `.mpe-ra-word`. The padding of both is
+ * cancelled by a negative margin, so the text does not move when a read
+ * starts and the line breaks stay where they were.
  * ----------------------------------------------------------------------- */
 
-.markdown-preview .mpe-ra-reading,
-.markdown-preview .mpe-ra-reading p,
-.markdown-preview .mpe-ra-reading li {
-  line-height: 2;
+.mpe-ra-pill,
+.mpe-ra-word {
+  --mpe-ra-pill-pad-x: 0.25em;
+  --mpe-ra-pill-pad-y: 0.2em;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  margin: calc(-1 * var(--mpe-ra-pill-pad-y)) calc(-1 * var(--mpe-ra-pill-pad-x));
+  padding: var(--mpe-ra-pill-pad-y) var(--mpe-ra-pill-pad-x);
 }
 
 .mpe-ra-pill {
-  -webkit-box-decoration-break: clone;
-  box-decoration-break: clone;
-  margin: 0 -0.25em;
-  padding: 0.18em 0.25em;
-  border-radius: 0.25em;
+  border-radius: 0.3em;
   background-color: var(--mpe-ra-pill, #ddf6ff);
   color: var(--mpe-ra-text, #000000);
 }
 
 .mpe-ra-word {
-  -webkit-box-decoration-break: clone;
-  box-decoration-break: clone;
-  margin: 0 -0.25em;
-  padding: 0.18em 0.25em;
-  border-radius: 0.16em;
+  border-radius: 0.25em;
   background-color: var(--mpe-ra-word, #73dbf3);
 }
 
@@ -123,7 +217,7 @@
 }
 
 /* --------------------------------------------------------------------------
- * Per-block play button (F1)
+ * 2c. Per-block play button (F1)
  * ----------------------------------------------------------------------- */
 
 .markdown-preview.mpe-ra-gutter {
@@ -225,8 +319,8 @@
 }
 
 /* --------------------------------------------------------------------------
- * Click to read (F17): playable text shows a pointer while the feature is on
- * (`.mpe-ra-click` on the preview root, toggled live from readAloudConfig).
+ * 2d. Click to read (F17): playable text shows a pointer while the feature is
+ * on (`.mpe-ra-click` on the preview root, toggled live from readAloudConfig).
  * Content that is never read keeps the default cursor; links and checkboxes
  * keep their own.
  * ----------------------------------------------------------------------- */
@@ -277,126 +371,282 @@
 }
 
 /* --------------------------------------------------------------------------
- * Player bar (F3)
+ * 3. The control panel (F3)
+ *
+ * A pill at the bottom centre, in the geometry of a reader app: volume,
+ * voice model, −10 s, a filled accent play/pause button, +10 s, the speed
+ * and close. Sizes are in px because crossnote neutralises the body zoom on
+ * `.fixed` elements, which the panel carries: it stays the same size on
+ * screen while the text zooms.
  * ----------------------------------------------------------------------- */
 
 .mpe-ra-bar {
+  --mpe-ra-panel-bg: #f4f4f5;
+  --mpe-ra-panel-fg: #17181c;
+  --mpe-ra-panel-border: rgba(0, 0, 0, 0.09);
+  --mpe-ra-panel-hover: rgba(0, 0, 0, 0.07);
+  --mpe-ra-panel-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
+  --mpe-ra-panel-track: rgba(0, 0, 0, 0.16);
+  --mpe-ra-accent: #3b5bfd;
+  --mpe-ra-accent-hover: #4d69ff;
+  --mpe-ra-accent-fg: #ffffff;
+
   position: fixed;
-  right: 1rem;
-  bottom: 1rem;
-  left: auto;
+  left: 50%;
+  bottom: 20px;
+  transform: translateX(-50%);
   z-index: 99998;
   display: flex;
   align-items: center;
-  gap: 0.4rem;
-  max-width: calc(100vw - 2rem);
-  padding: 0.35rem 0.6rem;
-  border: 1px solid var(--vscode-editorWidget-border, rgba(128, 128, 128, 0.35));
-  border-radius: 6px;
-  background: var(--vscode-editorWidget-background, #1f1f1f);
-  color: var(--vscode-editorWidget-foreground, var(--vscode-foreground, #ccc));
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
+  gap: 12px;
+  max-width: calc(100vw - 24px);
+  padding: 5px 14px;
+  border: 1px solid var(--mpe-ra-panel-border);
+  border-radius: 999px;
+  background: var(--mpe-ra-panel-bg);
+  color: var(--mpe-ra-panel-fg);
+  box-shadow: var(--mpe-ra-panel-shadow);
   font-family: var(--vscode-font-family, sans-serif);
-  font-size: 12px;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.mpe-ra-bar[data-mpe-ra-scheme='dark'] {
+  --mpe-ra-panel-bg: #2a2a2c;
+  --mpe-ra-panel-fg: #f2f2f4;
+  --mpe-ra-panel-border: rgba(255, 255, 255, 0.09);
+  --mpe-ra-panel-hover: rgba(255, 255, 255, 0.11);
+  --mpe-ra-panel-shadow: 0 6px 24px rgba(0, 0, 0, 0.55);
+  --mpe-ra-panel-track: rgba(255, 255, 255, 0.24);
 }
 
 .mpe-ra-bar:focus-visible {
-  outline: 1px solid var(--vscode-focusBorder, #007fd4);
+  outline: 2px solid var(--vscode-focusBorder, #007fd4);
   outline-offset: 2px;
 }
 
-.mpe-ra-bar button {
-  padding: 0.15rem 0.45rem;
+/* The progress of the read, traced along the top edge of the pill. */
+.mpe-ra-bar-progress {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  overflow: hidden;
+  border-top-left-radius: 999px;
+  border-top-right-radius: 999px;
+  pointer-events: none;
+}
+
+.mpe-ra-bar-progress > i {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--mpe-ra-accent);
+  transition: width 0.2s linear;
+}
+
+/* Loading, Paused, Finished and errors, above the pill so its shape never
+ * changes with the length of the message. */
+.mpe-ra-bar-status {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  transform: translateX(-50%);
+  max-width: min(28rem, calc(100vw - 32px));
+  padding: 4px 10px;
+  border: 1px solid var(--mpe-ra-panel-border);
+  border-radius: 8px;
+  background: var(--mpe-ra-panel-bg);
+  color: var(--mpe-ra-panel-fg);
+  box-shadow: var(--mpe-ra-panel-shadow);
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mpe-ra-bar-status:empty {
+  display: none;
+}
+
+.mpe-ra-bar .mpe-ra-bar-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  padding: 0;
   border: 1px solid transparent;
-  border-radius: 4px;
+  border-radius: 999px;
   background: transparent;
   color: inherit;
   font-family: inherit;
-  font-size: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1;
   cursor: pointer;
 }
 
-.mpe-ra-bar button:hover {
-  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.2));
+.mpe-ra-bar .mpe-ra-bar-btn svg {
+  display: block;
+  width: 23px;
+  height: 23px;
 }
 
-.mpe-ra-bar button:focus-visible {
-  outline: 1px solid var(--vscode-focusBorder, #007fd4);
+.mpe-ra-bar .mpe-ra-bar-btn:hover:not([disabled]):not([aria-disabled='true']) {
+  background: var(--mpe-ra-panel-hover);
+}
+
+.mpe-ra-bar .mpe-ra-bar-btn:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, #007fd4);
   outline-offset: 1px;
 }
 
-.mpe-ra-bar-play::before {
-  content: '\25B6';
+.mpe-ra-bar .mpe-ra-bar-btn[disabled],
+.mpe-ra-bar .mpe-ra-bar-btn[aria-disabled='true'] {
+  opacity: 0.38;
+  cursor: default;
 }
 
-.mpe-ra-bar-play[data-state='playing']::before {
-  content: '\23F8';
-}
-
-.mpe-ra-bar-play[data-state='loading']::before {
-  content: '\25CC';
-}
-
-.mpe-ra-bar-stop::before {
-  content: '\25A0';
-}
-
-.mpe-ra-bar-label {
-  max-width: 18rem;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  font-weight: 600;
-}
-
-.mpe-ra-bar-time {
+/* The speed reads as a label, not as an icon. Its width is fixed at the
+ * widest rate it can show (`0.25\d7`): the panel is centred on the viewport, so
+ * a label that grew with the value would shift the whole pill on every tick
+ * of the slider. */
+.mpe-ra-bar .mpe-ra-bar-speed {
+  width: 50px;
+  padding: 0;
+  border-radius: 999px;
   font-variant-numeric: tabular-nums;
-  opacity: 0.85;
 }
 
-.mpe-ra-bar-speed-label {
-  opacity: 0.85;
+/* The play/pause button: filled, accent, and a size larger than the rest. */
+.mpe-ra-bar .mpe-ra-bar-play {
+  width: 44px;
+  height: 44px;
+  background: var(--mpe-ra-accent);
+  color: var(--mpe-ra-accent-fg);
 }
 
-.mpe-ra-bar-speed,
-.mpe-ra-bar-rate {
-  border: 1px solid var(--vscode-dropdown-border, rgba(128, 128, 128, 0.35));
-  border-radius: 4px;
-  background: var(--vscode-dropdown-background, transparent);
-  color: var(--vscode-dropdown-foreground, inherit);
-  font-family: inherit;
-  font-size: inherit;
+.mpe-ra-bar .mpe-ra-bar-play svg {
+  width: 26px;
+  height: 26px;
 }
 
-.mpe-ra-bar-rate {
-  width: 4.5rem;
-  background: var(--vscode-input-background, transparent);
-  color: var(--vscode-input-foreground, inherit);
+.mpe-ra-bar .mpe-ra-bar-play:hover:not([disabled]) {
+  background: var(--mpe-ra-accent-hover);
 }
 
-.mpe-ra-bar-speed:focus-visible,
-.mpe-ra-bar-rate:focus-visible {
-  outline: 1px solid var(--vscode-focusBorder, #007fd4);
-}
-
-.mpe-ra-bar-voice {
-  max-width: 12rem;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  opacity: 0.85;
-}
-
-.mpe-ra-bar-status {
-  max-width: 22rem;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  opacity: 0.9;
+.mpe-ra-bar .mpe-ra-bar-play[data-state='loading'] svg {
+  animation: mpe-ra-spin 1.1s linear infinite;
 }
 
 /* --------------------------------------------------------------------------
- * Selection affordance and hints (F2)
+ * 3b. The volume and speed popovers (`featrues/speed.png`): a label, a slider
+ * and the value in its own rounded box.
+ * ----------------------------------------------------------------------- */
+
+.mpe-ra-pop {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--mpe-ra-panel-border);
+  border-radius: 14px;
+  background: var(--mpe-ra-panel-bg);
+  color: var(--mpe-ra-panel-fg);
+  box-shadow: var(--mpe-ra-panel-shadow);
+  font-size: 13px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.mpe-ra-pop[hidden] {
+  display: none;
+}
+
+.mpe-ra-pop-volume {
+  left: 0;
+}
+
+.mpe-ra-pop-speed {
+  right: 0;
+}
+
+.mpe-ra-pop-label {
+  font-weight: 500;
+}
+
+.mpe-ra-pop-value {
+  box-sizing: border-box;
+  /* Wide enough for `0.25` and for `100%`, and fixed for the same reason as
+   * the speed label above. */
+  width: 4.4em;
+  padding: 6px 8px;
+  border: 1px solid var(--mpe-ra-panel-border);
+  border-radius: 8px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.mpe-ra-pop-range {
+  width: 150px;
+  height: 18px;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  /* The filled half of the track is drawn with currentColor, and the UA
+   * stylesheet gives a range input its own colour instead of the panel's. */
+  color: var(--mpe-ra-panel-fg);
+  -webkit-appearance: none;
+  appearance: none;
+  cursor: pointer;
+}
+
+/* No box around the track: a range input is its thumb, so the focus ring
+ * goes there (and the UA's own ring is suppressed on both selectors). */
+.mpe-ra-pop-range:focus,
+.mpe-ra-pop-range:focus-visible {
+  outline: none;
+}
+
+.mpe-ra-pop-range:focus-visible::-webkit-slider-thumb {
+  box-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.35),
+    0 0 0 3px rgba(128, 128, 128, 0.5);
+}
+
+.mpe-ra-pop-range::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    currentColor 0 var(--mpe-ra-range-fill, 0%),
+    var(--mpe-ra-panel-track) var(--mpe-ra-range-fill, 0%) 100%
+  );
+}
+
+.mpe-ra-pop-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  margin-top: -6px;
+  border: 1px solid var(--mpe-ra-panel-border);
+  border-radius: 999px;
+  background: var(--mpe-ra-panel-fg);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+}
+
+/* --------------------------------------------------------------------------
+ * 4. Selection affordance and hints (F2)
  * ----------------------------------------------------------------------- */
 
 .mpe-ra-float {
@@ -434,6 +684,8 @@
 
 @media (forced-colors: active) {
   .mpe-ra-bar,
+  .mpe-ra-bar-status,
+  .mpe-ra-pop,
   .mpe-ra-float,
   .mpe-ra-hint {
     border-color: CanvasText;
@@ -441,8 +693,22 @@
     color: CanvasText;
   }
 
+  .mpe-ra-bar-play {
+    forced-color-adjust: none;
+    background: Highlight;
+    color: HighlightText;
+  }
+
   .mpe-ra-btn {
     color: CanvasText;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mpe-ra-bar-progress > i,
+  .mpe-ra-bar-play[data-state='loading'] svg {
+    transition: none;
+    animation: none;
   }
 }
 
@@ -453,6 +719,10 @@
   .mpe-ra-float,
   .mpe-ra-hint {
     display: none !important;
+  }
+
+  .markdown-preview.mpe-ra-panel {
+    padding-bottom: 0 !important;
   }
 
   .mpe-ra-pill,

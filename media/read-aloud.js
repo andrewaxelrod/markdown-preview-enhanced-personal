@@ -45,10 +45,17 @@
   var SPEED_STOPS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4];
   var SPEED_MIN = 0.25;
   var SPEED_MAX = 4;
+  var VOLUME_MIN = 0;
+  var VOLUME_MAX = 1;
+  // The control panel's skip buttons (F3): ±10 s, bounded to the block being
+  // read — a rewind past its first word restarts the block, a forward past
+  // its last word does nothing.
+  var SEEK_SECONDS = 10;
   var ERROR_DISPLAY_MS = 4000;
   var FINISH_DISPLAY_MS = 4000;
   var HINT_MS = 2500;
   var SPEED_DEBOUNCE_MS = 300;
+  var VOLUME_DEBOUNCE_MS = 300;
   var SELECTION_SETTLE_MS = 150;
   var USER_SCROLL_IDLE_MS = 3000;
   var PROGRAMMATIC_SCROLL_MS = 1200;
@@ -58,6 +65,15 @@
   // Class on the preview root while click to read is on: playable text
   // shows a pointer (media/read-aloud.css).
   var CLICK_CLASS = 'mpe-ra-click';
+  // Classes on the preview root: the reading canvas (one vertical rhythm for
+  // read and unread text alike) and the bottom padding that keeps the control
+  // panel off the last lines.
+  var CANVAS_CLASS = 'mpe-ra-canvas';
+  var PANEL_CLASS = 'mpe-ra-panel';
+  // Tailwind's `fixed`, which crossnote's zoom effect looks for: it divides
+  // the body zoom out again on every element that carries it, so the panel
+  // keeps its size on screen while the text zooms in and out.
+  var UNZOOM_CLASS = 'fixed';
   // Media elements (autoplay policy, see section 11a): two <audio> elements
   // reused for every chunk, unlocked on the user's gesture with 100 ms of
   // silence (8 kHz, 8-bit mono wav).
@@ -69,6 +85,64 @@
   var SILENT_CODES = {
     cancelled: true,
     empty_text: true,
+  };
+
+  // Control panel glyphs (F3). Own markup, no font and no network: the
+  // webview's CSP allows inline SVG and nothing else would load.
+  var STROKE =
+    '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none"' +
+    ' stroke="currentColor" stroke-width="1.8" stroke-linecap="round"' +
+    ' stroke-linejoin="round">';
+  var FILL =
+    '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"' +
+    ' fill="currentColor">';
+  var SPEAKER =
+    '<path fill="currentColor" stroke="none" d="M11.4 4.8 6.5 8.9H3.7a.7.7 0' +
+    ' 0 0-.7.7v4.8a.7.7 0 0 0 .7.7h2.8l4.9 4.1a.6.6 0 0 0 1-.46V5.26a.6.6 0' +
+    ' 0 0-1-.46Z"/>';
+  var ICONS = {
+    play:
+      FILL +
+      '<path d="M8.2 5.1v13.8a.8.8 0 0 0 1.23.67l10.4-6.9a.8.8 0 0 0 0-1.34L9.43 4.43A.8.8 0 0 0 8.2 5.1Z"/></svg>',
+    pause:
+      FILL +
+      '<rect x="7.6" y="5" width="3.4" height="14" rx="1.2"/>' +
+      '<rect x="13" y="5" width="3.4" height="14" rx="1.2"/></svg>',
+    loading:
+      '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"' +
+      ' fill="none" stroke="currentColor" stroke-width="2.2"' +
+      ' stroke-linecap="round">' +
+      '<circle cx="12" cy="12" r="8" stroke-opacity=".35"/>' +
+      '<path d="M20 12a8 8 0 0 0-8-8"/></svg>',
+    volumeHigh:
+      STROKE +
+      SPEAKER +
+      '<path d="M15.5 9.3a4 4 0 0 1 0 5.4"/>' +
+      '<path d="M18.3 6.7a8 8 0 0 1 0 10.6"/></svg>',
+    volumeLow: STROKE + SPEAKER + '<path d="M15.5 9.3a4 4 0 0 1 0 5.4"/></svg>',
+    volumeMute:
+      STROKE + SPEAKER + '<path d="m16.4 9.6 5 4.8m0-4.8-5 4.8"/></svg>',
+    // Placeholder for the voice-model chooser (a chip): the panel keeps its
+    // slot until the chooser itself is built.
+    model:
+      STROKE +
+      '<rect x="7" y="7" width="10" height="10" rx="2.2"/>' +
+      '<rect x="10.2" y="10.2" width="3.6" height="3.6" rx="1"/>' +
+      '<path d="M10 4v3M14 4v3M10 17v3M14 17v3M4 10h3M4 14h3M17 10h3M17 14h3"/>' +
+      '</svg>',
+    back10:
+      STROKE +
+      '<path d="M3.6 12a8.4 8.4 0 1 0 8.4-8.4 9.1 9.1 0 0 0-6.3 2.56L3.6 8.4"/>' +
+      '<path d="M3.6 3.6v4.8h4.8"/>' +
+      '<text x="12.4" y="15.3" text-anchor="middle" font-size="8"' +
+      ' font-weight="700" fill="currentColor" stroke="none">10</text></svg>',
+    forward10:
+      STROKE +
+      '<path d="M20.4 12a8.4 8.4 0 1 1-8.4-8.4 9.1 9.1 0 0 1 6.3 2.56L20.4 8.4"/>' +
+      '<path d="M20.4 3.6v4.8h-4.8"/>' +
+      '<text x="11.6" y="15.3" text-anchor="middle" font-size="8"' +
+      ' font-weight="700" fill="currentColor" stroke="none">10</text></svg>',
+    close: STROKE + '<path d="M6.2 6.2 17.8 17.8M17.8 6.2 6.2 17.8"/></svg>',
   };
 
   var NAV_KEYS = {
@@ -89,6 +163,7 @@
     enabled: true,
     clickToRead: true,
     speed: 1,
+    volume: 1,
     voiceName: '',
     modelId: '',
     highlightTheme: core.DEFAULT_HIGHLIGHT_THEME,
@@ -104,6 +179,7 @@
         config.enabled = parsed.enabled !== false;
         config.clickToRead = parsed.clickToRead !== false;
         config.speed = normaliseRate(parsed.speed);
+        config.volume = normaliseVolume(parsed.volume);
         config.voiceName =
           typeof parsed.voiceName === 'string' ? parsed.voiceName : '';
         config.modelId =
@@ -123,6 +199,7 @@
   var blocksByKey = Object.create(null);
   var blocksByElement = new Map();
   var rate = config.speed;
+  var volume = config.volume;
   var requestCounter = 0;
 
   var rootObserver = null;
@@ -132,6 +209,8 @@
 
   var bar = null;
   var barParts = null;
+  // The user closed the panel with its × ; it comes back with the next read.
+  var panelDismissed = false;
   var floatButton = null;
   var hintElement = null;
 
@@ -139,6 +218,7 @@
   var finishTimer = 0;
   var hintTimer = 0;
   var speedTimer = 0;
+  var volumeTimer = 0;
   var selectionTimer = 0;
 
   var lastUserScrollAt = 0;
@@ -147,6 +227,10 @@
   var floatRect = null;
   var pendingClick = null;
   var mediaPool = null;
+  // Whether the last gesture was a key press: a popover opened from the
+  // keyboard takes focus (and shows a focus ring on the slider's thumb), one
+  // opened with the mouse does not.
+  var lastGestureWasKey = false;
 
   var record = emptyRecord();
 
@@ -244,6 +328,20 @@
     return Math.round(number * 100) / 100;
   }
 
+  function normaliseVolume(value) {
+    var number = typeof value === 'number' ? value : parseFloat(value);
+    if (!isFinite(number)) {
+      return 1;
+    }
+    if (number < VOLUME_MIN) {
+      number = VOLUME_MIN;
+    }
+    if (number > VOLUME_MAX) {
+      number = VOLUME_MAX;
+    }
+    return Math.round(number * 100) / 100;
+  }
+
   function formatTime(seconds) {
     var value = isFinite(seconds) && seconds > 0 ? Math.floor(seconds) : 0;
     var minutes = Math.floor(value / 60);
@@ -269,6 +367,26 @@
 
   function entryForElement(el) {
     return el ? blocksByElement.get(el) || null : null;
+  }
+
+  /**
+   * A chunk's length in seconds: the element's own duration once it has been
+   * loaded, else the host's estimate, else nothing.
+   */
+  function chunkLength(chunk) {
+    if (!chunk) {
+      return 0;
+    }
+    if (typeof chunk.duration === 'number' && isFinite(chunk.duration)) {
+      return chunk.duration;
+    }
+    if (
+      typeof chunk.durationHint === 'number' &&
+      isFinite(chunk.durationHint)
+    ) {
+      return chunk.durationHint;
+    }
+    return 0;
   }
 
   // ---------------------------------------------------------------------------
@@ -344,6 +462,7 @@
     }
     root.setAttribute('data-mpe-ra-theme', config.highlightTheme);
     root.setAttribute('data-mpe-ra-scheme', detectScheme());
+    applyBarScheme();
   }
 
   function removeThemeAttributes() {
@@ -465,7 +584,18 @@
   }
 
   // ---------------------------------------------------------------------------
-  // 7. Player bar (F3)
+  // 7. Control panel (F3)
+  //
+  // A pill at the bottom centre of the preview, in the geometry of a reader
+  // app: volume, voice model (a placeholder until the chooser is built),
+  // −10 s, play/pause, +10 s, speed and close. It is on screen whenever read
+  // aloud is enabled — pressing play with nothing loaded starts a read at the
+  // first block in view — and the × puts it away until the next read.
+  //
+  // The panel carries Tailwind's `fixed`, which crossnote's zoom effect uses
+  // to divide the body zoom out again, so the panel keeps its size on screen
+  // while the text zooms; everything the panel measures is in px for that
+  // reason, and everything the canvas measures is in em.
   // ---------------------------------------------------------------------------
 
   function makeButton(action, label, className) {
@@ -478,164 +608,360 @@
     return button;
   }
 
+  /** Swap a button's glyph, by name, only when it actually changes. */
+  function setIcon(button, name) {
+    if (!button || button.getAttribute('data-icon') === name) {
+      return;
+    }
+    button.setAttribute('data-icon', name);
+    button.innerHTML = ICONS[name];
+  }
+
+  function makeIconButton(action, label, className, icon) {
+    var button = makeButton(action, label, className);
+    setIcon(button, icon);
+    return button;
+  }
+
+  /**
+   * One popover in the style of the reference: a label, a slider and the
+   * value in its own rounded box. `format` turns the raw number into what
+   * the box shows.
+   */
+  function makePopover(className, labelText, min, max, step) {
+    var popover = document.createElement('div');
+    popover.className = 'mpe-ra-ui mpe-ra-pop ' + className;
+    popover.hidden = true;
+
+    var label = document.createElement('span');
+    label.className = 'mpe-ra-pop-label';
+    label.textContent = labelText;
+
+    var range = document.createElement('input');
+    range.className = 'mpe-ra-ui mpe-ra-pop-range';
+    range.type = 'range';
+    range.min = String(min);
+    range.max = String(max);
+    range.step = String(step);
+    range.setAttribute('aria-label', labelText);
+
+    var value = document.createElement('span');
+    value.className = 'mpe-ra-pop-value';
+
+    popover.appendChild(label);
+    popover.appendChild(range);
+    popover.appendChild(value);
+    return { root: popover, range: range, value: value };
+  }
+
   function ensureBar() {
     if (bar && bar.isConnected) {
       return bar;
     }
     bar = document.createElement('div');
-    bar.className = 'mpe-ra-bar mpe-ra-ui';
+    bar.className = 'mpe-ra-bar mpe-ra-ui ' + UNZOOM_CLASS;
     bar.setAttribute('role', 'toolbar');
     bar.setAttribute('aria-label', 'Read aloud player');
     bar.setAttribute('tabindex', '0');
     bar.hidden = true;
 
-    var play = makeButton('play', 'Play or pause', 'mpe-ra-bar-play');
-    play.setAttribute('data-state', 'idle');
-    var stop = makeButton('stop', 'Stop read aloud', 'mpe-ra-bar-stop');
+    var progress = document.createElement('div');
+    progress.className = 'mpe-ra-bar-progress';
+    var progressFill = document.createElement('i');
+    progress.appendChild(progressFill);
 
-    var label = document.createElement('span');
-    label.className = 'mpe-ra-bar-label';
-
-    var time = document.createElement('span');
-    time.className = 'mpe-ra-bar-time';
-    time.textContent = '0:00 / 0:00';
-
-    var speedLabel = document.createElement('label');
-    speedLabel.className = 'mpe-ra-bar-speed-label';
-    speedLabel.setAttribute('for', 'mpe-ra-speed-select');
-    speedLabel.textContent = 'Speed';
-
-    var select = document.createElement('select');
-    select.className = 'mpe-ra-ui mpe-ra-bar-speed';
-    select.id = 'mpe-ra-speed-select';
-    for (var i = 0; i < SPEED_STOPS.length; i++) {
-      var option = document.createElement('option');
-      option.value = String(SPEED_STOPS[i]);
-      option.textContent = SPEED_STOPS[i] + 'x';
-      select.appendChild(option);
-    }
-    var custom = document.createElement('option');
-    custom.value = 'custom';
-    custom.textContent = 'Custom';
-    select.appendChild(custom);
-
-    var number = document.createElement('input');
-    number.className = 'mpe-ra-ui mpe-ra-bar-rate';
-    number.type = 'number';
-    number.min = String(SPEED_MIN);
-    number.max = String(SPEED_MAX);
-    number.step = '0.05';
-    number.setAttribute('aria-label', 'Playback speed');
-
-    var voice = makeButton('setup', 'Read aloud setup', 'mpe-ra-bar-voice');
-
-    var status = document.createElement('span');
+    var status = document.createElement('div');
     status.className = 'mpe-ra-bar-status';
     status.setAttribute('role', 'status');
     status.setAttribute('aria-live', 'polite');
 
-    bar.appendChild(play);
-    bar.appendChild(stop);
-    bar.appendChild(label);
-    bar.appendChild(time);
-    bar.appendChild(speedLabel);
-    bar.appendChild(select);
-    bar.appendChild(number);
-    bar.appendChild(voice);
+    var volumePop = makePopover('mpe-ra-pop-volume', 'Volume', 0, 1, 0.05);
+    var speedPop = makePopover(
+      'mpe-ra-pop-speed',
+      'Reading speed',
+      SPEED_MIN,
+      SPEED_MAX,
+      0.05,
+    );
+
+    var volumeButton = makeIconButton(
+      'volume',
+      'Volume',
+      'mpe-ra-bar-btn mpe-ra-bar-volume',
+      'volumeHigh',
+    );
+    volumeButton.setAttribute('aria-haspopup', 'true');
+    volumeButton.setAttribute('aria-expanded', 'false');
+
+    var model = makeIconButton(
+      'model',
+      'Voice model (coming soon)',
+      'mpe-ra-bar-btn mpe-ra-bar-model',
+      'model',
+    );
+    model.setAttribute('aria-disabled', 'true');
+
+    var back = makeIconButton(
+      'back10',
+      'Back 10 seconds',
+      'mpe-ra-bar-btn mpe-ra-bar-back10',
+      'back10',
+    );
+    var play = makeIconButton(
+      'play',
+      'Play',
+      'mpe-ra-bar-btn mpe-ra-bar-play',
+      'play',
+    );
+    play.setAttribute('data-state', 'idle');
+    var forward = makeIconButton(
+      'forward10',
+      'Forward 10 seconds',
+      'mpe-ra-bar-btn mpe-ra-bar-forward10',
+      'forward10',
+    );
+
+    var speedButton = makeButton(
+      'speed',
+      'Reading speed',
+      'mpe-ra-bar-btn mpe-ra-bar-speed',
+    );
+    speedButton.setAttribute('aria-haspopup', 'true');
+    speedButton.setAttribute('aria-expanded', 'false');
+
+    var close = makeIconButton(
+      'close',
+      'Close the player',
+      'mpe-ra-bar-btn mpe-ra-bar-close',
+      'close',
+    );
+
+    bar.appendChild(progress);
     bar.appendChild(status);
+    bar.appendChild(volumePop.root);
+    bar.appendChild(speedPop.root);
+    bar.appendChild(volumeButton);
+    bar.appendChild(model);
+    bar.appendChild(back);
+    bar.appendChild(play);
+    bar.appendChild(forward);
+    bar.appendChild(speedButton);
+    bar.appendChild(close);
     document.body.appendChild(bar);
 
     barParts = {
-      play: play,
-      stop: stop,
-      label: label,
-      time: time,
-      select: select,
-      number: number,
-      voice: voice,
+      progress: progress,
+      progressFill: progressFill,
       status: status,
+      volume: volumeButton,
+      volumePop: volumePop,
+      model: model,
+      back: back,
+      play: play,
+      forward: forward,
+      speed: speedButton,
+      speedPop: speedPop,
+      close: close,
     };
 
-    select.addEventListener('change', function () {
-      if (select.value === 'custom') {
-        barParts.number.focus();
-        return;
-      }
-      applyRate(parseFloat(select.value), true);
+    speedPop.range.addEventListener('input', function () {
+      applyRate(parseFloat(speedPop.range.value), true, speedPop.range);
     });
-    number.addEventListener('change', function () {
-      applyRate(parseFloat(number.value), true);
+    volumePop.range.addEventListener('input', function () {
+      applyVolume(parseFloat(volumePop.range.value), true, volumePop.range);
     });
     bar.addEventListener('keydown', onBarKeydown);
 
+    applyBarScheme();
     syncSpeedControls();
-    syncVoiceLabel();
+    syncVolumeControls();
+    renderBar();
     return bar;
   }
 
-  function syncSpeedControls() {
-    if (!barParts) {
+  /** The panel takes its light/dark palette from the preview background. */
+  function applyBarScheme() {
+    if (!bar || !root) {
       return;
     }
-    var known = SPEED_STOPS.indexOf(rate) >= 0;
-    barParts.select.value = known ? String(rate) : 'custom';
-    barParts.number.value = String(rate);
+    var scheme = root.getAttribute('data-mpe-ra-scheme');
+    if (scheme) {
+      bar.setAttribute('data-mpe-ra-scheme', scheme);
+    }
   }
 
-  function syncVoiceLabel() {
+  function setRangeFill(range, fraction) {
+    try {
+      range.style.setProperty(
+        '--mpe-ra-range-fill',
+        Math.round(Math.max(0, Math.min(1, fraction)) * 100) + '%',
+      );
+    } catch (error) {
+      /* jsdom and old engines drop custom properties; cosmetic only */
+    }
+  }
+
+  function formatRate(value) {
+    return String(Math.round(value * 100) / 100);
+  }
+
+  /**
+   * `from` is the slider the value came from, if any: writing a value back
+   * into the input the user is dragging makes the thumb stutter.
+   */
+  function syncSpeedControls(from) {
     if (!barParts) {
       return;
     }
-    var name = config.voiceName || 'Kokoro voice';
-    barParts.voice.textContent = name;
-    barParts.voice.setAttribute(
+    barParts.speed.textContent = formatRate(rate) + '×';
+    barParts.speed.setAttribute(
       'title',
-      config.modelId ? name + ' · ' + config.modelId : name,
+      'Reading speed: ' + formatRate(rate) + '×',
     );
+    barParts.speed.setAttribute(
+      'aria-label',
+      'Reading speed: ' + formatRate(rate) + ' times',
+    );
+    if (barParts.speedPop.range !== from) {
+      barParts.speedPop.range.value = String(rate);
+    }
+    barParts.speedPop.value.textContent = formatRate(rate);
+    setRangeFill(
+      barParts.speedPop.range,
+      (rate - SPEED_MIN) / (SPEED_MAX - SPEED_MIN),
+    );
+  }
+
+  function syncVolumeControls(from) {
+    if (!barParts) {
+      return;
+    }
+    var percent = Math.round(volume * 100);
+    setIcon(
+      barParts.volume,
+      volume === 0 ? 'volumeMute' : volume < 0.5 ? 'volumeLow' : 'volumeHigh',
+    );
+    barParts.volume.setAttribute('title', 'Volume: ' + percent + '%');
+    barParts.volume.setAttribute(
+      'aria-label',
+      'Volume: ' + percent + ' percent',
+    );
+    if (barParts.volumePop.range !== from) {
+      barParts.volumePop.range.value = String(volume);
+    }
+    barParts.volumePop.value.textContent = percent + '%';
+    setRangeFill(barParts.volumePop.range, volume);
+  }
+
+  function setEnabled(button, enabled) {
+    if (!button) {
+      return;
+    }
+    button.disabled = !enabled;
+  }
+
+  /** Whether the panel belongs on screen at all. */
+  function barVisible() {
+    return config.enabled && !panelDismissed;
+  }
+
+  /** Play, pause, skip and progress, from `record`. */
+  function renderBar() {
+    if (!barParts) {
+      return;
+    }
+    var state = record.state;
+    setIcon(
+      barParts.play,
+      state === 'playing' ? 'pause' : state === 'loading' ? 'loading' : 'play',
+    );
+    barParts.play.setAttribute('data-state', state);
+    var action = state === 'playing' ? 'Pause' : 'Play';
+    barParts.play.setAttribute('aria-label', action);
+    barParts.play.setAttribute(
+      'title',
+      record.label ? action + ' — ' + record.label : action,
+    );
+    syncSeekButtons();
+    syncSpeedControls();
+    syncVolumeControls();
+    updateTimeDisplay();
+    applyCanvasClasses();
   }
 
   function showBar(statusText) {
     ensureBar();
     finishTimer = clearTimer(finishTimer);
-    bar.hidden = false;
-    barParts.label.textContent = record.label || '';
+    bar.hidden = !barVisible();
     barParts.status.textContent = statusText || '';
-    barParts.play.setAttribute('data-state', record.state);
-    barParts.play.setAttribute(
-      'aria-label',
-      record.state === 'playing' ? 'Pause' : 'Play',
-    );
-    syncSpeedControls();
-    syncVoiceLabel();
-    updateTimeDisplay();
+    renderBar();
   }
 
+  /**
+   * The read is over: the panel stays, with its controls back in the idle
+   * state and nothing to say. Only `dismissBar` takes it off screen.
+   */
   function hideBar() {
     finishTimer = clearTimer(finishTimer);
+    if (!bar) {
+      return;
+    }
+    if (barParts) {
+      barParts.status.textContent = '';
+    }
+    bar.hidden = !barVisible();
+    renderBar();
+  }
+
+  /** The × , and read aloud being switched off. */
+  function dismissBar() {
+    finishTimer = clearTimer(finishTimer);
+    closePopovers();
     if (bar) {
       bar.hidden = true;
       if (barParts) {
         barParts.status.textContent = '';
       }
     }
+    applyCanvasClasses();
   }
 
   var lastTimeText = '';
+  var lastProgress = -1;
+
+  /**
+   * How far the read has come, as a fraction of the text it was asked to
+   * read: the word being spoken, not the audio, so a document-length read
+   * whose later chunks are still being synthesised still advances evenly.
+   */
+  function readProgress() {
+    var spans = record.allSpans;
+    if (!record.text || !spans.length) {
+      return 0;
+    }
+    // The word the highlight is on, by index rather than by `record.lastSpan`:
+    // between two words — and after the last word of the chunks that have
+    // arrived — there is no current span, and the bar must not fall back to
+    // the start of the document there.
+    var index = record.spanIndex;
+    if (index >= spans.length) {
+      index = spans.length - 1;
+    }
+    var end = spans[index].charEnd;
+    if (!(end > 0)) {
+      return 0;
+    }
+    return Math.max(0, Math.min(1, end / record.text.length));
+  }
 
   function updateTimeDisplay() {
-    if (!barParts || bar.hidden) {
+    if (!barParts || !bar || bar.hidden) {
       return;
     }
     var elapsed = 0;
     var total = 0;
     for (var i = 0; i < record.chunks.length; i++) {
-      var chunk = record.chunks[i];
-      var length = chunk.duration;
-      if (typeof length !== 'number' || !isFinite(length)) {
-        length =
-          typeof chunk.durationHint === 'number' ? chunk.durationHint : 0;
-      }
-      total += length;
+      total += chunkLength(record.chunks[i]);
     }
     if (record.current >= 0 && record.chunks[record.current]) {
       var playing = record.chunks[record.current];
@@ -646,13 +972,91 @@
     var text = formatTime(elapsed) + ' / ' + formatTime(total);
     if (text !== lastTimeText) {
       lastTimeText = text;
-      barParts.time.textContent = text;
+      barParts.progress.setAttribute('title', text);
+    }
+    var fraction = record.state === 'idle' ? 0 : readProgress();
+    var percent = Math.round(fraction * 1000) / 10;
+    if (percent !== lastProgress) {
+      lastProgress = percent;
+      barParts.progressFill.style.width = percent + '%';
+    }
+    syncSeekButtons();
+  }
+
+  var lastSeekState = '';
+
+  function syncSeekButtons() {
+    if (!barParts) {
+      return;
+    }
+    var bounds = seekBounds();
+    var canBack = !!bounds;
+    var canForward = !!bounds && bounds.here + SEEK_SECONDS < bounds.end;
+    var next = (canBack ? '1' : '0') + (canForward ? '1' : '0');
+    if (next === lastSeekState) {
+      return;
+    }
+    lastSeekState = next;
+    setEnabled(barParts.back, canBack);
+    setEnabled(barParts.forward, canForward);
+  }
+
+  // ------------------------------------------------------------- popovers
+
+  function popoverFor(name) {
+    if (!barParts) {
+      return null;
+    }
+    if (name === 'volume') {
+      return { pop: barParts.volumePop, button: barParts.volume };
+    }
+    if (name === 'speed') {
+      return { pop: barParts.speedPop, button: barParts.speed };
+    }
+    return null;
+  }
+
+  function closePopovers(except) {
+    if (!barParts) {
+      return;
+    }
+    var names = ['volume', 'speed'];
+    for (var i = 0; i < names.length; i++) {
+      if (names[i] === except) {
+        continue;
+      }
+      var found = popoverFor(names[i]);
+      found.pop.root.hidden = true;
+      found.button.setAttribute('aria-expanded', 'false');
     }
   }
+
+  function togglePopover(name) {
+    var found = popoverFor(name);
+    if (!found) {
+      return;
+    }
+    var open = found.pop.root.hidden;
+    closePopovers(name);
+    found.pop.root.hidden = !open;
+    found.button.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (open && lastGestureWasKey && found.pop.range.focus) {
+      found.pop.range.focus();
+    }
+  }
+
+  // ---------------------------------------------------------------- keys
 
   function onBarKeydown(event) {
     if (event.key === 'Escape') {
       event.preventDefault();
+      if (
+        barParts &&
+        !(barParts.volumePop.root.hidden && barParts.speedPop.root.hidden)
+      ) {
+        closePopovers();
+        return;
+      }
       handleStop();
       return;
     }
@@ -695,7 +1099,7 @@
     applyRate(SPEED_STOPS[next], true);
   }
 
-  function applyRate(value, persist) {
+  function applyRate(value, persist, from) {
     rate = normaliseRate(value);
     if (mediaPool) {
       for (var i = 0; i < mediaPool.length; i++) {
@@ -703,7 +1107,7 @@
         mediaPool[i].el.playbackRate = rate;
       }
     }
-    syncSpeedControls();
+    syncSpeedControls(from);
     if (!persist) {
       return;
     }
@@ -712,6 +1116,29 @@
       speedTimer = 0;
       post('readAloudSetSpeed', [rate]);
     }, SPEED_DEBOUNCE_MS);
+  }
+
+  function applyVolume(value, persist, from) {
+    volume = normaliseVolume(value);
+    if (mediaPool) {
+      for (var i = 0; i < mediaPool.length; i++) {
+        // Never touch an element that is still being unlocked with the
+        // silent wav: Chromium counts a volume of 0 as muted and would not
+        // grant the element the permission the read needs (11a).
+        if (mediaPool[i].chunk) {
+          mediaPool[i].el.volume = volume;
+        }
+      }
+    }
+    syncVolumeControls(from);
+    if (!persist) {
+      return;
+    }
+    volumeTimer = clearTimer(volumeTimer);
+    volumeTimer = setTimeout(function () {
+      volumeTimer = 0;
+      post('readAloudSetVolume', [volume]);
+    }, VOLUME_DEBOUNCE_MS);
   }
 
   // ---------------------------------------------------------------------------
@@ -930,6 +1357,11 @@
       removeDecorations();
       return;
     }
+    if (!panelDismissed && (!bar || !bar.isConnected)) {
+      // The panel lives in <body>, outside the preview root: rebuild it if a
+      // re-render of the page ever takes it with it.
+      showBar('');
+    }
     if (viewportObserver) {
       viewportObserver.disconnect();
     }
@@ -971,6 +1403,7 @@
     }
     applyThemeAttributes();
     applyClickClass();
+    applyCanvasClasses();
     applyGutter();
     rebindAfterRender();
   }
@@ -984,6 +1417,26 @@
       root.classList.add(CLICK_CLASS);
     } else {
       root.classList.remove(CLICK_CLASS);
+    }
+  }
+
+  /**
+   * The reading canvas: one vertical rhythm for read and unread text alike
+   * (media/read-aloud.css §1), plus room at the bottom for the panel.
+   */
+  function applyCanvasClasses() {
+    if (!root) {
+      return;
+    }
+    if (config.enabled) {
+      root.classList.add(CANVAS_CLASS);
+    } else {
+      root.classList.remove(CANVAS_CLASS);
+    }
+    if (barVisible()) {
+      root.classList.add(PANEL_CLASS);
+    } else {
+      root.classList.remove(PANEL_CLASS);
     }
   }
 
@@ -1002,6 +1455,8 @@
     removeThemeAttributes();
     if (root) {
       root.classList.remove(CLICK_CLASS);
+      root.classList.remove(CANVAS_CLASS);
+      root.classList.remove(PANEL_CLASS);
     }
     blocks = [];
     blocksByKey = Object.create(null);
@@ -1277,6 +1732,8 @@
       endJob({ next: 'idle', reason: 'superseded by a new read' });
     }
 
+    // A new read always brings the panel back, however it was started.
+    panelDismissed = false;
     record = emptyRecord();
     record.state = 'loading';
     record.requestId = nextRequestId();
@@ -1775,6 +2232,10 @@
       }
       try {
         slot.el.src = SILENT_WAV;
+        // Full volume for the unlock itself: Chromium treats a volume of 0
+        // as muted, and a muted play() does not grant the permission the
+        // read needs. loadChunk puts the user's volume back.
+        slot.el.volume = 1;
         var promise = slot.el.play();
         if (promise && typeof promise.then === 'function') {
           promise.then(markUnlocked(slot), ignoreRejection);
@@ -1847,6 +2308,7 @@
     chunk.slot = slot;
     slot.el.playbackRate = rate;
     slot.el.preservesPitch = true;
+    slot.el.volume = volume;
     slot.el.src = chunk.url;
     return slot;
   }
@@ -1879,10 +2341,7 @@
     record.offsets[index] =
       index === 0
         ? 0
-        : record.offsets[index - 1] +
-          (record.chunks[index - 1].duration !== null
-            ? record.chunks[index - 1].duration
-            : record.chunks[index - 1].durationHint || 0);
+        : record.offsets[index - 1] + chunkLength(record.chunks[index - 1]);
 
     var offset = record.offsets[index];
     if (message.spans && message.spans.length) {
@@ -1969,6 +2428,7 @@
     }
     slot.el.playbackRate = rate;
     slot.el.preservesPitch = true;
+    slot.el.volume = volume;
     var promise = slot.el.play();
     if (promise && typeof promise.catch === 'function') {
       promise.catch(function (reason) {
@@ -2132,6 +2592,153 @@
   }
 
   // ---------------------------------------------------------------------------
+  // 11c. Skipping (F3): the ±10 s buttons of the control panel
+  //
+  // A skip stays inside the block being read, which is also the only block
+  // whose audio is guaranteed to still be there: the memory rule releases
+  // every earlier block as the read moves on (section 10). So a rewind that
+  // would land before the block's first word restarts the block, and a
+  // forward that would land past its last synthesised word does nothing.
+  // ---------------------------------------------------------------------------
+
+  /**
+   * `{ start, end, here, blockIndex }` on the read's own timeline for the
+   * block being read, from the chunks of it that have arrived and still have
+   * their audio; null when there is nothing to skip within.
+   */
+  function seekBounds() {
+    if (record.current < 0) {
+      return null;
+    }
+    var chunk = record.chunks[record.current];
+    if (!chunk || chunk.released) {
+      return null;
+    }
+    var blockIndex = chunk.blockIndex;
+    var start = null;
+    var end = 0;
+    for (var i = 0; i < record.chunks.length; i++) {
+      var candidate = record.chunks[i];
+      if (candidate.blockIndex !== blockIndex || candidate.released) {
+        continue;
+      }
+      if (start === null) {
+        start = record.offsets[i];
+      }
+      end = record.offsets[i] + chunkLength(candidate);
+    }
+    if (start === null) {
+      return null;
+    }
+    return {
+      start: start,
+      end: end,
+      here:
+        record.offsets[record.current] +
+        (chunk.slot ? chunk.slot.el.currentTime : 0),
+      blockIndex: blockIndex,
+    };
+  }
+
+  /** Move the word highlight to time `time` without touching the audio. */
+  function syncSpansTo(time) {
+    var spans = record.allSpans;
+    var index = 0;
+    while (index < spans.length && spans[index].end <= time) {
+      index++;
+    }
+    record.spanIndex = index;
+    var current =
+      index < spans.length && spans[index].start <= time ? spans[index] : null;
+    paintSpan(current);
+    record.lastSpan = current;
+  }
+
+  /**
+   * Move playback to `target` seconds on the read's timeline. The chunk that
+   * holds it must belong to the block being read and still have its audio; a
+   * paused read stays paused at the new position, a playing one plays on.
+   */
+  function seekToTime(target) {
+    var bounds = seekBounds();
+    if (!bounds) {
+      return false;
+    }
+    if (target < bounds.start) {
+      target = bounds.start;
+    }
+    if (target >= bounds.end) {
+      return false;
+    }
+    var index = -1;
+    for (var i = 0; i < record.chunks.length; i++) {
+      var candidate = record.chunks[i];
+      if (
+        candidate.blockIndex === bounds.blockIndex &&
+        !candidate.released &&
+        record.offsets[i] <= target
+      ) {
+        index = i;
+      }
+    }
+    if (index < 0) {
+      return false;
+    }
+    var chunk = record.chunks[index];
+    var local = target - record.offsets[index];
+    if (!(local >= 0)) {
+      local = 0;
+    }
+    var wasPaused = record.state === 'paused';
+    stopLoop();
+    clearWordBox();
+    var playing = record.chunks[record.current];
+    if (playing && playing !== chunk && playing.slot) {
+      // Abandoned mid-way: rewind it, so a later pass starts at its top.
+      try {
+        playing.slot.el.pause();
+        playing.slot.el.currentTime = 0;
+      } catch (error) {
+        /* ignore */
+      }
+    }
+    var slot = loadChunk(chunk);
+    if (!slot) {
+      return false;
+    }
+    try {
+      // Before the metadata has loaded this sets the start position.
+      slot.el.currentTime = local;
+    } catch (error) {
+      return false;
+    }
+    if (wasPaused) {
+      record.current = index;
+      syncSpansTo(target);
+      showBar('Paused');
+      return true;
+    }
+    playChunk(index);
+    return true;
+  }
+
+  /** The −10 s / +10 s buttons; `delta` is in seconds. */
+  function handleSeek(delta) {
+    var bounds = seekBounds();
+    if (!bounds) {
+      return;
+    }
+    var target = bounds.here + delta;
+    if (delta > 0 && target >= bounds.end) {
+      // Past the end of the block that is being read: do nothing.
+      syncSeekButtons();
+      return;
+    }
+    seekToTime(target);
+    syncSeekButtons();
+  }
+
+  // ---------------------------------------------------------------------------
   // 12. Events from the user (E1, E2, E3)
   // ---------------------------------------------------------------------------
 
@@ -2164,8 +2771,34 @@
     startBlockRead(entry);
   }
 
+  /**
+   * The first eligible block that is still on screen, so the panel's play
+   * button starts where the reader is looking rather than at the top of a
+   * document they have scrolled halfway through.
+   */
+  function firstVisibleEntry() {
+    for (var i = 0; i < blocks.length; i++) {
+      var rect = null;
+      try {
+        rect = blocks[i].el.getBoundingClientRect();
+      } catch (error) {
+        rect = null;
+      }
+      if (rect && rect.bottom > 4) {
+        return blocks[i];
+      }
+    }
+    return blocks.length ? blocks[0] : null;
+  }
+
   function handleTogglePlayPause() {
     if (record.state === 'idle') {
+      // Nothing loaded: read from the top of the viewport to the end of the
+      // document, the same read a play button in the gutter would start.
+      var entry = firstVisibleEntry();
+      if (entry) {
+        startBlockRead(entry);
+      }
       return;
     }
     if (record.state === 'error') {
@@ -2199,11 +2832,34 @@
 
   function handleAction(action) {
     if (action === 'play') {
+      closePopovers();
       handleTogglePlayPause();
       return;
     }
     if (action === 'stop') {
       handleStop();
+      return;
+    }
+    if (action === 'back10') {
+      handleSeek(-SEEK_SECONDS);
+      return;
+    }
+    if (action === 'forward10') {
+      handleSeek(SEEK_SECONDS);
+      return;
+    }
+    if (action === 'volume' || action === 'speed') {
+      togglePopover(action);
+      return;
+    }
+    if (action === 'model') {
+      // Placeholder: the voice-model chooser is not built yet.
+      return;
+    }
+    if (action === 'close') {
+      handleStop();
+      panelDismissed = true;
+      dismissBar();
       return;
     }
     if (action === 'setup') {
@@ -2316,6 +2972,12 @@
         applyRate(incoming, false);
       }
     }
+    if (typeof message.volume === 'number') {
+      var level = normaliseVolume(message.volume);
+      if (level !== volume) {
+        applyVolume(level, false);
+      }
+    }
     if (!config.enabled) {
       cancelPendingClickRead();
       if (record.state !== 'idle') {
@@ -2324,18 +2986,19 @@
       errorTimer = clearTimer(errorTimer);
       clearTransientError();
       removeDecorations();
-      hideBar();
+      dismissBar();
       hideFloat();
       return;
     }
     if (!wasEnabled) {
       decorate();
+      showBar('');
     } else {
       applyThemeAttributes();
       applyClickClass();
     }
-    syncVoiceLabel();
     syncSpeedControls();
+    syncVolumeControls();
   }
 
   function handleControl(action) {
@@ -2411,12 +3074,17 @@
     var ui = element.closest('.mpe-ra-ui');
     if (!ui) {
       hideFloat();
+      closePopovers();
       maybeClickToRead(event, element);
       return;
     }
     event.stopPropagation();
     var actionElement = element.closest('[data-mpe-ra-action]');
     if (!actionElement) {
+      // Inside a popover: leave it open while its slider is being used.
+      if (!element.closest('.mpe-ra-pop')) {
+        closePopovers();
+      }
       return;
     }
     event.preventDefault();
@@ -2451,6 +3119,10 @@
   function start() {
     sourceUri = readSourceUriFromPage();
     attachRoot(document.querySelector(core.ROOT_SELECTOR));
+    if (config.enabled) {
+      // The control panel is part of the page, not just of a running read.
+      showBar('');
+    }
     bodyObserver = new MutationObserver(function () {
       if (root && root.isConnected) {
         return;
@@ -2464,6 +3136,7 @@
       function (event) {
         // A gesture: the moment the media elements can be unlocked (11a).
         unlockMediaPool();
+        lastGestureWasKey = false;
         // Any new press, including the second one of a double click,
         // cancels a click-to-read that is still waiting out its delay.
         cancelPendingClickRead();
@@ -2493,6 +3166,7 @@
       'keydown',
       function (event) {
         unlockMediaPool();
+        lastGestureWasKey = true;
         if (NAV_KEYS[event.key]) {
           markUserScroll();
         }

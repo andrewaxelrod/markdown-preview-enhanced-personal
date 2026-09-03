@@ -57,6 +57,7 @@ type VSCodeMPEConfigKey =
   | 'readAloudSpeed'
   | 'readAloudVolume'
   | 'readAloudHighlightTheme'
+  | 'readAloudFont'
   | 'readAloudCacheSizeMB'
   | 'kokoroBaseUrl';
 

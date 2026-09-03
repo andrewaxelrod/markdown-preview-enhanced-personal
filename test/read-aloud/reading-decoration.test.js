@@ -304,18 +304,22 @@ suite('read-aloud reading decoration: the spoken word', () => {
 });
 
 suite('read-aloud highlight theme helpers', () => {
-  test('normaliseHighlightTheme accepts the four themes and falls back to blue', () => {
+  test('normaliseHighlightTheme accepts the five themes and falls back to blue', () => {
     assert.deepStrictEqual(core.HIGHLIGHT_THEMES, [
       'blue',
-      'orange',
-      'yellow',
+      'pink',
+      'red',
       'green',
+      'orange',
     ]);
     assert.strictEqual(core.DEFAULT_HIGHLIGHT_THEME, 'blue');
     for (const theme of core.HIGHLIGHT_THEMES) {
       assert.strictEqual(core.normaliseHighlightTheme(theme), theme);
     }
     assert.strictEqual(core.normaliseHighlightTheme('Blue'), 'blue');
+    // `yellow` was one of the original four and is retired: a settings file
+    // that still names it falls back rather than losing the decoration.
+    assert.strictEqual(core.normaliseHighlightTheme('yellow'), 'blue');
     assert.strictEqual(core.normaliseHighlightTheme(undefined), 'blue');
     assert.strictEqual(core.normaliseHighlightTheme(42), 'blue');
     assert.strictEqual(core.normaliseHighlightTheme(''), 'blue');

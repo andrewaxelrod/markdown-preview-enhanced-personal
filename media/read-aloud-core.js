@@ -99,8 +99,66 @@
   var READING_CLASS = 'mpe-ra-reading';
   var PILL_CLASS = 'mpe-ra-pill';
   var WORD_CLASS = 'mpe-ra-word';
-  var HIGHLIGHT_THEMES = ['blue', 'orange', 'yellow', 'green'];
+  var HIGHLIGHT_THEMES = ['blue', 'pink', 'red', 'green', 'orange'];
   var DEFAULT_HIGHLIGHT_THEME = 'blue';
+
+  // The player font (theme settings panel): an override for the preview
+  // theme's own font family. Only families a machine already has — the
+  // webview must not fetch a font over the network — so every entry is a
+  // stack that degrades to a generic family on a platform without the first
+  // choice. `default` leaves the preview theme's font alone.
+  var PLAYER_FONTS = [
+    { id: 'default', label: 'Theme default', stack: '' },
+    {
+      id: 'system',
+      label: 'System',
+      stack:
+        '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+    },
+    {
+      id: 'helvetica',
+      label: 'Helvetica',
+      stack:
+        '"Helvetica Neue", Helvetica, Arial, "Liberation Sans", sans-serif',
+    },
+    {
+      id: 'verdana',
+      label: 'Verdana',
+      stack: 'Verdana, Geneva, "DejaVu Sans", sans-serif',
+    },
+    {
+      id: 'trebuchet',
+      label: 'Trebuchet MS',
+      stack: '"Trebuchet MS", "Lucida Grande", Tahoma, sans-serif',
+    },
+    {
+      id: 'georgia',
+      label: 'Georgia',
+      stack: 'Georgia, "Times New Roman", "Liberation Serif", serif',
+    },
+    {
+      id: 'palatino',
+      label: 'Palatino',
+      stack:
+        '"Palatino Linotype", Palatino, "Book Antiqua", "URW Palladio L", serif',
+    },
+    {
+      id: 'baskerville',
+      label: 'Baskerville',
+      stack: 'Baskerville, "Libre Baskerville", Georgia, serif',
+    },
+    {
+      id: 'times',
+      label: 'Times New Roman',
+      stack: '"Times New Roman", Times, "Liberation Serif", serif',
+    },
+    {
+      id: 'menlo',
+      label: 'Menlo',
+      stack: 'Menlo, Consolas, "DejaVu Sans Mono", monospace',
+    },
+  ];
+  var DEFAULT_PLAYER_FONT = 'default';
 
   // Elements that establish a block of their own: their inline runs are
   // wrapped separately from the parent's. Anything else is treated as inline.
@@ -1384,6 +1442,29 @@
       : DEFAULT_HIGHLIGHT_THEME;
   }
 
+  /** One of PLAYER_FONTS' ids; anything else falls back to `default`. */
+  function normalisePlayerFont(value) {
+    if (typeof value === 'string') {
+      for (var i = 0; i < PLAYER_FONTS.length; i++) {
+        if (PLAYER_FONTS[i].id === value) {
+          return value;
+        }
+      }
+    }
+    return DEFAULT_PLAYER_FONT;
+  }
+
+  /** The CSS font-family stack of a font id; '' for the theme's own font. */
+  function playerFontStack(value) {
+    var id = normalisePlayerFont(value);
+    for (var i = 0; i < PLAYER_FONTS.length; i++) {
+      if (PLAYER_FONTS[i].id === id) {
+        return PLAYER_FONTS[i].stack;
+      }
+    }
+    return '';
+  }
+
   var RGB_RE =
     /^rgba?\(\s*([\d.]+)\s*[, ]\s*([\d.]+)\s*[, ]\s*([\d.]+)\s*(?:[,/]\s*([\d.]+%?)\s*)?\)$/i;
   var HEX_RE = /^#([0-9a-f]{3,8})$/i;
@@ -1475,11 +1556,15 @@
     WORD_CLASS: WORD_CLASS,
     HIGHLIGHT_THEMES: HIGHLIGHT_THEMES,
     DEFAULT_HIGHLIGHT_THEME: DEFAULT_HIGHLIGHT_THEME,
+    PLAYER_FONTS: PLAYER_FONTS,
+    DEFAULT_PLAYER_FONT: DEFAULT_PLAYER_FONT,
     decorateReadingBlock: decorateReadingBlock,
     undecorateReadingBlock: undecorateReadingBlock,
     wrapRange: wrapRange,
     unwrapSpans: unwrapSpans,
     normaliseHighlightTheme: normaliseHighlightTheme,
+    normalisePlayerFont: normalisePlayerFont,
+    playerFontStack: playerFontStack,
     backgroundLuminance: backgroundLuminance,
   };
 

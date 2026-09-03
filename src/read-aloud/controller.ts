@@ -41,11 +41,15 @@ import type {
   PlayingRequest,
   ReadAloudConfigMessage,
   ReadAloudControlAction,
+  ReadAloudFont,
+  ReadAloudHighlightTheme,
   ReadAloudKind,
   SynthesizeRequest,
 } from './messages';
 import {
   readReadAloudSettings,
+  writeFontSetting,
+  writeHighlightThemeSetting,
   writeSpeedSetting,
   writeVolumeSetting,
   type ReadAloudSettingKey,
@@ -342,6 +346,36 @@ export class ReadAloudController implements vscode.Disposable {
     }
   }
 
+  /**
+   * F13 `readAloudSetHighlightTheme`: a swatch of the theme settings sheet.
+   * The webview has already repainted; this only persists the choice, and the
+   * setting change broadcasts it to every other preview.
+   */
+  public async setHighlightTheme(
+    theme: ReadAloudHighlightTheme,
+  ): Promise<void> {
+    if (this.guardWebBuild()) {
+      return;
+    }
+    try {
+      await writeHighlightThemeSetting(theme);
+    } catch (error) {
+      readAloudLog(`highlight theme persist failed: ${String(error)}`);
+    }
+  }
+
+  /** F13 `readAloudSetFont`: the theme settings sheet's player font. */
+  public async setFont(font: ReadAloudFont): Promise<void> {
+    if (this.guardWebBuild()) {
+      return;
+    }
+    try {
+      await writeFontSetting(font);
+    } catch (error) {
+      readAloudLog(`font persist failed: ${String(error)}`);
+    }
+  }
+
   // ----------------------------------------------------------------- config
 
   /**
@@ -360,6 +394,7 @@ export class ReadAloudController implements vscode.Disposable {
       voiceName: settings.kokoroVoice,
       modelId: KOKORO_MODEL_ID,
       highlightTheme: settings.highlightTheme,
+      font: settings.font,
     };
   }
 

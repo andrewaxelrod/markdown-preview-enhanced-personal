@@ -6,15 +6,16 @@
  *      whole preview, so a block looks exactly the same before, during and
  *      after it is read. Everything is in `em`, so crossnote's zoom in / zoom
  *      out (which sets `zoom` on <body>) scales it proportionally.
- *   2. The reading decoration (F4), on its own four palettes, switched
+ *   2. The reading decoration (F4), on its own five palettes, switched
  *      between their light and dark variants by the preview background
  *      (`data-mpe-ra-scheme`, set on the preview root by read-aloud.js next
  *      to `data-mpe-ra-theme`).
  *   3. The control panel (F3): a floating pill at the bottom centre with the
- *      volume, voice model, −10 s, play/pause, +10 s, speed and close
- *      controls. It takes its own light/dark palette from the same
- *      `data-mpe-ra-scheme`, so it matches the page it floats over rather
- *      than the surrounding VS Code theme.
+ *      volume, theme settings, −10 s, play/pause, +10 s, speed and close
+ *      controls, plus the volume, speed and theme-settings popovers. It takes
+ *      its own light/dark palette from the same `data-mpe-ra-scheme`, so it
+ *      matches the page it floats over rather than the surrounding VS Code
+ *      theme.
  *
  * forced-colors gets its own overrides.
  */
@@ -111,54 +112,84 @@
  * 2a. Highlight theme palettes (F4), in the style of a reader app: `pill` is
  * the line background, `word` the spoken word, `text` the prose colour
  * inside a pill.
+ *
+ * Five palettes — blue, pink, red, green, orange. The dark variants are the
+ * colours sampled from the reference reader (enhancement/Screenshot
+ * 2026-09-02 at 4.18.41/4.18.54/4.19.25/4.52.56/4.53.18 PM.png); the light
+ * variants keep each palette's hue at a high lightness so the prose stays
+ * readable in black.
+ *
+ * The same three custom properties drive the swatches of the theme settings
+ * panel (§3c), which is why the palettes are declared on a plain attribute
+ * selector rather than on the preview root alone.
  * ----------------------------------------------------------------------- */
 
 [data-mpe-ra-theme='blue'] {
-  --mpe-ra-pill: #ddf6ff;
-  --mpe-ra-word: #73dbf3;
+  --mpe-ra-pill: #e3e7fa;
+  --mpe-ra-word: #758af0;
   --mpe-ra-text: #000000;
 }
 
-[data-mpe-ra-theme='orange'] {
-  --mpe-ra-pill: #ffeade;
-  --mpe-ra-word: #f2b074;
+[data-mpe-ra-theme='pink'] {
+  --mpe-ra-pill: #f3e7f6;
+  --mpe-ra-word: #cd88dd;
   --mpe-ra-text: #000000;
 }
 
-[data-mpe-ra-theme='yellow'] {
-  --mpe-ra-pill: #f5f5f5;
-  --mpe-ra-word: #f3da73;
+[data-mpe-ra-theme='red'] {
+  --mpe-ra-pill: #f7e7e6;
+  --mpe-ra-word: #e18b84;
   --mpe-ra-text: #000000;
 }
 
 [data-mpe-ra-theme='green'] {
-  --mpe-ra-pill: #e7ffdd;
-  --mpe-ra-word: #73f275;
+  --mpe-ra-pill: #e9f4ee;
+  --mpe-ra-word: #94d1b2;
+  --mpe-ra-text: #000000;
+}
+
+[data-mpe-ra-theme='orange'] {
+  --mpe-ra-pill: #f7efe6;
+  --mpe-ra-word: #e1b484;
   --mpe-ra-text: #000000;
 }
 
 [data-mpe-ra-scheme='dark'][data-mpe-ra-theme='blue'] {
-  --mpe-ra-pill: #41606b;
-  --mpe-ra-word: #094452;
+  --mpe-ra-pill: #444864;
+  --mpe-ra-word: #536ce8;
   --mpe-ra-text: #ffffff;
 }
 
-[data-mpe-ra-scheme='dark'][data-mpe-ra-theme='orange'] {
-  --mpe-ra-pill: #654f42;
-  --mpe-ra-word: #4c2c0f;
+[data-mpe-ra-scheme='dark'][data-mpe-ra-theme='pink'] {
+  --mpe-ra-pill: #5c4362;
+  --mpe-ra-word: #a139b8;
   --mpe-ra-text: #ffffff;
 }
 
-[data-mpe-ra-scheme='dark'][data-mpe-ra-theme='yellow'] {
-  --mpe-ra-pill: #464646;
-  --mpe-ra-word: #6e5805;
+[data-mpe-ra-scheme='dark'][data-mpe-ra-theme='red'] {
+  --mpe-ra-pill: #623532;
+  --mpe-ra-word: #af382f;
   --mpe-ra-text: #ffffff;
 }
 
 [data-mpe-ra-scheme='dark'][data-mpe-ra-theme='green'] {
-  --mpe-ra-pill: #536e49;
-  --mpe-ra-word: #3f9316;
+  --mpe-ra-pill: #2c4a40;
+  --mpe-ra-word: #3a805c;
   --mpe-ra-text: #ffffff;
+}
+
+[data-mpe-ra-scheme='dark'][data-mpe-ra-theme='orange'] {
+  --mpe-ra-pill: #4b3a24;
+  --mpe-ra-word: #9e662a;
+  --mpe-ra-text: #ffffff;
+}
+
+/* The player font (theme settings): an override for the preview theme's own
+ * family, set on the root only so code, diagrams and maths — which declare a
+ * family of their own — are left alone. `!important` because a preview theme
+ * may reach the root through a more specific selector than this one. */
+.markdown-preview.mpe-ra-font {
+  font-family: var(--mpe-ra-font-family) !important;
 }
 
 /* --------------------------------------------------------------------------
@@ -646,6 +677,183 @@
 }
 
 /* --------------------------------------------------------------------------
+ * 3c. The theme settings sheet (`featrues/control2.png`), opened from the
+ * second button of the panel: the player font, the player font size (which
+ * is the preview's own zoom) and the five highlight palettes, each shown as
+ * three lines of sample text with one word spoken.
+ *
+ * It is a taller popover in the same palette as the panel, anchored above it
+ * and centred on it, and it scrolls inside itself on a short viewport.
+ * ----------------------------------------------------------------------- */
+
+.mpe-ra-sheet {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 10px);
+  transform: translateX(-50%);
+  z-index: 2;
+  box-sizing: border-box;
+  width: 360px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 120px);
+  overflow-y: auto;
+  padding: 18px 20px 20px;
+  border: 1px solid var(--mpe-ra-panel-border);
+  border-radius: 16px;
+  background: var(--mpe-ra-panel-bg);
+  color: var(--mpe-ra-panel-fg);
+  box-shadow: var(--mpe-ra-panel-shadow);
+  font-size: 13px;
+  line-height: 1.35;
+  text-align: left;
+}
+
+.mpe-ra-sheet[hidden] {
+  display: none;
+}
+
+.mpe-ra-sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
+.mpe-ra-sheet-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+/* The × of the sheet is smaller than the panel's own buttons. */
+.mpe-ra-bar .mpe-ra-sheet-close {
+  width: 26px;
+  height: 26px;
+}
+
+.mpe-ra-bar .mpe-ra-sheet-close svg {
+  width: 17px;
+  height: 17px;
+}
+
+.mpe-ra-sheet-label {
+  display: block;
+  margin: 18px 0 8px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+/* The font chooser: a native select, so the list is the platform's own. */
+.mpe-ra-sheet-select {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 10px 32px 10px 12px;
+  border: 1px solid var(--mpe-ra-panel-border);
+  border-radius: 10px;
+  background-color: transparent;
+  /* A chevron drawn in the panel's own colour, since a native select arrow
+   * cannot be recoloured. The data URI keeps it inside the webview's CSP. */
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 15px 15px;
+  color: inherit;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.4;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.mpe-ra-sheet-select:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, #007fd4);
+  outline-offset: 1px;
+}
+
+/* The native popup list is drawn by the platform, which does not inherit the
+ * panel's transparent background. */
+.mpe-ra-sheet-select option {
+  background: var(--mpe-ra-panel-bg);
+  color: var(--mpe-ra-panel-fg);
+}
+
+.mpe-ra-sheet-range {
+  width: 100%;
+}
+
+/* Five palettes in two columns, the last one across both. */
+.mpe-ra-sheet-swatches {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.mpe-ra-sheet-swatches > :last-child {
+  grid-column: 1 / -1;
+}
+
+.mpe-ra-swatch {
+  display: block;
+  width: 100%;
+  padding: 9px;
+  border: 2px solid var(--mpe-ra-panel-border);
+  border-radius: 12px;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.mpe-ra-swatch:hover {
+  border-color: var(--mpe-ra-panel-track);
+}
+
+.mpe-ra-swatch[aria-checked='true'] {
+  border-color: var(--mpe-ra-panel-fg);
+}
+
+.mpe-ra-swatch:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, #007fd4);
+  outline-offset: 1px;
+}
+
+/* Three lines of sample text on the palette's own pill, one word spoken.
+ * The lines are separate rows so every swatch shows the same shape whatever
+ * its width. */
+.mpe-ra-swatch-line {
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  padding: 3px 5px;
+  border-radius: 4px;
+  background: var(--mpe-ra-pill);
+  color: var(--mpe-ra-text);
+  font-size: 12px;
+  line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mpe-ra-swatch-line + .mpe-ra-swatch-line {
+  margin-top: 3px;
+}
+
+.mpe-ra-swatch-word {
+  border-radius: 3px;
+  background: var(--mpe-ra-word);
+}
+
+.mpe-ra-swatch-name {
+  display: block;
+  margin-top: 6px;
+  font-size: 11px;
+  opacity: 0.75;
+}
+
+/* --------------------------------------------------------------------------
  * 4. Selection affordance and hints (F2)
  * ----------------------------------------------------------------------- */
 
@@ -686,6 +894,7 @@
   .mpe-ra-bar,
   .mpe-ra-bar-status,
   .mpe-ra-pop,
+  .mpe-ra-sheet,
   .mpe-ra-float,
   .mpe-ra-hint {
     border-color: CanvasText;
@@ -701,6 +910,17 @@
 
   .mpe-ra-btn {
     color: CanvasText;
+  }
+
+  /* The palettes are the point of the swatches, so they keep their colours;
+   * the selected card is told apart by a thicker border instead. */
+  .mpe-ra-swatch-line,
+  .mpe-ra-swatch-word {
+    forced-color-adjust: none;
+  }
+
+  .mpe-ra-swatch[aria-checked='true'] {
+    border-color: Highlight;
   }
 }
 

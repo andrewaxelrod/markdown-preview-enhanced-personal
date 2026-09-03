@@ -80,13 +80,17 @@ Categories: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Security`.
     1 s / 2 s / 4 s backoff.
   - Reading decoration: every rendered line of the block being read sits on a rounded pill and
     the spoken word gets a darker box (`.mpe-ra-pill` / `.mpe-ra-word`, text nodes split and
-    merged back so the offset map stays valid); `readAloudHighlightTheme` (`blue` default,
-    `orange`, `yellow`, `green`), light or dark variant chosen from the preview background.
+    merged back so the offset map stays valid); `readAloudHighlightTheme` — `blue`
+    (default), `pink`, `red`, `green`, `orange`, whose dark variants are the colours sampled
+    from the reference reader in `enhancement/` — light or dark variant chosen from the
+    preview background.
   - Settings: `markdown-preview-enhanced.readAloudEnabled` (default `true`),
     `readAloudClickToRead` (`true`), `kokoroVoice` (`af_heart`; `+` blends allowed),
     `kokoroBaseUrl` (`http://127.0.0.1:8880`, machine scope; plain http on localhost only),
     `readAloudSpeed` (0.25–4, default 1), `readAloudVolume` (0–1, default 1),
-    `readAloudHighlightTheme`, `readAloudCacheSizeMB`.
+    `readAloudHighlightTheme` (`blue`, `pink`, `red`, `green`, `orange`), `readAloudFont`
+    (`default`, `system`, `helvetica`, `verdana`, `trebuchet`, `georgia`, `palatino`,
+    `baskerville`, `times`, `menlo`), `readAloudCacheSizeMB`.
     Changes to any of them except `readAloudEnabled` apply live without reloading the preview.
   - Commands: `markdown-preview-enhanced.readAloud.readSelection` (`Alt+R`),
     `.togglePlayPause` (`Alt+Space`), `.stop` (`Alt+Esc`), `.chooseVoice` (QuickPick over
@@ -95,8 +99,10 @@ Categories: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Security`.
     count).
   - Messages: webview → host `readAloudSynthesize` `[sourceUri, requestId, text, { kind,
 blockId?, blocks? }]`, `readAloudCancel`, `readAloudPlaying`, `readAloudSetSpeed`,
-    `readAloudSetVolume`, `readAloudOpenSetup`; host → webview `readAloudAudio` (with
-    `blockIndex`), `readAloudError`, `readAloudConfig`, `readAloudControl`. Every payload is validated in
+    `readAloudSetVolume`, `readAloudSetHighlightTheme`, `readAloudSetFont`,
+    `readAloudOpenSetup`; host → webview `readAloudAudio` (with
+    `blockIndex`), `readAloudError`, `readAloudConfig` (which carries `font`),
+    `readAloudControl`. Every payload is validated in
     `src/read-aloud/messages.ts` before the controller sees it.
   - Files: `src/read-aloud/*.ts` (controller, chunker, speakable, cache, messages, settings,
     error mapping, log, Kokoro client, types, voices, alignment, word spans),
@@ -104,11 +110,14 @@ blockId?, blocks? }]`, `readAloudCancel`, `readAloudPlaying`, `readAloudSetSpeed
     preview `head` like the lightbox), `src/types/intl-segmenter.d.ts`, `install.sh` (build,
     package and install the `.vsix` in one step), and fifteen mocha suites under
     `test/read-aloud/` wired into `test:unit`, among them `continuous-read.test.js` for the
-    joined extraction and the re-render remap and `control-panel.test.js` for the panel. devDependency `jsdom@23.2.0`.
+    joined extraction and the re-render remap, `control-panel.test.js` for the panel and
+    `theme-settings.test.js` for the theme sheet (the zoom bridge included, against a stub of
+    crossnote's ctrl+wheel handler and against a page with no crossnote at all).
+    devDependency `jsdom@23.2.0`.
 
   - **Control panel** (F3, revised 2026-09-03): the player bar is now a rounded panel floating
     at the bottom centre of the preview, on screen whenever read aloud is enabled, with seven
-    controls — volume, a voice-model placeholder, −10 s, a filled play/pause button, +10 s, the
+    controls — volume, theme settings, −10 s, a filled play/pause button, +10 s, the
     speed and a close ×. The progress of the read is traced along the top edge of the panel, and
     _Loading…_, _Paused_, _Finished_ and errors appear above it so the panel's shape never
     changes with the length of a message. Its light or dark palette comes from the preview
@@ -134,6 +143,30 @@ blockId?, blocks? }]`, `readAloudCancel`, `readAloudPlaying`, `readAloudSetSpeed
     - **Close** stops the read and puts the panel away until the next one starts.
     - The voice button is gone with the rest of the bar; _Read aloud setup_ has its own palette
       command, **Markdown Preview Enhanced: Read Aloud Setup**.
+  - **Theme settings** (`featrues/03-control-panel-addons.md`), behind the second button of
+    the panel — a palette, in place of the voice-model placeholder — as a sheet in the panel's
+    own palette anchored above it: the player font, the player font size and the highlight
+    theme. _Global theme_ from the reference (`featrues/control2.png`) is deliberately not
+    built yet.
+    - **Player font**: an override for the preview theme's own family, applied to the preview
+      root so code, diagrams and maths keep their own. Ten choices, each a stack that degrades
+      to a generic family where the first name is missing, and every one a family a machine
+      already has: the webview never fetches a font. Persisted in the new
+      `markdown-preview-enhanced.readAloudFont` setting (webview → host `readAloudSetFont`,
+      carrying the id only — the stacks live in `media/read-aloud-core.js`, so nothing the
+      webview sends can become a `font-family` on the host).
+    - **Player font size** _is_ the preview's zoom, the one behind crossnote's own Zoom In /
+      Zoom Out: the slider moves in the same 0.1 steps, between 0.6 and 2, and drives them by
+      dispatching the synthetic ctrl+wheel events crossnote's own capture-phase handler is
+      listening for, so its `zoomLevel` state, the `Zoom (110%)` label of its context menu and
+      the elements it un-zooms (the panel among them) all stay in step. The label names the
+      resulting size in pixels, measured from the preview's own font size while the page is at
+      zoom 1. On a page with no crossnote on it the sheet notices after the first change and
+      sets `document.body.style.zoom` itself. Like crossnote's own zoom, it is not persisted.
+    - **Player highlight theme**: the five palettes as cards, each painting three lines of
+      sample text with one word spoken in the palette it offers, in the panel's own light or
+      dark scheme. The choice is applied at once and persisted through
+      `readAloudSetHighlightTheme`.
   - **One reading rhythm for the whole canvas** (`.mpe-ra-canvas`): the 2.0 line height that used
     to be applied to the block being read moved to the whole preview at 1.85, together with even
     spacing for paragraphs, lists, blockquotes, tables and headings. Starting a read no longer

@@ -144,15 +144,15 @@ diagram or math is refused with a short inline hint.
 A rounded panel floats at the bottom centre of the preview whenever read aloud is enabled, with
 seven controls, left to right:
 
-| Control          | What it does                                                                                                                                           |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Volume**       | Opens a slider, 0–100 %. Applies to the audio straight away and persists in `markdown-preview-enhanced.readAloudVolume`. The glyph follows the level.  |
-| **Voice model**  | A placeholder for the model chooser; it does nothing yet.                                                                                              |
-| **−10 s**        | Skips back ten seconds **inside the block being read**. Landing before its first word restarts the block rather than going back into the previous one. |
-| **Play / pause** | With nothing loaded, reads from the first block still on screen to the end of the document — the same read a play button in the gutter starts.         |
-| **+10 s**        | Skips forward ten seconds. Landing past the last synthesised word of the block does nothing, and the button greys out when that is the case.           |
-| **Speed**        | Shows the current rate and opens a slider, 0.25×–4×.                                                                                                   |
-| **Close**        | Stops the read and puts the panel away. The next read brings it back.                                                                                  |
+| Control            | What it does                                                                                                                                           |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Volume**         | Opens a slider, 0–100 %. Applies to the audio straight away and persists in `markdown-preview-enhanced.readAloudVolume`. The glyph follows the level.  |
+| **Theme settings** | Opens the theme settings sheet: the player font, the player font size and the highlight theme (below).                                                 |
+| **−10 s**          | Skips back ten seconds **inside the block being read**. Landing before its first word restarts the block rather than going back into the previous one. |
+| **Play / pause**   | With nothing loaded, reads from the first block still on screen to the end of the document — the same read a play button in the gutter starts.         |
+| **+10 s**          | Skips forward ten seconds. Landing past the last synthesised word of the block does nothing, and the button greys out when that is the case.           |
+| **Speed**          | Shows the current rate and opens a slider, 0.25×–4×.                                                                                                   |
+| **Close**          | Stops the read and puts the panel away. The next read brings it back.                                                                                  |
 
 Progress through the read is traced along the top edge of the panel, and _Loading…_, _Paused_,
 _Finished_ and any error appear above it so the panel's own shape never changes. The panel keeps
@@ -171,15 +171,38 @@ inside it, with their padding cancelled by a negative margin. Starting a read th
 nothing: the text keeps its size, its line breaks and its position. Every measurement is in `em`,
 so zooming the preview scales the whole canvas, decoration included.
 
-### Highlight theme
+### Theme settings
 
-While a block is being read every line sits on a rounded pill and the spoken word gets a darker
-box inside it. `markdown-preview-enhanced.readAloudHighlightTheme` picks one of four palettes,
-`blue` (default), `orange`, `yellow` or `green`. Each has a light and a dark variant; the
+The second button of the panel opens a sheet with three controls. Each takes effect at once,
+also mid-playback.
+
+| Control                    | What it does                                                                                                                  |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| **Player font**            | Overrides the preview theme's own font family. Persists in `markdown-preview-enhanced.readAloudFont`.                         |
+| **Player font size**       | The preview's zoom — the same one behind _Zoom In_ / _Zoom Out_ in the preview's context menu. Not persisted, like that zoom. |
+| **Player highlight theme** | Five palettes shown as sample cards. Persists in `markdown-preview-enhanced.readAloudHighlightTheme`.                         |
+
+_Global theme_ from the reference design is not built yet.
+
+**Player font.** Ten choices — the theme's own font, the system UI font, Helvetica, Verdana,
+Trebuchet MS, Georgia, Palatino, Baskerville, Times New Roman and Menlo. Each is a stack that
+degrades to a generic family where the first name is missing, and every family is one the
+machine already has: no font is ever fetched over the network. The override is applied to the
+preview root, so code, diagrams and maths keep their own font.
+
+**Player font size** is not a font setting at all — it is the preview's zoom, in the same 0.1
+steps the context menu's _Zoom In_ and _Zoom Out_ use, between 0.6 and 2. The label names the
+size in pixels the prose ends up at. Because it drives crossnote's own zoom, the context menu's
+`Zoom (110%)` label, ⌘-scroll and the slider all agree, and the panel keeps its size on screen
+while the text scales.
+
+**Player highlight theme.** While a block is being read every line sits on a rounded pill and
+the spoken word gets a darker box inside it.
+`markdown-preview-enhanced.readAloudHighlightTheme` picks one of five palettes: `blue`
+(default), `pink`, `red`, `green` or `orange`. Each has a light and a dark variant; the
 extension chooses the variant from the preview theme's background (`atom-dark.css` gets the
-dark one, `github-light.css` the light one), not from the VS Code colour theme. A change applies
-immediately, also mid-playback. The decoration is added when playback starts and removed when it
-ends; nothing of it reaches exports.
+dark one, `github-light.css` the light one), not from the VS Code colour theme. The decoration
+is added when playback starts and removed when it ends; nothing of it reaches exports.
 
 ### What exactly is sent
 

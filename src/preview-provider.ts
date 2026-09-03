@@ -78,8 +78,8 @@ const WORKSPACE_PREVIEW_PROVIDER_MAP: Map<string, PreviewProvider> = new Map();
  * match the panel's current target before the command is dispatched. This is
  * the `updateMarkdown` identity check generalised to the read-aloud commands
  * that also carry a `sourceUri` (spec F13; `readAloudSetSpeed`,
- * `readAloudSetVolume` and `readAloudOpenSetup` carry none and are validated
- * by type only).
+ * `readAloudSetVolume`, `readAloudSetHighlightTheme`, `readAloudSetFont` and
+ * `readAloudOpenSetup` carry none and are validated by type only).
  */
 const SOURCE_URI_GUARDED_COMMANDS: Set<string> = new Set([
   'updateMarkdown',
@@ -120,6 +120,8 @@ const WEBVIEW_MESSAGE_COMMANDS: Set<string> = new Set([
   'readAloudCancel',
   'readAloudOpenSetup',
   'readAloudPlaying',
+  'readAloudSetFont',
+  'readAloudSetHighlightTheme',
   'readAloudSetSpeed',
   'readAloudSetVolume',
   'readAloudSynthesize',

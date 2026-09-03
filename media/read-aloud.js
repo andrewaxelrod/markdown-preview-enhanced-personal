@@ -51,6 +51,17 @@
   // read — a rewind past its first word restarts the block, a forward past
   // its last word does nothing.
   var SEEK_SECONDS = 10;
+  // The theme settings sheet's font-size slider is crossnote's own zoom: it
+  // moves in the same 0.1 steps the preview's Zoom In / Zoom Out use, over a
+  // reading range narrower than crossnote's own 0.2–5.
+  var ZOOM_STEP = 0.1;
+  var ZOOM_MIN = 0.6;
+  var ZOOM_MAX = 2;
+  var FALLBACK_BASE_FONT_PX = 16;
+  // How long crossnote's React state and its zoom effect are given to answer
+  // the synthetic ctrl+wheel events before the sheet falls back to setting
+  // the zoom itself.
+  var ZOOM_PROBE_MS = 120;
   var ERROR_DISPLAY_MS = 4000;
   var FINISH_DISPLAY_MS = 4000;
   var HINT_MS = 2500;
@@ -122,13 +133,14 @@
     volumeLow: STROKE + SPEAKER + '<path d="M15.5 9.3a4 4 0 0 1 0 5.4"/></svg>',
     volumeMute:
       STROKE + SPEAKER + '<path d="m16.4 9.6 5 4.8m0-4.8-5 4.8"/></svg>',
-    // Placeholder for the voice-model chooser (a chip): the panel keeps its
-    // slot until the chooser itself is built.
-    model:
+    // Theme settings (the second button): a painter's palette.
+    theme:
       STROKE +
-      '<rect x="7" y="7" width="10" height="10" rx="2.2"/>' +
-      '<rect x="10.2" y="10.2" width="3.6" height="3.6" rx="1"/>' +
-      '<path d="M10 4v3M14 4v3M10 17v3M14 17v3M4 10h3M4 14h3M17 10h3M17 14h3"/>' +
+      '<path d="M12 3.2a8.8 8.8 0 0 0 0 17.6c1.1 0 1.9-.85 1.9-1.85 0-.5-.2-.92-.5-1.24-.3-.33-.5-.75-.5-1.25 0-1 .84-1.86 1.9-1.86h2.05A4.35 4.35 0 0 0 21 10.25C21 6.32 16.97 3.2 12 3.2Z"/>' +
+      '<circle cx="7.6" cy="12" r="1.15" fill="currentColor" stroke="none"/>' +
+      '<circle cx="9.7" cy="8.1" r="1.15" fill="currentColor" stroke="none"/>' +
+      '<circle cx="14.3" cy="7.8" r="1.15" fill="currentColor" stroke="none"/>' +
+      '<circle cx="17.4" cy="11" r="1.15" fill="currentColor" stroke="none"/>' +
       '</svg>',
     back10:
       STROKE +
@@ -167,6 +179,7 @@
     voiceName: '',
     modelId: '',
     highlightTheme: core.DEFAULT_HIGHLIGHT_THEME,
+    font: core.DEFAULT_PLAYER_FONT,
   };
   try {
     if (
@@ -187,6 +200,7 @@
         config.highlightTheme = core.normaliseHighlightTheme(
           parsed.highlightTheme,
         );
+        config.font = core.normalisePlayerFont(parsed.font);
       }
     }
   } catch (error) {
@@ -220,6 +234,18 @@
   var speedTimer = 0;
   var volumeTimer = 0;
   var selectionTimer = 0;
+
+  // The preview's zoom, as the theme settings sheet means it to be. It is
+  // driven through crossnote's own ctrl+wheel handler (section 7b), whose
+  // React state settles a tick later, so the sheet keeps the value it asked
+  // for rather than reading the DOM back on every tick of the slider.
+  var zoomIntent = 1;
+  // null until the first change tells us whether crossnote's handler is
+  // there; false means the sheet sets `document.body.style.zoom` itself.
+  var zoomHandled = null;
+  var zoomProbeTimer = 0;
+  // The preview's font size with no zoom, measured once from the root.
+  var baseFontPx = 0;
 
   var lastUserScrollAt = 0;
   var programmaticScrollUntil = 0;
@@ -587,10 +613,10 @@
   // 7. Control panel (F3)
   //
   // A pill at the bottom centre of the preview, in the geometry of a reader
-  // app: volume, voice model (a placeholder until the chooser is built),
-  // −10 s, play/pause, +10 s, speed and close. It is on screen whenever read
-  // aloud is enabled — pressing play with nothing loaded starts a read at the
-  // first block in view — and the × puts it away until the next read.
+  // app: volume, theme settings, −10 s, play/pause, +10 s, speed and close.
+  // It is on screen whenever read aloud is enabled — pressing play with
+  // nothing loaded starts a read at the first block in view — and the × puts
+  // it away until the next read.
   //
   // The panel carries Tailwind's `fixed`, which crossnote's zoom effect uses
   // to divide the body zoom out again, so the panel keeps its size on screen
@@ -654,6 +680,141 @@
     return { root: popover, range: range, value: value };
   }
 
+  /**
+   * The theme settings sheet (`featrues/control2.png`): the player font, the
+   * player font size — which is the preview's own zoom — and the five
+   * highlight palettes. "Global theme" is deliberately not built yet.
+   */
+  function makeSheet() {
+    var sheet = document.createElement('div');
+    sheet.className = 'mpe-ra-ui mpe-ra-sheet';
+    sheet.setAttribute('role', 'dialog');
+    sheet.setAttribute('aria-label', 'Theme settings');
+    sheet.hidden = true;
+
+    var head = document.createElement('div');
+    head.className = 'mpe-ra-sheet-head';
+    var title = document.createElement('span');
+    title.className = 'mpe-ra-sheet-title';
+    title.textContent = 'Theme settings';
+    var close = makeIconButton(
+      'themeClose',
+      'Close theme settings',
+      'mpe-ra-bar-btn mpe-ra-sheet-close',
+      'close',
+    );
+    head.appendChild(title);
+    head.appendChild(close);
+
+    var fontLabel = document.createElement('label');
+    fontLabel.className = 'mpe-ra-sheet-label';
+    fontLabel.textContent = 'Player font';
+    var fontSelect = document.createElement('select');
+    fontSelect.className = 'mpe-ra-ui mpe-ra-sheet-select mpe-ra-sheet-font';
+    for (var i = 0; i < core.PLAYER_FONTS.length; i++) {
+      var font = core.PLAYER_FONTS[i];
+      var option = document.createElement('option');
+      option.value = font.id;
+      option.textContent = font.label;
+      if (font.stack) {
+        option.style.fontFamily = font.stack;
+      }
+      fontSelect.appendChild(option);
+    }
+    fontLabel.appendChild(fontSelect);
+
+    var sizeLabel = document.createElement('label');
+    sizeLabel.className = 'mpe-ra-sheet-label mpe-ra-sheet-size-label';
+    var sizeText = document.createTextNode('');
+    sizeLabel.appendChild(sizeText);
+    var sizeRange = document.createElement('input');
+    sizeRange.className =
+      'mpe-ra-ui mpe-ra-pop-range mpe-ra-sheet-range mpe-ra-sheet-size';
+    sizeRange.type = 'range';
+    sizeRange.min = String(ZOOM_MIN);
+    sizeRange.max = String(ZOOM_MAX);
+    sizeRange.step = String(ZOOM_STEP);
+    sizeRange.setAttribute('aria-label', 'Player font size');
+    sizeLabel.appendChild(sizeRange);
+
+    var themeLabel = document.createElement('span');
+    themeLabel.className = 'mpe-ra-sheet-label';
+    themeLabel.textContent = 'Player highlight theme';
+
+    var swatches = document.createElement('div');
+    swatches.className = 'mpe-ra-sheet-swatches';
+    swatches.setAttribute('role', 'radiogroup');
+    swatches.setAttribute('aria-label', 'Player highlight theme');
+    var swatchByTheme = Object.create(null);
+    for (var t = 0; t < core.HIGHLIGHT_THEMES.length; t++) {
+      var theme = core.HIGHLIGHT_THEMES[t];
+      var swatch = makeSwatch(theme);
+      swatchByTheme[theme] = swatch;
+      swatches.appendChild(swatch);
+    }
+
+    sheet.appendChild(head);
+    sheet.appendChild(fontLabel);
+    sheet.appendChild(sizeLabel);
+    sheet.appendChild(themeLabel);
+    sheet.appendChild(swatches);
+
+    return {
+      root: sheet,
+      font: fontSelect,
+      sizeRange: sizeRange,
+      sizeText: sizeText,
+      swatches: swatchByTheme,
+    };
+  }
+
+  /** One palette card: three lines of sample text with one word spoken. */
+  function makeSwatch(theme) {
+    var button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'mpe-ra-ui mpe-ra-swatch';
+    button.setAttribute('data-mpe-ra-action', 'highlightTheme');
+    button.setAttribute('data-mpe-ra-theme-choice', theme);
+    // The palettes of media/read-aloud.css are keyed on these two attributes,
+    // so a swatch paints itself exactly as the preview would.
+    button.setAttribute('data-mpe-ra-theme', theme);
+    button.setAttribute('role', 'radio');
+    button.setAttribute('aria-checked', 'false');
+    var name = theme.charAt(0).toUpperCase() + theme.slice(1);
+    button.setAttribute('aria-label', name + ' highlight theme');
+
+    var lines = [
+      ['In a world where', -1],
+      ['melodies dance and', 0],
+      ['dreams take flight', -1],
+    ];
+    for (var i = 0; i < lines.length; i++) {
+      var line = document.createElement('span');
+      line.className = 'mpe-ra-swatch-line';
+      var words = lines[i][0].split(' ');
+      for (var w = 0; w < words.length; w++) {
+        if (w > 0) {
+          line.appendChild(document.createTextNode(' '));
+        }
+        if (w === lines[i][1]) {
+          var spoken = document.createElement('span');
+          spoken.className = 'mpe-ra-swatch-word';
+          spoken.textContent = words[w];
+          line.appendChild(spoken);
+        } else {
+          line.appendChild(document.createTextNode(words[w]));
+        }
+      }
+      button.appendChild(line);
+    }
+
+    var caption = document.createElement('span');
+    caption.className = 'mpe-ra-swatch-name';
+    caption.textContent = name;
+    button.appendChild(caption);
+    return button;
+  }
+
   function ensureBar() {
     if (bar && bar.isConnected) {
       return bar;
@@ -693,13 +854,14 @@
     volumeButton.setAttribute('aria-haspopup', 'true');
     volumeButton.setAttribute('aria-expanded', 'false');
 
-    var model = makeIconButton(
-      'model',
-      'Voice model (coming soon)',
-      'mpe-ra-bar-btn mpe-ra-bar-model',
-      'model',
+    var themeButton = makeIconButton(
+      'theme',
+      'Theme settings',
+      'mpe-ra-bar-btn mpe-ra-bar-theme',
+      'theme',
     );
-    model.setAttribute('aria-disabled', 'true');
+    themeButton.setAttribute('aria-haspopup', 'dialog');
+    themeButton.setAttribute('aria-expanded', 'false');
 
     var back = makeIconButton(
       'back10',
@@ -736,12 +898,15 @@
       'close',
     );
 
+    var sheet = makeSheet();
+
     bar.appendChild(progress);
     bar.appendChild(status);
     bar.appendChild(volumePop.root);
     bar.appendChild(speedPop.root);
+    bar.appendChild(sheet.root);
     bar.appendChild(volumeButton);
-    bar.appendChild(model);
+    bar.appendChild(themeButton);
     bar.appendChild(back);
     bar.appendChild(play);
     bar.appendChild(forward);
@@ -755,7 +920,8 @@
       status: status,
       volume: volumeButton,
       volumePop: volumePop,
-      model: model,
+      theme: themeButton,
+      sheet: sheet,
       back: back,
       play: play,
       forward: forward,
@@ -770,11 +936,18 @@
     volumePop.range.addEventListener('input', function () {
       applyVolume(parseFloat(volumePop.range.value), true, volumePop.range);
     });
+    sheet.font.addEventListener('change', function () {
+      applyFont(sheet.font.value, true);
+    });
+    sheet.sizeRange.addEventListener('input', function () {
+      applyZoom(parseFloat(sheet.sizeRange.value), sheet.sizeRange);
+    });
     bar.addEventListener('keydown', onBarKeydown);
 
     applyBarScheme();
     syncSpeedControls();
     syncVolumeControls();
+    syncSheet();
     renderBar();
     return bar;
   }
@@ -785,8 +958,20 @@
       return;
     }
     var scheme = root.getAttribute('data-mpe-ra-scheme');
-    if (scheme) {
-      bar.setAttribute('data-mpe-ra-scheme', scheme);
+    if (!scheme) {
+      return;
+    }
+    bar.setAttribute('data-mpe-ra-scheme', scheme);
+    if (!barParts || !barParts.sheet) {
+      return;
+    }
+    // The palettes are keyed on the theme and the scheme together, on one
+    // element, so every swatch carries the scheme as well as its own theme.
+    for (var i = 0; i < core.HIGHLIGHT_THEMES.length; i++) {
+      barParts.sheet.swatches[core.HIGHLIGHT_THEMES[i]].setAttribute(
+        'data-mpe-ra-scheme',
+        scheme,
+      );
     }
   }
 
@@ -1003,30 +1188,58 @@
 
   // ------------------------------------------------------------- popovers
 
+  var POPOVER_NAMES = ['volume', 'speed', 'theme'];
+
   function popoverFor(name) {
     if (!barParts) {
       return null;
     }
     if (name === 'volume') {
-      return { pop: barParts.volumePop, button: barParts.volume };
+      return {
+        pop: barParts.volumePop.root,
+        focus: barParts.volumePop.range,
+        button: barParts.volume,
+      };
     }
     if (name === 'speed') {
-      return { pop: barParts.speedPop, button: barParts.speed };
+      return {
+        pop: barParts.speedPop.root,
+        focus: barParts.speedPop.range,
+        button: barParts.speed,
+      };
+    }
+    if (name === 'theme') {
+      return {
+        pop: barParts.sheet.root,
+        focus: barParts.sheet.font,
+        button: barParts.theme,
+      };
     }
     return null;
+  }
+
+  function anyPopoverOpen() {
+    if (!barParts) {
+      return false;
+    }
+    for (var i = 0; i < POPOVER_NAMES.length; i++) {
+      if (!popoverFor(POPOVER_NAMES[i]).pop.hidden) {
+        return true;
+      }
+    }
+    return false;
   }
 
   function closePopovers(except) {
     if (!barParts) {
       return;
     }
-    var names = ['volume', 'speed'];
-    for (var i = 0; i < names.length; i++) {
-      if (names[i] === except) {
+    for (var i = 0; i < POPOVER_NAMES.length; i++) {
+      if (POPOVER_NAMES[i] === except) {
         continue;
       }
-      var found = popoverFor(names[i]);
-      found.pop.root.hidden = true;
+      var found = popoverFor(POPOVER_NAMES[i]);
+      found.pop.hidden = true;
       found.button.setAttribute('aria-expanded', 'false');
     }
   }
@@ -1036,12 +1249,242 @@
     if (!found) {
       return;
     }
-    var open = found.pop.root.hidden;
+    var open = found.pop.hidden;
     closePopovers(name);
-    found.pop.root.hidden = !open;
+    found.pop.hidden = !open;
     found.button.setAttribute('aria-expanded', open ? 'true' : 'false');
-    if (open && lastGestureWasKey && found.pop.range.focus) {
-      found.pop.range.focus();
+    if (open) {
+      if (name === 'theme') {
+        // Somebody may have zoomed from crossnote's own menu since the sheet
+        // was last open.
+        adoptZoomFromPage();
+        syncSheet();
+      }
+      if (lastGestureWasKey && found.focus && found.focus.focus) {
+        found.focus.focus();
+      }
+    }
+  }
+
+  // ------------------------------------------------ 7b. Theme settings
+
+  /**
+   * The zoom the page is actually on, from `document.body.style.zoom` —
+   * which is where crossnote's zoom effect writes it. 1 when it has never
+   * been set, or when the engine does not support the property.
+   */
+  function pageZoom() {
+    var text = '';
+    try {
+      text = document.body.style.zoom || '';
+    } catch (error) {
+      text = '';
+    }
+    var raw = parseFloat(text);
+    // CSSOM may hand a `zoom` back as a percentage.
+    if (text.charAt(text.length - 1) === '%') {
+      raw /= 100;
+    }
+    return isFinite(raw) && raw > 0 ? raw : 1;
+  }
+
+  function roundZoom(value) {
+    return Math.round(value * 100) / 100;
+  }
+
+  function clampZoom(value) {
+    if (typeof value !== 'number' || !isFinite(value)) {
+      return 1;
+    }
+    return roundZoom(Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, value)));
+  }
+
+  /** Follow a zoom the reader made from crossnote's own menu or ctrl+wheel. */
+  function adoptZoomFromPage() {
+    if (zoomHandled === false) {
+      return;
+    }
+    var live = roundZoom(pageZoom());
+    if (Math.abs(live - zoomIntent) > 0.001) {
+      zoomIntent = live;
+    }
+  }
+
+  /**
+   * The preview's own font size, with no zoom on it — what the sheet's label
+   * multiplies by the zoom to name a size in pixels.
+   *
+   * Measured again on every read while the page is at zoom 1, so a preview
+   * theme that arrives after the player did is picked up, and frozen at the
+   * last such value while the page is zoomed: engines disagree over whether
+   * a computed font size carries the body zoom, and at zoom 1 they cannot.
+   */
+  function baseFontSize() {
+    if (pageZoom() === 1) {
+      var measured = NaN;
+      try {
+        measured = parseFloat(
+          window.getComputedStyle(root || document.body).fontSize,
+        );
+      } catch (error) {
+        measured = NaN;
+      }
+      if (isFinite(measured) && measured > 0) {
+        baseFontPx = measured;
+      }
+    }
+    return baseFontPx > 0 ? baseFontPx : FALLBACK_BASE_FONT_PX;
+  }
+
+  /**
+   * Zoom the preview to `level`, the same 0.1 steps as crossnote's Zoom In
+   * and Zoom Out: a synthetic ctrl+wheel event per step, which crossnote's
+   * own capture-phase handler turns into its `zoomLevel` state. Going
+   * through crossnote rather than writing `document.body.style.zoom`
+   * directly is what keeps the panel — and the context menu, and crossnote's
+   * own "Zoom (110%)" label — in step with the text.
+   *
+   * `from` is the slider the value came from, if any (see syncSpeedControls).
+   */
+  function applyZoom(level, from) {
+    var target = clampZoom(level);
+    var steps = Math.round((target - zoomIntent) / ZOOM_STEP);
+    zoomIntent = target;
+    syncSheet(from);
+    if (!steps) {
+      return;
+    }
+    if (zoomHandled !== false) {
+      for (var i = 0; i < Math.abs(steps); i++) {
+        dispatchZoomWheel(steps > 0);
+      }
+      probeZoom();
+      return;
+    }
+    applyZoomDirectly(target);
+  }
+
+  function dispatchZoomWheel(zoomIn) {
+    try {
+      document.dispatchEvent(
+        new WheelEvent('wheel', {
+          bubbles: true,
+          cancelable: true,
+          ctrlKey: true,
+          deltaY: zoomIn ? -120 : 120,
+        }),
+      );
+    } catch (error) {
+      zoomHandled = false;
+    }
+  }
+
+  /**
+   * Once, after the first change: did crossnote take the wheel events? If it
+   * did not — no crossnote on the page, or a build without the handler — the
+   * sheet keeps the zoom itself from here on.
+   */
+  function probeZoom() {
+    if (zoomHandled !== null || zoomProbeTimer) {
+      return;
+    }
+    zoomProbeTimer = setTimeout(function () {
+      zoomProbeTimer = 0;
+      if (zoomHandled !== null) {
+        return;
+      }
+      if (Math.abs(roundZoom(pageZoom()) - zoomIntent) < 0.001) {
+        zoomHandled = true;
+        return;
+      }
+      zoomHandled = false;
+      applyZoomDirectly(zoomIntent);
+    }, ZOOM_PROBE_MS);
+  }
+
+  /**
+   * The fallback: what crossnote's zoom effect does, including dividing the
+   * zoom out again on the elements that must keep their size on screen (the
+   * panel carries `fixed` for exactly that reason).
+   */
+  function applyZoomDirectly(level) {
+    try {
+      document.body.style.zoom = String(level);
+      var inverse = level === 1 ? '' : String(1 / level);
+      var fixed = document.querySelectorAll('.fixed, .contexify');
+      for (var i = 0; i < fixed.length; i++) {
+        fixed[i].style.zoom = inverse;
+      }
+    } catch (error) {
+      /* an engine without `zoom`: the sheet's label is still honest */
+    }
+  }
+
+  /** The player font: an override for the preview theme's own family. */
+  function applyFont(value, persist) {
+    config.font = core.normalisePlayerFont(value);
+    applyFontToRoot();
+    syncSheet();
+    if (persist) {
+      post('readAloudSetFont', [config.font]);
+    }
+  }
+
+  function applyFontToRoot() {
+    if (!root) {
+      return;
+    }
+    var stack = core.playerFontStack(config.font);
+    try {
+      if (stack) {
+        root.style.setProperty('--mpe-ra-font-family', stack);
+      } else {
+        root.style.removeProperty('--mpe-ra-font-family');
+      }
+    } catch (error) {
+      /* cosmetic only */
+    }
+    root.classList.toggle('mpe-ra-font', !!stack);
+  }
+
+  /** The highlight palette: applied at once, persisted through the host. */
+  function applyHighlightTheme(value, persist) {
+    config.highlightTheme = core.normaliseHighlightTheme(value);
+    applyThemeAttributes();
+    syncSheet();
+    if (persist) {
+      post('readAloudSetHighlightTheme', [config.highlightTheme]);
+    }
+  }
+
+  /** Every control of the sheet, from `config` and `zoomIntent`. */
+  function syncSheet(from) {
+    if (!barParts || !barParts.sheet) {
+      return;
+    }
+    var sheet = barParts.sheet;
+    if (sheet.font.value !== config.font) {
+      sheet.font.value = config.font;
+    }
+    var px = Math.round(baseFontSize() * zoomIntent);
+    sheet.sizeText.data = 'Player font size: ' + px + 'px';
+    sheet.sizeRange.setAttribute(
+      'aria-valuetext',
+      px + ' pixels, ' + Math.round(zoomIntent * 100) + ' percent',
+    );
+    if (sheet.sizeRange !== from) {
+      sheet.sizeRange.value = String(zoomIntent);
+    }
+    setRangeFill(
+      sheet.sizeRange,
+      (zoomIntent - ZOOM_MIN) / (ZOOM_MAX - ZOOM_MIN),
+    );
+    for (var i = 0; i < core.HIGHLIGHT_THEMES.length; i++) {
+      var theme = core.HIGHLIGHT_THEMES[i];
+      sheet.swatches[theme].setAttribute(
+        'aria-checked',
+        theme === config.highlightTheme ? 'true' : 'false',
+      );
     }
   }
 
@@ -1050,10 +1493,7 @@
   function onBarKeydown(event) {
     if (event.key === 'Escape') {
       event.preventDefault();
-      if (
-        barParts &&
-        !(barParts.volumePop.root.hidden && barParts.speedPop.root.hidden)
-      ) {
+      if (anyPopoverOpen()) {
         closePopovers();
         return;
       }
@@ -1404,6 +1844,7 @@
     applyThemeAttributes();
     applyClickClass();
     applyCanvasClasses();
+    applyFontToRoot();
     applyGutter();
     rebindAfterRender();
   }
@@ -1457,6 +1898,8 @@
       root.classList.remove(CLICK_CLASS);
       root.classList.remove(CANVAS_CLASS);
       root.classList.remove(PANEL_CLASS);
+      root.classList.remove('mpe-ra-font');
+      root.style.removeProperty('--mpe-ra-font-family');
     }
     blocks = [];
     blocksByKey = Object.create(null);
@@ -2830,7 +3273,7 @@
     endJob({ next: 'idle', reason: 'stop' });
   }
 
-  function handleAction(action) {
+  function handleAction(action, element) {
     if (action === 'play') {
       closePopovers();
       handleTogglePlayPause();
@@ -2848,12 +3291,19 @@
       handleSeek(SEEK_SECONDS);
       return;
     }
-    if (action === 'volume' || action === 'speed') {
+    if (action === 'volume' || action === 'speed' || action === 'theme') {
       togglePopover(action);
       return;
     }
-    if (action === 'model') {
-      // Placeholder: the voice-model chooser is not built yet.
+    if (action === 'themeClose') {
+      closePopovers();
+      return;
+    }
+    if (action === 'highlightTheme') {
+      applyHighlightTheme(
+        element ? element.getAttribute('data-mpe-ra-theme-choice') : '',
+        true,
+      );
       return;
     }
     if (action === 'close') {
@@ -2966,6 +3416,10 @@
         message.highlightTheme,
       );
     }
+    if (typeof message.font === 'string') {
+      config.font = core.normalisePlayerFont(message.font);
+      applyFontToRoot();
+    }
     if (typeof message.speed === 'number') {
       var incoming = normaliseRate(message.speed);
       if (incoming !== rate) {
@@ -2999,6 +3453,7 @@
     }
     syncSpeedControls();
     syncVolumeControls();
+    syncSheet();
   }
 
   function handleControl(action) {
@@ -3081,14 +3536,18 @@
     event.stopPropagation();
     var actionElement = element.closest('[data-mpe-ra-action]');
     if (!actionElement) {
-      // Inside a popover: leave it open while its slider is being used.
-      if (!element.closest('.mpe-ra-pop')) {
+      // Inside a popover or the theme settings sheet: leave it open while
+      // its own controls are being used.
+      if (!element.closest('.mpe-ra-pop, .mpe-ra-sheet')) {
         closePopovers();
       }
       return;
     }
     event.preventDefault();
-    handleAction(actionElement.getAttribute('data-mpe-ra-action'));
+    handleAction(
+      actionElement.getAttribute('data-mpe-ra-action'),
+      actionElement,
+    );
   }
 
   function markUserScroll() {

@@ -217,12 +217,14 @@ suite('read-aloud control panel (F3)', function () {
   test('the panel is on screen from the start with the seven controls in order', function () {
     assert.ok(bar(), 'the panel exists; logs: ' + logs.join('\n'));
     assert.strictEqual(bar().hidden, false, 'and is visible while idle');
-    const order = Array.from(bar().querySelectorAll('button')).map((el) =>
-      el.getAttribute('data-mpe-ra-action'),
+    // The panel's own row; the popovers and the theme settings sheet carry
+    // buttons of their own.
+    const order = Array.from(bar().querySelectorAll(':scope > button')).map(
+      (el) => el.getAttribute('data-mpe-ra-action'),
     );
     assert.deepStrictEqual(order, [
       'volume',
-      'model',
+      'theme',
       'back10',
       'play',
       'forward10',
@@ -230,11 +232,6 @@ suite('read-aloud control panel (F3)', function () {
       'close',
     ]);
     assert.strictEqual(button('speed').textContent, '1×');
-    assert.strictEqual(
-      button('model').getAttribute('aria-disabled'),
-      'true',
-      'the model chooser is a placeholder',
-    );
     assert.strictEqual(button('back10').disabled, true, 'nothing to skip yet');
     assert.strictEqual(button('forward10').disabled, true);
     // The canvas classes carry the reading rhythm and the room for the panel.
@@ -243,10 +240,16 @@ suite('read-aloud control panel (F3)', function () {
     assert.ok(root.classList.contains('mpe-ra-panel'));
   });
 
-  test('the model placeholder does nothing at all', function () {
-    const before = posted.length;
-    click(button('model'));
-    assert.strictEqual(posted.length, before, 'nothing was posted');
+  test('the theme button opens the theme settings sheet, and closes it again', function () {
+    const sheet = bar().querySelector('.mpe-ra-sheet');
+    assert.ok(sheet, 'the sheet is built with the panel');
+    assert.strictEqual(sheet.hidden, true, 'and starts closed');
+    click(button('theme'));
+    assert.strictEqual(sheet.hidden, false);
+    assert.strictEqual(button('theme').getAttribute('aria-expanded'), 'true');
+    click(button('theme'));
+    assert.strictEqual(sheet.hidden, true);
+    assert.strictEqual(button('theme').getAttribute('aria-expanded'), 'false');
   });
 
   test('the speed popover moves the rate, and the volume popover the volume', async function () {

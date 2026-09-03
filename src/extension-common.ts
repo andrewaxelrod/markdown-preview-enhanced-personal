@@ -8,6 +8,8 @@ import { readAloudLog } from './read-aloud/log';
 import {
   parseCancelArgs,
   parsePlayingArgs,
+  parseSetFontArgs,
+  parseSetHighlightThemeArgs,
   parseSetSpeedArgs,
   parseSetVolumeArgs,
   parseSynthesizeArgs,
@@ -1902,6 +1904,34 @@ export async function initExtensionCommon(context: vscode.ExtensionContext) {
           return;
         }
         await readAloud.setVolume(level);
+      },
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      '_crossnote.readAloudSetHighlightTheme',
+      async (...args: unknown[]) => {
+        const theme = parseSetHighlightThemeArgs(args);
+        if (theme === undefined) {
+          readAloudLog('dropped invalid readAloudSetHighlightTheme message');
+          return;
+        }
+        await readAloud.setHighlightTheme(theme);
+      },
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      '_crossnote.readAloudSetFont',
+      async (...args: unknown[]) => {
+        const font = parseSetFontArgs(args);
+        if (font === undefined) {
+          readAloudLog('dropped invalid readAloudSetFont message');
+          return;
+        }
+        await readAloud.setFont(font);
       },
     ),
   );

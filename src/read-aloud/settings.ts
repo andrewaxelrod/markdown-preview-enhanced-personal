@@ -11,11 +11,13 @@ import {
   clampSpeed,
   clampVolume,
   normaliseHighlightTheme,
+  normalisePlayerFont,
+  type ReadAloudFont,
   type ReadAloudHighlightTheme,
 } from './messages';
 
 /**
- * Typed accessors for the eight `markdown-preview-enhanced.readAloud*` /
+ * Typed accessors for the nine `markdown-preview-enhanced.readAloud*` /
  * `kokoro*` settings (spec §4.1).
  *
  * They are ordinary VS Code settings read through `getMPEConfig`, deliberately
@@ -30,6 +32,7 @@ export const READ_ALOUD_SETTING_KEYS = [
   'readAloudSpeed',
   'readAloudVolume',
   'readAloudHighlightTheme',
+  'readAloudFont',
   'readAloudCacheSizeMB',
   'kokoroBaseUrl',
 ] as const;
@@ -43,6 +46,7 @@ export interface ReadAloudSettings {
   speed: number;
   volume: number;
   highlightTheme: ReadAloudHighlightTheme;
+  font: ReadAloudFont;
   cacheSizeMB: number;
   kokoroBaseUrl: string;
 }
@@ -73,6 +77,7 @@ export function readReadAloudSettings(): ReadAloudSettings {
   const speedRaw = getMPEConfig<number>('readAloudSpeed');
   const volumeRaw = getMPEConfig<number>('readAloudVolume');
   const themeRaw = getMPEConfig<string>('readAloudHighlightTheme');
+  const fontRaw = getMPEConfig<string>('readAloudFont');
   const kokoroBaseUrlRaw = getMPEConfig<string>('kokoroBaseUrl');
 
   let kokoroBaseUrl = DEFAULT_KOKORO_BASE_URL;
@@ -102,6 +107,7 @@ export function readReadAloudSettings(): ReadAloudSettings {
     speed: clampSpeed(typeof speedRaw === 'number' ? speedRaw : 1),
     volume: clampVolume(typeof volumeRaw === 'number' ? volumeRaw : 1),
     highlightTheme: normaliseHighlightTheme(themeRaw),
+    font: normalisePlayerFont(fontRaw),
     cacheSizeMB: readInteger('readAloudCacheSizeMB', 100, 1),
     kokoroBaseUrl,
   };
@@ -147,4 +153,14 @@ export async function writeSpeedSetting(rate: number): Promise<void> {
 
 export async function writeVolumeSetting(level: number): Promise<void> {
   await updateMPEConfig('readAloudVolume', level, true);
+}
+
+export async function writeHighlightThemeSetting(
+  theme: ReadAloudHighlightTheme,
+): Promise<void> {
+  await updateMPEConfig('readAloudHighlightTheme', theme, true);
+}
+
+export async function writeFontSetting(font: ReadAloudFont): Promise<void> {
+  await updateMPEConfig('readAloudFont', font, true);
 }

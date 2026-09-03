@@ -31,10 +31,16 @@ export const VOLUME_MIN = 0;
 export const VOLUME_MAX = 1;
 
 /**
- * F4 — the four highlight palettes. Same list as `HIGHLIGHT_THEMES` in
+ * F4 — the five highlight palettes. Same list as `HIGHLIGHT_THEMES` in
  * media/read-aloud-core.js; the colours live in media/read-aloud.css.
  */
-export const HIGHLIGHT_THEMES = ['blue', 'orange', 'yellow', 'green'] as const;
+export const HIGHLIGHT_THEMES = [
+  'blue',
+  'pink',
+  'red',
+  'green',
+  'orange',
+] as const;
 export type ReadAloudHighlightTheme = (typeof HIGHLIGHT_THEMES)[number];
 export const DEFAULT_HIGHLIGHT_THEME: ReadAloudHighlightTheme = 'blue';
 
@@ -45,6 +51,35 @@ export function normaliseHighlightTheme(
     (HIGHLIGHT_THEMES as readonly string[]).includes(value)
     ? (value as ReadAloudHighlightTheme)
     : DEFAULT_HIGHLIGHT_THEME;
+}
+
+/**
+ * The player font of the theme settings sheet: an override for the preview
+ * theme's own family. Same ids as `PLAYER_FONTS` in
+ * media/read-aloud-core.js, which is where the font stacks live — the host
+ * only ever carries the id, so nothing the webview sends can turn into a
+ * font-family declaration here.
+ */
+export const PLAYER_FONTS = [
+  'default',
+  'system',
+  'helvetica',
+  'verdana',
+  'trebuchet',
+  'georgia',
+  'palatino',
+  'baskerville',
+  'times',
+  'menlo',
+] as const;
+export type ReadAloudFont = (typeof PLAYER_FONTS)[number];
+export const DEFAULT_PLAYER_FONT: ReadAloudFont = 'default';
+
+export function normalisePlayerFont(value: unknown): ReadAloudFont {
+  return typeof value === 'string' &&
+    (PLAYER_FONTS as readonly string[]).includes(value)
+    ? (value as ReadAloudFont)
+    : DEFAULT_PLAYER_FONT;
 }
 
 export type ReadAloudKind = 'block' | 'selection';
@@ -125,6 +160,8 @@ export interface ReadAloudConfigMessage {
   voiceName: string;
   modelId: string;
   highlightTheme: ReadAloudHighlightTheme;
+  /** Theme settings — the preview font override, by id. */
+  font: ReadAloudFont;
 }
 
 export type ReadAloudControlAction =
@@ -339,4 +376,34 @@ export function clampVolume(level: number): number {
     return 1;
   }
   return Math.min(VOLUME_MAX, Math.max(VOLUME_MIN, level));
+}
+
+/**
+ * `readAloudSetHighlightTheme` -> `[theme]` (F13), from a swatch of the theme
+ * settings sheet. An unknown palette is rejected, not defaulted: the sheet
+ * only ever offers the five, so anything else is a rogue message.
+ */
+export function parseSetHighlightThemeArgs(
+  args: unknown,
+): ReadAloudHighlightTheme | undefined {
+  if (!Array.isArray(args) || args.length !== 1) {
+    return undefined;
+  }
+  const theme = args[0] as unknown;
+  return typeof theme === 'string' &&
+    (HIGHLIGHT_THEMES as readonly string[]).includes(theme)
+    ? (theme as ReadAloudHighlightTheme)
+    : undefined;
+}
+
+/** `readAloudSetFont` -> `[font]` (F13), the mirror of the theme above. */
+export function parseSetFontArgs(args: unknown): ReadAloudFont | undefined {
+  if (!Array.isArray(args) || args.length !== 1) {
+    return undefined;
+  }
+  const font = args[0] as unknown;
+  return typeof font === 'string' &&
+    (PLAYER_FONTS as readonly string[]).includes(font)
+    ? (font as ReadAloudFont)
+    : undefined;
 }

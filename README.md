@@ -21,26 +21,17 @@ The original project README is preserved in git at `git show baseline-0.8.32:REA
 | Read aloud play/pause            | `⌥Space` |
 | Stop read aloud                  | `⌥Esc`   |
 
-## Read aloud (Kokoro or ElevenLabs)
+## Read aloud (Kokoro)
 
-The preview can speak any readable block, any text you select in it, or everything from a word
-you click to the end of its block, with the spoken word highlighted as it is said. Playback runs entirely in the preview webview; the synthesis request
-is made by the extension host. Two engines are available: a local **Kokoro** server (the
-default) or the **ElevenLabs** API; see _Provider_ below.
+The preview can read itself aloud. Press the play button of any readable block, or click a
+word, and a voice reads from there to the **end of the document** with the spoken word
+highlighted as it is said; select text and only the selection is read. The voice is the
+open-weight, Apache-licensed [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) model,
+run on this machine by a [Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI) server:
+free, offline, no account, and nothing leaves the machine. Playback runs entirely in the
+preview webview; the synthesis requests are made by the extension host.
 
-### Provider
-
-`markdown-preview-enhanced.readAloudProvider` selects the engine:
-
-| Provider           | What it is                                                                                                                                                                                                                                                                                                      |
-| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `kokoro` (default) | The open-weight, Apache-licensed [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) model, run on this machine by a [Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI) server. Free, offline, no account, and nothing leaves the machine. Word highlighting comes from the model's own timestamps. |
-| `elevenlabs`       | The ElevenLabs cloud API. Needs an API key and credits; higher voice quality and more languages.                                                                                                                                                                                                                |
-
-Everything else — play buttons, click to read, selection reading, highlighting, speed, the cache
-and the keybindings — is identical for both.
-
-#### Kokoro server setup (once)
+### Kokoro server setup (once)
 
 [`uv`](https://docs.astral.sh/uv/) downloads its own Python and every dependency (espeak is
 bundled), so nothing else needs to be installed. Keep the checkout **outside** `~/Documents`,
@@ -75,7 +66,7 @@ In VS Code, the voice button in the player bar opens _Read aloud setup_, where *
 Server** confirms the server answers and reports its voice count, and **Markdown Preview
 Enhanced: Choose Read Aloud Voice** lists every voice with its language and gender.
 
-#### Kokoro settings and behaviour
+### Settings and server behaviour
 
 - `markdown-preview-enhanced.kokoroBaseUrl` (default `http://127.0.0.1:8880`, machine scope).
   Plain `http` is accepted on localhost only; any other host must be `https`.
@@ -93,133 +84,108 @@ Enhanced: Choose Read Aloud Voice** lists every voice with its language and gend
   timed neighbours. (Kokoro-FastAPI stops timestamping the rest of a chunk after a token with
   no phonemes, typically a bare `$` before a number; the interpolation covers it.) Japanese and
   Mandarin voices return no word timing, so those play without highlighting.
-- No API key, no cost guard, no character limit and no prosody context: Kokoro has none of
-  these. The disk cache, the sent-text log and the output channel work exactly as for
-  ElevenLabs, with `kokoro` as the model id.
 - If the server is not running, play shows _Could not reach the Kokoro server at … Start it and
   try again._ inline; nothing is retried automatically.
+- Audio in a VS Code webview may only start on the heels of a user gesture, so the preview
+  unlocks its two media elements on your first click or key press and reuses them for every
+  chunk. A read started from the command palette on a preview you have never clicked in shows
+  _Audio is blocked until you click in the preview_; click a word or a play button once and it
+  works from then on.
 
-### ElevenLabs setup
+### Reading to the end of the document
 
-1. Run **Markdown Preview Enhanced: Set ElevenLabs API Key** from the command palette and paste
-   a key from <https://elevenlabs.io/app/settings/api-keys>. The key is validated against
-   `GET /v1/user/subscription` and, on success, stored in VS Code's **SecretStorage** under
-   `mpe.elevenlabs.apiKey` — never in your settings, in the preview, in the output log, or in the
-   packaged `.vsix`. **Markdown Preview Enhanced: Clear ElevenLabs API Key** removes it.
-2. Open a preview and hover a paragraph. A play button appears in the left gutter; a plain
-   click on any word starts reading from that word. The first play with no key stored opens the
-   same prompt and then continues.
+A play button or a click on a word starts a read that continues through every readable block
+that follows — paragraphs, headings, lists, blockquotes — until the end of the document, in
+document order. Code fences, code chunks, diagrams, display math, images, embeds, tables, the
+TOC and footnote definitions are passed over. A paragraph that contains inline `$…$` math is
+read with the math left out; the LaTeX is never spoken.
 
-### ElevenLabs voice
+- The whole read is **one request**: the webview sends the text of every block from the start
+  point on, with the block boundaries, and the host splits each block on its own into
+  sentence-packed chunks (a ~250-character first chunk so audio starts fast, ~700 characters
+  after that). No chunk ever spans two blocks, so the pause between a heading and its paragraph
+  is real silence between two pieces of audio.
+- The host keeps **two chunks synthesised ahead** of the one playing (about 90 s of audio) and
+  requests the next as soon as the previous response is in, so the next block's audio is ready
+  before the current one ends and there is no gap at the boundary. One request is in flight at
+  a time; Kokoro serialises on one GPU or CPU anyway.
+- The highlight pills and the play-button state move to the next block as its first chunk starts
+  playing, the player bar shows that block's label, and auto-scroll follows. The audio of a
+  block that has finished is released; a 20-minute document is never held in memory in full.
+- Editing the document: if the block being read, or the next one when its turn comes, no longer
+  exists with the same text, the read stops. An edit anywhere else does not interrupt it.
+- At the last block the read stops and the bar shows _Finished_.
 
-`markdown-preview-enhanced.elevenLabsVoiceId` is empty by default. On first use the extension
-calls `GET /v2/voices?page_size=1`, stores the first voice available to your account in the
-setting, and shows a one-time _Reading with voice …_ notice with a **Change voice…** action. No
-voice ID is hard-coded, because the voices used in ElevenLabs' own examples are being retired.
-**Markdown Preview Enhanced: Choose Read Aloud Voice** opens a QuickPick of every voice on the
-account and writes your pick to the setting.
+### Click to read
 
-### ElevenLabs model
+A plain left click anywhere inside a readable block — on a word, in the margin, between lines
+or past the end of a line — starts reading at the nearest word and continues to the end of the
+document; playable text shows a pointer cursor. A click on a word whose audio is already
+synthesised (the current block, or a prefetched one) jumps the audio there without a request;
+a click further away starts a new read. The gesture waits out the double-click interval, so
+double and triple clicks still select text, and it ignores drags, clicks with a modifier key
+held, links and task-list checkboxes. Set `markdown-preview-enhanced.readAloudClickToRead` to
+`false` to keep the play buttons and the selection affordance only; the pointer goes with it.
 
-`markdown-preview-enhanced.elevenLabsModelId` (default `eleven_flash_v2_5`):
+**Table cells are reading units.** Tables have no play button and are skipped by a continuous
+read; click a word in a cell to read from there to the end of that cell, and playback stops
+there. Selecting text **within a single cell** and using the floating _Read aloud_ affordance or
+⌥R reads the selection; a selection spanning more than one cell is refused with _Select text
+within a single table cell_.
 
-| Model                    | Notes                                                                                                                                                                                                   |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `eleven_flash_v2_5`      | Half the per-character cost of Multilingual v2 and the lowest latency. Recommended. **Numbers and dates are not normalized on non-Enterprise plans** — "2026-09-01" and "$1,000" may be read literally. |
-| `eleven_multilingual_v2` | Best pronunciation of numbers, dates and URLs, at twice the cost.                                                                                                                                       |
-| `eleven_v3`              | Most expressive. 5,000-character limit. Timestamp support is still to be confirmed, so word highlighting may not work.                                                                                  |
+### Selection
+
+Select text in the preview and press the floating _Read aloud_ affordance or ⌥R: only the
+selection is read, across as many readable blocks as it covers. A selection inside code, a
+diagram or math is refused with a short inline hint.
 
 ### Speed
 
 The player bar offers 0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3 and 4, plus free entry of
 any value in the range 0.25x–4x. Speed is applied with `HTMLMediaElement.playbackRate` and
-`preservesPitch`, so it takes effect immediately mid-playback and **never** triggers
-re-synthesis or another charge. The chosen value persists in
-`markdown-preview-enhanced.readAloudSpeed`.
+`preservesPitch`, so it takes effect immediately mid-playback and never triggers
+re-synthesis. The chosen value persists in `markdown-preview-enhanced.readAloudSpeed`.
 
 ### Highlight theme
 
-While a block is being read it is drawn the way the ElevenLabs Reader app draws text: every
-line sits on a rounded pill and the spoken word gets a darker box inside it.
-`markdown-preview-enhanced.readAloudHighlightTheme` picks one of the Reader's four palettes,
+While a block is being read every line sits on a rounded pill and the spoken word gets a darker
+box inside it. `markdown-preview-enhanced.readAloudHighlightTheme` picks one of four palettes,
 `blue` (default), `orange`, `yellow` or `green`. Each has a light and a dark variant; the
 extension chooses the variant from the preview theme's background (`atom-dark.css` gets the
 dark one, `github-light.css` the light one), not from the VS Code colour theme. A change applies
 immediately, also mid-playback. The decoration is added when playback starts and removed when it
 ends; nothing of it reaches exports.
 
-### What can be read
+### What exactly is sent
 
-Paragraphs, headings, blockquotes, and bullet/ordered/task lists get a play button; checkbox
-markers are not spoken, only the item text. Code fences, code chunks, diagrams (mermaid,
-PlantUML, WaveDrom, Vega, D2, …), math, images, embeds, the TOC and footnote definitions are
-skipped, and a selection inside one of them is refused with a short inline hint. A code fence or
-table nested inside a list item or blockquote is skipped too; the prose around it is read.
-
-**Tables** have no play button; each cell is its own reading unit. Click a word in a cell to
-read from there to the end of that cell, or select text **within a single cell** and use the
-floating _Read aloud_ affordance or ⌥R. A selection spanning more than one cell is refused with
-_Select text within a single table cell_.
-
-**What exactly is sent.** The text comes from the rendered preview, so markdown syntax is
-already gone, and before the request it is reduced to letters and digits (any script),
-whitespace and sentence punctuation: `. , ; : ! ?`, quotes, parentheses, `…`, dashes, and
-`% $ € £ ¥ ° & + = / @`. Anything else is dropped — `**`, `#`, `>`, `[x]`, backticks, `~~`,
-brackets, backslashes, symbols, emoji — `_` and `|` become word separators, and a hyphen stays
-only inside a word (`read-aloud`, `2024-09-02`). Word highlighting still lands on the original
-text. The HTTP client refuses to send a request containing any other character, and the _MPE
-Read Aloud_ log shows `tts sanitised … N -> M chars` when something was removed.
-
-### Click to read
-
-A plain left click on a word starts reading at that word and stops where the block's play
-button would stop: the end of the paragraph, heading or blockquote, the end of the whole list
-for a list item, the end of the cell for a table cell. Clicking inside the block that is already
-loaded, playing or paused jumps the audio to that word without another request. The gesture
-waits out the double-click interval, so double and triple clicks still select text, and it
-ignores drags, clicks with a modifier key held, links and task-list checkboxes. Clicks in the
-margin or between lines start nothing, because every new read is an ElevenLabs request. Set
-`markdown-preview-enhanced.readAloudClickToRead` to `false` to keep the play buttons and the
-selection affordance only.
+The text comes from the rendered preview, so markdown syntax is already gone, and before the
+request it is reduced to letters and digits (any script), whitespace and sentence punctuation:
+`. , ; : ! ?`, quotes, parentheses, `…`, dashes, and `% $ € £ ¥ ° & + = / @`. Anything else is
+dropped — `**`, `#`, `>`, `[x]`, backticks, `~~`, brackets, backslashes, symbols, emoji — `_`
+and `|` become word separators, and a hyphen stays only inside a word (`read-aloud`,
+`2024-09-02`). Task-list checkbox markers are never spoken. Word highlighting still lands on the
+original text. The HTTP client refuses to send a request containing any other character, and
+the _MPE Read Aloud_ log shows `tts sanitised … N -> M chars` when something was removed.
 
 ### Privacy
 
-With the Kokoro provider the text only ever travels to the local server on `kokoroBaseUrl`.
-With ElevenLabs, selected or block text is sent to ElevenLabs when you press play. **Nothing is sent until you
-click play** — opening a preview makes no request. ElevenLabs keeps request history by default
-(`enable_logging` defaults to true, and zero-retention mode is Enterprise-only), so treat
-confidential documents accordingly. Set `markdown-preview-enhanced.readAloudEnabled` to `false`
-to remove the buttons and stop the scripts from being injected at all.
+The text only ever travels to the local server on `kokoroBaseUrl`, and only when you press
+play, click a word or run a read-aloud command — opening a preview makes no request. Set
+`markdown-preview-enhanced.readAloudEnabled` to `false` to remove the buttons and stop the
+scripts from being injected at all.
 
-### Cost guard, cache and log
+### Cache and log
 
-The cost guard and the quota notices apply to ElevenLabs only; Kokoro bills nothing. Chunking,
-lazy synthesis, the cache and both logs work the same for either provider.
-
-- Only the block (or selection) you asked for is ever sent, and not all at once: the text is
-  split at sentence boundaries into a short first chunk (~250 characters, so audio starts after a
-  one-or-two-sentence request) and ~700-character chunks after it, and the next chunk is only
-  requested once the previous one has started playing. Stopping or pausing never pays for more
-  than one chunk beyond what you heard. ElevenLabs bills every character of the `text` sent
-  (the 300-character prosody context sent alongside it is free).
-- Reads longer than `markdown-preview-enhanced.readAloudConfirmAbove` characters (default
-  5,000) ask for confirmation first and show the characters remaining in your quota.
 - Audio is cached on disk under `globalStorageUri/read-aloud-cache`, keyed by the chunk text,
   voice and model, and capped by `markdown-preview-enhanced.readAloudCacheSizeMB` (default 100,
-  least-recently-used eviction). A cache hit replays instantly with no request and no charge, and
-  editing a neighbouring paragraph does not invalidate it. **Markdown Preview Enhanced: Clear
-  Read Aloud Cache** empties it.
-- Audio is requested as `mp3_44100_64`, which needs no paid tier.
-- Every string sent to ElevenLabs is appended, one per line and nothing else, to
-  `logs/read-aloud-sent.log` in the workspace folder of the document being read (under the
-  extension's global storage when the document has no workspace folder). It is exactly what is
-  billed; cache hits never appear. The output channel names the file on first use.
+  least-recently-used eviction). A cache hit replays instantly with no request, and editing a
+  neighbouring paragraph does not invalidate it. **Markdown Preview Enhanced: Clear Read Aloud
+  Cache** empties it.
 - **Markdown Preview Enhanced: Show Read Aloud Log** opens the _MPE Read Aloud_ output channel:
-  one line per request with text length, model, voice, `request-id`, `character-cost`,
-  `x-region` and duration. It never contains the API key, and never more than the first 80
-  characters of the text.
-- `markdown-preview-enhanced.elevenLabsBaseUrl` pins a region, e.g.
-  `https://api.eu.residency.elevenlabs.io`.
+  the plan of every read (blocks, chunks, characters), one line per chunk with its block, text
+  length, voice, HTTP status, duration and whether it was a cache hit, and the webview's reason
+  whenever it gives a read up (`reason=webview (stop)`, `(audio: …)`, `(next block gone …)`).
+  Never more than the first 80 characters of the text.
 
 ### Keybindings
 
@@ -239,9 +205,11 @@ Rebind those two commands in _Keyboard Shortcuts_ if you use Windows.
 
 - Desktop VS Code only (`engines.vscode` `^1.82.0`, for the host's native `fetch`). The commands
   are disabled and nothing is injected in VS Code for the Web.
-- Code, diagrams and math are never read — including a paragraph that contains inline `$…$`.
+- Code, diagrams and math are never read; a read of the whole document skips them.
 - One thing plays at a time across all preview panels.
-- Kokoro: the server must be running; a stopped server is reported inline, not started for you.
+- The server must be running; a stopped server is reported inline, not started for you.
+- A read is bounded by a 200,000-character request; a longer document is read up to the last
+  block that fits.
 
 ## Identity
 
@@ -313,9 +281,8 @@ pnpm check:all      # eslint + prettier
 pnpm fix:all        # autofix both
 ```
 
-Note: `.husky/pre-commit` runs `npx lint-staged`. It is dormant until the next
-`pnpm install` wires up the hooks; after that, commits lint and reformat staged files.
-`git commit --no-verify` skips it.
+Note: `.husky/pre-commit` runs `npx lint-staged` (`pnpm install` wires the hook up through
+`core.hooksPath`), so commits lint and reformat staged files. `git commit --no-verify` skips it.
 
 ## Where things live
 

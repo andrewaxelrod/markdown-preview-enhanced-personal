@@ -1,18 +1,18 @@
 import type { WordSpan } from './word-spans';
 
 /**
- * Speakable text (F5; cost pass 2026-09-02).
+ * Speakable text (F5).
  *
  * Only letters, marks and digits of any script, whitespace and the sentence
- * punctuation in {@link SPEAKABLE_PUNCTUATION} ever reach ElevenLabs.
+ * punctuation in {@link SPEAKABLE_PUNCTUATION} ever reach the Kokoro server.
  * Everything else — markdown residue (`**`, `#`, `>`, `[x]`, backticks,
  * `~~`), brackets, symbols, emoji — is dropped here before chunking, and
- * `ElevenLabsClient` refuses a request containing anything outside the set
+ * `KokoroClient` refuses a request containing anything outside the set
  * ({@link assertSpeakable}) as the last line of defence.
  *
  * Pure module: no `vscode`, no I/O.
  *
- * Why not plain `[a-z0-9]`: ElevenLabs takes its pauses and intonation from
+ * Why not plain `[a-z0-9]`: the model takes its pauses and intonation from
  * `.,;:!?`, reads "don't" and "3.5" from the apostrophe and the decimal
  * point, and the preview is not English-only. And the webview built its
  * offset map against the *original* text, so the sanitised text carries a
@@ -196,7 +196,7 @@ export function unspeakableSample(text: string): string {
 export function assertSpeakable(text: string, field: string): void {
   if (!isSpeakable(text)) {
     throw new Error(
-      `read aloud: ${field} contains characters that must not be sent to ElevenLabs: ${JSON.stringify(
+      `read aloud: ${field} contains characters that must not be sent for synthesis: ${JSON.stringify(
         unspeakableSample(text),
       )}`,
     );

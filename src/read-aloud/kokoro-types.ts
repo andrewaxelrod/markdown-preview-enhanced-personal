@@ -5,9 +5,9 @@
  * (<https://github.com/remsky/Kokoro-FastAPI>), the local OpenAI-compatible
  * wrapper around the Apache-licensed Kokoro-82M model.
  *
- * Mirrors `api/src/structures/schemas.py` of the server verbatim. Like
- * `elevenlabs-types.ts`, this is the only Kokoro module allowed to use
- * snake_case identifiers; every other module converts at the boundary.
+ * Mirrors `api/src/structures/schemas.py` of the server verbatim. This is
+ * the only read-aloud module allowed to use snake_case identifiers; every
+ * other module converts at the boundary.
  */
 
 /** `POST /dev/captioned_speech` body (the non-streaming, timestamped call). */

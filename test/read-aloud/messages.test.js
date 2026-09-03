@@ -70,18 +70,22 @@ suite('read-aloud/messages', function () {
       const parsed = messages.parseSynthesizeArgs(
         synthesizeArgs({
           options: {
-            kind: 'selection',
+            kind: 'block',
             blockId: 'b1a2b3c4#7',
-            previousText: 'before',
-            nextText: 'after',
+            blocks: [
+              { key: 'b1a2b3c4', start: 0, end: 5 },
+              { key: 'bdeadbeef', start: 6, end: 11 },
+            ],
           },
         }),
       );
       assert.deepStrictEqual(parsed.options, {
-        kind: 'selection',
+        kind: 'block',
         blockId: 'b1a2b3c4#7',
-        previousText: 'before',
-        nextText: 'after',
+        blocks: [
+          { key: 'b1a2b3c4', start: 0, end: 5 },
+          { key: 'bdeadbeef', start: 6, end: 11 },
+        ],
       });
     });
 
@@ -223,47 +227,112 @@ suite('read-aloud/messages', function () {
       );
     });
 
-    test('truncates previousText to the last 300 and nextText to the first 300', function () {
-      assert.strictEqual(messages.MAX_CONTEXT_CHARS, 300);
-      const long = 'abcdefghij'.repeat(40);
-      assert.strictEqual(long.length, 400);
+    test('drops unknown option fields instead of forwarding them', function () {
       const parsed = messages.parseSynthesizeArgs(
         synthesizeArgs({
-          options: { kind: 'block', previousText: long, nextText: long },
+          options: { kind: 'block', previousText: 'gone', nextText: 'gone' },
         }),
       );
-      assert.strictEqual(parsed.options.previousText, long.slice(100));
-      assert.strictEqual(parsed.options.nextText, long.slice(0, 300));
+      assert.deepStrictEqual(parsed.options, { kind: 'block' });
     });
 
-    test('rejects non-string context fields', function () {
-      assert.strictEqual(
+    test('an empty or absent blocks list means one block', function () {
+      for (const blocks of [undefined, null, []]) {
+        const parsed = messages.parseSynthesizeArgs(
+          synthesizeArgs({ options: { kind: 'block', blocks } }),
+        );
+        assert.deepStrictEqual(
+          parsed.options,
+          { kind: 'block' },
+          String(blocks),
+        );
+      }
+    });
+
+    test('blocks must be ascending, non-empty, non-overlapping ranges inside the text', function () {
+      assert.strictEqual(messages.MAX_BLOCK_KEY_CHARS, 64);
+      assert.strictEqual(messages.MAX_REQUEST_BLOCKS, 20000);
+      const ok = (blocks) =>
         messages.parseSynthesizeArgs(
-          synthesizeArgs({ options: { kind: 'block', previousText: 12 } }),
-        ),
-        undefined,
+          synthesizeArgs({ options: { kind: 'block', blocks } }),
+        );
+      // "Hello world" is 11 characters.
+      assert.ok(ok([{ key: 'b1', start: 0, end: 11 }]));
+      assert.ok(ok([{ key: '', start: 3, end: 4 }]), 'an empty key is allowed');
+      assert.ok(
+        ok([
+          { key: 'b1', start: 0, end: 5 },
+          { key: 'b2', start: 5, end: 11 },
+        ]),
+        'adjacent ranges are allowed',
       );
+      for (const blocks of [
+        'nope',
+        {},
+        [null],
+        ['b1'],
+        [{ start: 0, end: 5 }],
+        [{ key: 5, start: 0, end: 5 }],
+        [{ key: 'b'.repeat(65), start: 0, end: 5 }],
+        [{ key: 'b1', start: 0, end: 12 }],
+        [{ key: 'b1', start: 5, end: 5 }],
+        [{ key: 'b1', start: 6, end: 5 }],
+        [{ key: 'b1', start: -1, end: 5 }],
+        [{ key: 'b1', start: 0.5, end: 5 }],
+        [{ key: 'b1', start: 0, end: '5' }],
+        [
+          { key: 'b1', start: 0, end: 6 },
+          { key: 'b2', start: 5, end: 11 },
+        ],
+        [
+          { key: 'b2', start: 6, end: 11 },
+          { key: 'b1', start: 0, end: 5 },
+        ],
+      ]) {
+        assert.strictEqual(ok(blocks), undefined, JSON.stringify(blocks));
+      }
       assert.strictEqual(
-        messages.parseSynthesizeArgs(
-          synthesizeArgs({ options: { kind: 'block', nextText: {} } }),
+        ok(
+          Array.from({ length: messages.MAX_REQUEST_BLOCKS + 1 }, () => ({
+            key: 'b',
+            start: 0,
+            end: 1,
+          })),
         ),
         undefined,
+        'too many blocks',
       );
     });
   });
 
   suite('T-12 parseCancelArgs', function () {
-    test('accepts the exact F13 shape', function () {
+    test('accepts the exact F13 shape, with or without a reason', function () {
       assert.deepStrictEqual(messages.parseCancelArgs([URI, REQUEST_ID]), {
         sourceUri: URI,
         requestId: REQUEST_ID,
       });
+      assert.deepStrictEqual(
+        messages.parseCancelArgs([URI, REQUEST_ID, 'stop']),
+        { sourceUri: URI, requestId: REQUEST_ID, reason: 'stop' },
+      );
+      assert.strictEqual(messages.MAX_CANCEL_REASON_CHARS, 200);
+      const long = messages.parseCancelArgs([
+        URI,
+        REQUEST_ID,
+        'a\nb'.repeat(200),
+      ]);
+      assert.strictEqual(long.reason.length, 200);
+      assert.ok(!/\n/.test(long.reason));
+      assert.strictEqual(
+        messages.parseCancelArgs([URI, REQUEST_ID, 42]),
+        undefined,
+      );
     });
 
     test('rejects wrong arity, wrong types and a bad requestId', function () {
       assert.strictEqual(messages.parseCancelArgs([URI]), undefined);
       assert.strictEqual(
-        messages.parseCancelArgs([URI, REQUEST_ID, 'extra']),
+        messages.parseCancelArgs([URI, REQUEST_ID, 'extra', 'more']),
         undefined,
       );
       assert.strictEqual(messages.parseCancelArgs([42, REQUEST_ID]), undefined);

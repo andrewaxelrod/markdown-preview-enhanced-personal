@@ -172,18 +172,27 @@ suite('read-aloud: selection rules (F2, D3)', function () {
     assert.strictEqual(inDiagram.reason, 'ineligible');
     assert.strictEqual(inDiagram.hint, core.HINT_INELIGIBLE);
 
-    // B17: prose that carries inline math is a math block, selection included.
-    const inMath = select((range) => {
+    // Decision 8: the prose beside inline math is read, the math itself is
+    // refused at any depth.
+    const besideMath = select((range) => {
       const prose = textNodeOf('mathp');
       range.setStart(prose, 0);
       range.setEnd(prose, 7);
     });
-    assert.strictEqual(inMath.reason, 'ineligible');
-    assert.strictEqual(inMath.hint, core.HINT_INELIGIBLE);
+    assert.strictEqual(besideMath.ok, true);
+    assert.strictEqual(besideMath.text, 'Inline:');
     assert.strictEqual(
       core.classifyBlock(doc.getElementById('mathp')).kind,
-      'math',
+      'paragraph',
     );
+    const inMath = select((range) => {
+      const mi = doc.querySelector('#mathp mi').firstChild;
+      range.setStart(mi, 0);
+      range.setEnd(mi, 1);
+    });
+    assert.strictEqual(inMath.ok, false);
+    assert.strictEqual(inMath.reason, 'ineligible');
+    assert.strictEqual(inMath.hint, core.HINT_INELIGIBLE);
   });
 
   // T-19
@@ -224,10 +233,13 @@ suite('read-aloud: selection rules (F2, D3)', function () {
     assert.strictEqual(result.ok, true);
     assert.deepStrictEqual(
       result.blocks.map((el) => el.id),
-      ['p1', 'p2'],
-      'the table and the math paragraph are dropped',
+      ['p1', 'mathp', 'p2'],
+      'the table is dropped; the inline-math paragraph reads its prose',
     );
-    assert.strictEqual(result.text, 'paragraph with several words.\nSecond');
+    assert.strictEqual(
+      result.text,
+      'paragraph with several words.\nInline: and more.\nSecond',
+    );
     assert.strictEqual(result.text, result.text.trim());
     assert.strictEqual(
       core
@@ -267,10 +279,10 @@ suite('read-aloud: selection rules (F2, D3)', function () {
       range.setEnd(textNodeOf('p2'), 6);
     });
     assert.strictEqual(fromBlockEnd.ok, true);
-    assert.strictEqual(fromBlockEnd.text, 'Second');
+    assert.strictEqual(fromBlockEnd.text, 'Inline: and more.\nSecond');
     assert.deepStrictEqual(
       fromBlockEnd.blocks.map((el) => el.id),
-      ['p2'],
+      ['mathp', 'p2'],
     );
   });
 

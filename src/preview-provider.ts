@@ -715,7 +715,7 @@ export class PreviewProvider {
         head = `<link rel="stylesheet" href="${lightboxCssUri}"><script defer src="${lightboxJsUri}"></script>`;
       }
 
-      // Read aloud (ElevenLabs): inject the classifier, the player script and
+      // Read aloud (Kokoro): inject the classifier, the player script and
       // its stylesheet only into the live preview — never into an export — and
       // only on the desktop build (spec F14, D2). The scripts are deliberately
       // NOT deferred: `media/read-aloud.js` memoises `acquireVsCodeApi` during

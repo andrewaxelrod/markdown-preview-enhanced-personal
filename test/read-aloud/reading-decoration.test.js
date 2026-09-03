@@ -1,7 +1,7 @@
 /* global suite, test */
 'use strict';
 
-// Reading decoration (spec F4, ElevenLabs Reader look): the line pills, the
+// Reading decoration (spec F4, the reader-app look): the line pills, the
 // spoken-word spans and the highlight theme helpers of
 // media/read-aloud-core.js, run under jsdom like text-extraction.test.js.
 //

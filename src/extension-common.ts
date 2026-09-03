@@ -72,7 +72,7 @@ export async function initExtensionCommon(context: vscode.ExtensionContext) {
   }
   PreviewProvider.notebooksManager = notebooksManager;
 
-  // Read aloud (ElevenLabs). The controller owns the host-side job machine and
+  // Read aloud (Kokoro). The controller owns the host-side job machine and
   // reaches the previews only through these three hooks.
   const readAloud = ReadAloudController.init(context, {
     isWebBuild: isVSCodeWebExtension(),
@@ -1766,28 +1766,10 @@ export async function initExtensionCommon(context: vscode.ExtensionContext) {
   );
 
   // ---------------------------------------------------------------------------
-  // Read aloud (ElevenLabs) — palette commands (spec §4.2) and the
+  // Read aloud (Kokoro) — palette commands (spec §4.2) and the
   // `_crossnote.readAloud*` handlers the webview dispatches through the
   // allowlist in preview-provider.ts (spec F13).
   // ---------------------------------------------------------------------------
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand(
-      'markdown-preview-enhanced.readAloud.setApiKey',
-      async () => {
-        await readAloud.setApiKeyCommand();
-      },
-    ),
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand(
-      'markdown-preview-enhanced.readAloud.clearApiKey',
-      async () => {
-        await readAloud.clearApiKeyCommand();
-      },
-    ),
-  );
 
   context.subscriptions.push(
     vscode.commands.registerCommand(

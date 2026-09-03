@@ -1,17 +1,17 @@
 /*
- * Read aloud (ElevenLabs) — preview styles (spec F1, F3, F4; §6 Accessibility).
+ * Read aloud (Kokoro) — preview styles (spec F1, F3, F4, F17; §6 Accessibility).
  * The controls take every colour from a VS Code theme variable so light, dark
- * and high-contrast themes all work. The reading decoration (F4) uses the
- * ElevenLabs Reader "Player highlight theme" palettes instead, switched
- * between their light and dark variants by the preview background
- * (`data-mpe-ra-scheme`, set on the preview root by read-aloud.js next to
- * `data-mpe-ra-theme`). forced-colors gets its own overrides.
+ * and high-contrast themes all work. The reading decoration (F4) uses its
+ * own four palettes instead, switched between their light and dark variants
+ * by the preview background (`data-mpe-ra-scheme`, set on the preview root
+ * by read-aloud.js next to `data-mpe-ra-theme`). forced-colors gets its own
+ * overrides.
  */
 
 /* --------------------------------------------------------------------------
- * Highlight theme palettes (F4). Sampled from the ElevenLabs Reader theme
- * picker: `pill` is the line background, `word` the spoken word, `text` the
- * prose colour inside a pill.
+ * Highlight theme palettes (F4), in the style of a reader app: `pill` is
+ * the line background, `word` the spoken word, `text` the prose colour
+ * inside a pill.
  * ----------------------------------------------------------------------- */
 
 [data-mpe-ra-theme='blue'] {
@@ -222,6 +222,58 @@
   .mpe-ra-btn {
     transition: none;
   }
+}
+
+/* --------------------------------------------------------------------------
+ * Click to read (F17): playable text shows a pointer while the feature is on
+ * (`.mpe-ra-click` on the preview root, toggled live from readAloudConfig).
+ * Content that is never read keeps the default cursor; links and checkboxes
+ * keep their own.
+ * ----------------------------------------------------------------------- */
+
+.markdown-preview.mpe-ra-click .mpe-ra-block,
+.markdown-preview.mpe-ra-click td,
+.markdown-preview.mpe-ra-click th {
+  cursor: pointer;
+}
+
+.markdown-preview.mpe-ra-click .mpe-ra-block pre,
+.markdown-preview.mpe-ra-click .mpe-ra-block table,
+.markdown-preview.mpe-ra-click .mpe-ra-block img,
+.markdown-preview.mpe-ra-click .mpe-ra-block iframe,
+.markdown-preview.mpe-ra-click .mpe-ra-block video,
+.markdown-preview.mpe-ra-click .mpe-ra-block audio,
+.markdown-preview.mpe-ra-click .mpe-ra-block object,
+.markdown-preview.mpe-ra-click .mpe-ra-block embed,
+.markdown-preview.mpe-ra-click .mpe-ra-block svg,
+.markdown-preview.mpe-ra-click .mpe-ra-block canvas,
+.markdown-preview.mpe-ra-click .mpe-ra-block .katex,
+.markdown-preview.mpe-ra-click .mpe-ra-block .katex-display,
+.markdown-preview.mpe-ra-click .mpe-ra-block math,
+.markdown-preview.mpe-ra-click .mpe-ra-block .code-chunk,
+.markdown-preview.mpe-ra-click .mpe-ra-block .md-toc,
+.markdown-preview.mpe-ra-click .mpe-ra-block .mermaid,
+.markdown-preview.mpe-ra-click .mpe-ra-block .plantuml,
+.markdown-preview.mpe-ra-click .mpe-ra-block .puml,
+.markdown-preview.mpe-ra-click .mpe-ra-block .wavedrom,
+.markdown-preview.mpe-ra-click .mpe-ra-block .bitfield,
+.markdown-preview.mpe-ra-click .mpe-ra-block .bit-field,
+.markdown-preview.mpe-ra-click .mpe-ra-block .graphviz,
+.markdown-preview.mpe-ra-click .mpe-ra-block .viz,
+.markdown-preview.mpe-ra-click .mpe-ra-block .dot,
+.markdown-preview.mpe-ra-click .mpe-ra-block .vega,
+.markdown-preview.mpe-ra-click .mpe-ra-block .vega-lite,
+.markdown-preview.mpe-ra-click .mpe-ra-block .wsd,
+.markdown-preview.mpe-ra-click .mpe-ra-block .d2,
+.markdown-preview.mpe-ra-click .mpe-ra-block .d2-diagram,
+.markdown-preview.mpe-ra-click .mpe-ra-block .tikz,
+.markdown-preview.mpe-ra-click .code-chunk td,
+.markdown-preview.mpe-ra-click .code-chunk th {
+  cursor: auto;
+}
+
+.markdown-preview.mpe-ra-click .mpe-ra-block input[type='checkbox'] {
+  cursor: default;
 }
 
 /* --------------------------------------------------------------------------

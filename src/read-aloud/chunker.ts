@@ -1,46 +1,44 @@
 /**
- * Sentence packing and prosody context windows (F11, R2 §8.4, §4.4).
+ * Sentence packing (F11).
  *
  * Pure module: no `vscode`, no I/O. Text is split on sentence boundaries into
  * chunks packed towards a small *target* size — a short first chunk so audio
- * starts quickly, larger ones after it — and never above the model's limit
- * minus a 5 % margin; each chunk carries the tail of the previous chunk and
- * the head of the next one so ElevenLabs keeps the prosody continuous.
+ * starts quickly, larger ones after it — and never above the request limit
+ * minus a 5 % margin.
  *
- * Small chunks are what make synthesis lazy (and cheap): the controller only
- * requests the chunk after the one that is playing, so stopping early costs
- * at most one chunk beyond the audio already heard.
+ * Small chunks are what make the first sound arrive fast: a Kokoro request
+ * for a whole 5,000-character block takes seconds before anything plays, a
+ * one-or-two-sentence request well under a second. Later chunks are
+ * synthesised while the earlier ones play (the controller's prefetch window).
+ *
+ * A continuous read ({@link planReadChunks}) is chunked block by block: no
+ * chunk ever crosses a block boundary, so the pause between a heading and its
+ * paragraph comes from separate audio, not from merged text, and every chunk
+ * knows which block it belongs to.
  *
  * Invariant relied on by F4: `text.slice(chunk.charOffset, chunk.charOffset +
- * chunk.text.length) === chunk.text`, so a word span computed against the
- * chunk can be shifted by `charOffset` and still index the full request text.
+ * chunk.text.length) === chunk.text` for the block's text, so a word span
+ * computed against the chunk can be shifted by `charOffset` and still index
+ * the block.
  */
 
-/** F11 — `previous_text` / `next_text` are capped at 300 characters. */
-export const CONTEXT_WINDOW_CHARS = 300;
-
-/** F11 — chunks stay under the model limit minus 5 %. */
+/** F11 — chunks stay under the request limit minus 5 %. */
 export const LIMIT_MARGIN = 0.05;
 
 /**
- * Target size of the first chunk: one or two sentences (~15 s of speech), so
- * the time to first audio is the synthesis of a short text, not of the block.
+ * Target size of the first chunk of a read: one or two sentences (~15 s of
+ * speech), so the time to first audio is the synthesis of a short text.
  */
 export const FIRST_CHUNK_TARGET_CHARS = 250;
 
 /**
  * Target size of every later chunk (~45 s of speech): long enough to hide the
  * next request's latency behind playback, short enough that a stop wastes
- * little.
+ * little synthesis.
  */
 export const CHUNK_TARGET_CHARS = 700;
 
-export interface ChunkContext {
-  previousText?: string;
-  nextText?: string;
-}
-
-/** Packing targets in characters; each is capped by the model limit. */
+/** Packing targets in characters; each is capped by the request limit. */
 export interface ChunkTargets {
   first: number;
   rest: number;
@@ -52,11 +50,13 @@ export const DEFAULT_CHUNK_TARGETS: Readonly<ChunkTargets> = {
 };
 
 export interface Chunk {
+  /** Position in the whole read. */
   index: number;
+  /** Which block of the read the chunk was cut from. */
+  blockIndex: number;
   text: string;
+  /** Offset of `text` inside its block's text. */
   charOffset: number;
-  previousText: string;
-  nextText: string;
 }
 
 export interface ChunkPlan {
@@ -69,12 +69,12 @@ interface Span {
   end: number;
 }
 
-/** The model limit with the F11 safety margin applied. */
-export function effectiveLimit(modelLimit: number): number {
-  if (!Number.isFinite(modelLimit) || modelLimit <= 0) {
+/** The request limit with the F11 safety margin applied. */
+export function effectiveLimit(requestLimit: number): number {
+  if (!Number.isFinite(requestLimit) || requestLimit <= 0) {
     return 1;
   }
-  return Math.max(1, Math.floor(modelLimit * (1 - LIMIT_MARGIN)));
+  return Math.max(1, Math.floor(requestLimit * (1 - LIMIT_MARGIN)));
 }
 
 function isWhitespace(char: string): boolean {
@@ -159,28 +159,6 @@ export function splitSentences(
   return out;
 }
 
-/** Last `max` characters of `text` (R2 §4.4 continuity window). */
-export function contextTail(
-  text: string,
-  max: number = CONTEXT_WINDOW_CHARS,
-): string {
-  if (!text) {
-    return '';
-  }
-  return text.length <= max ? text : text.slice(text.length - max);
-}
-
-/** First `max` characters of `text` (R2 §4.4 continuity window). */
-export function contextHead(
-  text: string,
-  max: number = CONTEXT_WINDOW_CHARS,
-): string {
-  if (!text) {
-    return '';
-  }
-  return text.length <= max ? text : text.slice(0, max);
-}
-
 /**
  * Split one oversized sentence at the last whitespace before the limit (at the
  * limit itself when the sentence contains no whitespace there).
@@ -245,20 +223,17 @@ function normalizeTarget(value: number, limit: number): number {
 /**
  * Greedy packing of whole sentences into chunks: the first chunk grows up to
  * `targets.first` characters, later ones up to `targets.rest`, and no chunk
- * ever exceeds `effectiveLimit(modelLimit)` (a single sentence longer than its
- * target stays whole up to the limit, and is hard-split above it). The R2
- * §4.4 context windows are filled in; `outer` supplies the neighbouring
- * blocks' text for the first and last chunk (F11 "single-chunk block reads
- * pass the neighbouring eligible blocks' text the same way").
+ * ever exceeds `effectiveLimit(requestLimit)` (a single sentence longer than
+ * its target stays whole up to the limit, and is hard-split above it). Every
+ * chunk gets `blockIndex` 0; {@link planReadChunks} renumbers for a read.
  */
 export function planChunks(
   text: string,
-  modelLimit: number,
+  requestLimit: number,
   locale: string,
-  outer?: ChunkContext,
   targets: Readonly<ChunkTargets> = DEFAULT_CHUNK_TARGETS,
 ): ChunkPlan {
-  const limit = effectiveLimit(modelLimit);
+  const limit = effectiveLimit(requestLimit);
   const firstTarget = normalizeTarget(targets.first, limit);
   const restTarget = normalizeTarget(targets.rest, limit);
   const pieces = buildPieces(text, limit, locale);
@@ -281,44 +256,51 @@ export function planChunks(
     }
     chunks.push({
       index: chunks.length,
+      blockIndex: 0,
       text: trimmed.value,
       charOffset: trimmed.offset,
-      previousText: '',
-      nextText: '',
     });
   }
-
-  for (let i = 0; i < chunks.length; i++) {
-    chunks[i].previousText =
-      i === 0
-        ? contextTail(outer?.previousText ?? '')
-        : contextTail(chunks[i - 1].text);
-    chunks[i].nextText =
-      i === chunks.length - 1
-        ? contextHead(outer?.nextText ?? '')
-        : contextHead(chunks[i + 1].text);
-  }
-
   return { chunks, limit };
 }
 
 /**
- * Re-plan the tail of a request after `text_too_long` (§3.3, G-07). The
- * returned chunks keep `charOffset` relative to the *full* request text, so
- * word spans stay comparable with the chunks already posted.
+ * The chunk plan of a continuous read (decision 5): block `i` of `blocks` is
+ * packed on its own, so no chunk crosses a block boundary, and the chunks
+ * are concatenated in document order with `blockIndex` set. Only the very
+ * first chunk of the read uses the small `targets.first`; the first chunk of
+ * every later block is already covered by the prefetch window, so it packs
+ * to `targets.rest` like any other. `charOffset` stays relative to the
+ * chunk's own block. A block with no speakable text contributes nothing.
  */
-export function replanFrom(
-  text: string,
-  from: number,
-  newLimit: number,
+export function planReadChunks(
+  blocks: readonly string[],
+  requestLimit: number,
   locale: string,
-  outer?: ChunkContext,
   targets: Readonly<ChunkTargets> = DEFAULT_CHUNK_TARGETS,
-): Chunk[] {
-  const offset = Math.max(0, Math.min(from, text.length));
-  const plan = planChunks(text.slice(offset), newLimit, locale, outer, targets);
-  return plan.chunks.map((chunk) => ({
-    ...chunk,
-    charOffset: chunk.charOffset + offset,
-  }));
+): ChunkPlan {
+  const chunks: Chunk[] = [];
+  let limit = effectiveLimit(requestLimit);
+  for (let blockIndex = 0; blockIndex < blocks.length; blockIndex++) {
+    const blockTargets: ChunkTargets =
+      chunks.length === 0
+        ? targets
+        : { first: targets.rest, rest: targets.rest };
+    const plan = planChunks(
+      blocks[blockIndex],
+      requestLimit,
+      locale,
+      blockTargets,
+    );
+    limit = plan.limit;
+    for (const chunk of plan.chunks) {
+      chunks.push({
+        index: chunks.length,
+        blockIndex,
+        text: chunk.text,
+        charOffset: chunk.charOffset,
+      });
+    }
+  }
+  return { chunks, limit };
 }

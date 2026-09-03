@@ -4,7 +4,7 @@ import { SHA256 } from 'crypto-js';
 import type { WordSpan } from './word-spans';
 
 /**
- * On-disk audio cache (F12).
+ * On-disk audio cache (F12): instant replay of any chunk already synthesised.
  *
  * Node `fs` only — no `vscode` import, so the class is unit-testable against a
  * temp directory, and no `node:crypto`, because the web bundle stubs it out
@@ -27,16 +27,13 @@ export interface CacheEntry {
   audioBase64: string;
   spans: WordSpan[] | null;
   mimeType: 'audio/mpeg';
-  characterCost: number | null;
   createdAt: number;
 }
 
 /**
- * Content, voice and model only. The `previous_text` / `next_text` prosody
- * context is deliberately *not* part of the key: it changes whenever a
- * neighbouring block is edited or a click lands on a different word, and a
- * chunk spoken with slightly different context is still the right audio for
- * the same words. Keying on context turned most re-reads into misses.
+ * Content, voice and model only, so the same words are a hit wherever they
+ * sit: editing a neighbouring block, or starting a read at a different word,
+ * never invalidates a chunk that is still spoken the same way.
  */
 export interface CacheKeyParts {
   text: string;

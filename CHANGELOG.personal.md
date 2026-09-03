@@ -14,213 +14,158 @@ Categories: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Security`.
 
 ### Added
 
-- Local **Kokoro** read-aloud provider, now the default: the open-weight, Apache-licensed
-  Kokoro-82M model served on this machine by a Kokoro-FastAPI server takes ElevenLabs' place in
-  every read (spec F1–F14 unchanged: play buttons, click to read, selection, word highlighting,
-  speed, cache, keybindings). Free, offline, no key; nothing leaves the machine.
-  - Requests are `POST /dev/captioned_speech`, non-streaming, mp3, with word timestamps and the
-    server's text normaliser **off** (`normalization_options.normalize: false`) so the words it
-    times are the words on screen; Kokoro's own G2P still reads numbers, dates, currency and
-    abbreviations. New pure module `src/read-aloud/kokoro-alignment.ts` aligns those per-token
-    timestamps with the webview's word segmentation: punctuation tokens dropped, a hyphenated or
-    dotted token (`read-aloud`, `2024-09-02`, `10,000-credit`, `U.S.`) split across the words
-    it covers in proportion to their length, a contraction spanning several tokens joined,
-    anything else resynced within a short window, and untimed runs interpolated between their
-    timed neighbours. The interpolation also covers a Kokoro-FastAPI bug seen in practice: after
-    a token with no phonemes (a bare `$` before a number) it stops timestamping the rest of the
-    chunk although the audio is there.
-  - New host modules: `src/read-aloud/kokoro-client.ts` (plain-`fetch` transport mirroring the
-    ElevenLabs client, with `KokoroHttpError` / `KokoroNetworkError` / `KokoroCancelledError`,
-    a 60 s timeout, the F5 speakable guard, `isAllowedKokoroBaseUrl`, `describeKokoroVoice`),
-    `kokoro-types.ts` (wire shapes) and `kokoro-voices.ts` (QuickPick over
-    `GET /v1/audio/voices`, language and gender decoded from the id). The controller branches
-    per provider: no key step, no cost guard, no model limits and no `previous_text` /
-    `next_text` for Kokoro; a fixed 5,000-character request bound keeps the chunker's targets;
-    cache keys carry the model id `kokoro`, so entries never collide with ElevenLabs ones. The
-    webview and the ElevenLabs path are untouched.
-  - Settings: `markdown-preview-enhanced.readAloudProvider` (`kokoro` default | `elevenlabs`),
-    `kokoroVoice` (default `af_heart`; `+` blends allowed), `kokoroBaseUrl` (default
-    `http://127.0.0.1:8880`, machine scope; plain http accepted on localhost only, anything
-    else must be https). `readAloudEnabled`'s description no longer names ElevenLabs.
-  - _Read aloud setup_ (the voice button in the player bar) offers **Check Kokoro Server**
-    (`GET /health` plus the voice count) instead of the API-key entry when the provider is
-    Kokoro; **Choose Read Aloud Voice** lists Kokoro voices with their grade, language and
-    gender and writes `kokoroVoice`.
-  - Errors (`error-mapping.ts`: `kokoroErrorInfo`, `mapKokoroErrorToAction`, provider-aware
-    `userMessageFor`): server not running → inline, retryable _Could not reach the Kokoro server
-    at … Start it and try again._; unknown voice → a short message naming the voice instead of
-    the server's list of all 68; _Input contains no speakable text_ → the silent `empty_text`;
-    5xx → _Kokoro server error: …_; 429 → backoff.
-  - Tests: `test/read-aloud/kokoro-alignment.test.js` (10, fixtures taken from real server
-    output including the dropped-timestamps case), `test/read-aloud/kokoro-client.test.js`
-    (12) and five Kokoro tests in `error-mapping.test.js` (289 total).
-  - README: the read-aloud section gained a _Provider_ table, the one-time server setup (uv,
-    clone, venv, model download, loopback start, launchd) and the Kokoro settings and behaviour;
-    the ElevenLabs subsections are unchanged under provider-qualified headings.
-- ElevenLabs read-aloud in the preview (`resources/spec.md` F1–F14, desktop VS Code only): a
-  play button on every readable block (paragraphs, headings, blockquotes, lists), reading of the
-  current preview selection with a floating affordance, a player bar with play/pause, stop and
-  0.25x–4x speed (`HTMLMediaElement.playbackRate`, never re-synthesized), and word-by-word
-  highlighting driven by ElevenLabs `with-timestamps` character alignment (CSS Custom Highlight
-  API). Code fences, code chunks, diagrams, math, tables (except a single-cell selection),
-  images, the TOC and footnote definitions are skipped. Long text is chunked by sentence with
-  `previous_text`/`next_text` continuity, guarded by a confirmation above a character threshold,
-  and cached on disk (LRU). The webview and host talk through the new `readAloudSynthesize`,
-  `readAloudCancel`, `readAloudSetSpeed`, `readAloudOpenSetup` and `readAloudAudio`,
-  `readAloudError`, `readAloudConfig`, `readAloudControl` messages.
-  - Settings: `markdown-preview-enhanced.readAloudEnabled` (master switch, default `true`),
-    `elevenLabsVoiceId` (empty; resolved at runtime from `GET /v2/voices`, no ID hard-coded),
-    `elevenLabsModelId` (`eleven_multilingual_v2` | `eleven_flash_v2_5` | `eleven_v3`),
-    `readAloudSpeed` (0.25–4, default 1), `readAloudConfirmAbove` (default 5000),
-    `readAloudCacheSizeMB` (default 100), `elevenLabsBaseUrl` (default
-    `https://api.elevenlabs.io`, machine scope).
-  - Commands: `markdown-preview-enhanced.readAloud.setApiKey`, `.clearApiKey`, `.readSelection`,
-    `.togglePlayPause`, `.stop`, `.chooseVoice`, `.clearCache`, `.showLog` (all disabled in VS
-    Code for the Web).
-  - Keybindings while a preview panel or custom editor has focus: `Alt+R` read selection,
-    `Alt+Space` play/pause, `Alt+Esc` stop. On Windows the last two collide with OS window
-    shortcuts; rebind them there.
-  - The _MPE Read Aloud_ output channel: one line per request with text length, model, voice,
-    `request-id`, `character-cost`, `x-region` and duration; never the API key and never more
-    than the first 80 characters of the text.
-  - New files: `src/read-aloud/*.ts` (host: client, chunker, word spans, cache, error mapping,
-    controller), `media/read-aloud{,-core}.js` and `media/read-aloud.css` (webview, injected
-    through the preview `head` like the lightbox), `src/types/intl-segmenter.d.ts`, and nine
-    mocha suites under `test/read-aloud/` wired into `test:unit` (137 new tests; 195 total). The
-    manual API smoke script `test/read-aloud/elevenlabs-smoke.mts` (R2 §15) is included but has
-    not yet been run.
-- devDependency `jsdom@23.2.0` for the webview eligibility, extraction and selection tests.
-- Sent-text log: every string sent to ElevenLabs is appended, one per line and nothing else, to
-  `logs/read-aloud-sent.log` in the workspace folder of the document being read (the
-  extension's global storage when there is none). Written at request time by the controller
-  through the new `src/read-aloud/sent-log.ts`, so cache hits never appear; best effort, never
-  blocks playback. `logs/` is git-ignored and excluded from the `.vsix`. New suite
-  `test/read-aloud/sent-log.test.js` (4 tests).
-- `install.sh` at the repo root: `pnpm build`, `vsce package --no-dependencies` and
-  `code --install-extension … --force` in one step (`--no-build` skips the build when
-  `pnpm watch` keeps `./out` current). Finds the `code` CLI via `$CODE_BIN`, PATH, or the macOS
-  app bundle. Excluded from the `.vsix` through `.vscodeignore`.
-- ElevenLabs Reader look for the block being read: every rendered line sits on a rounded pill
-  (`.mpe-ra-pill` around each inline run, `box-decoration-break: clone`, 2em line pitch) and the
-  spoken word gets a darker rounded box of the same height (`.mpe-ra-word`). Setting
-  `markdown-preview-enhanced.readAloudHighlightTheme` (`blue` default, `orange`, `yellow`,
-  `green`) selects one of the Reader's four "Player highlight theme" palettes, colours sampled
-  from the app; the light or dark variant is chosen from the preview background's luminance
-  (`data-mpe-ra-scheme` / `data-mpe-ra-theme` on the preview root), so `atom-dark.css` gets the
-  dark palette regardless of the VS Code theme. The theme travels in the `readAloudConfig`
-  message (`highlightTheme`) and switches live. New mocha suite
-  `test/read-aloud/reading-decoration.test.js` (14 tests) covers the wrappers and the helpers, and
-  `messages.test.js` gains two theme tests (211 total).
-- Click to read (`resources/spec.md` F17): a plain left click on a word in a readable block starts
-  reading at that word and stops where the block's play button would stop (end of the paragraph,
-  heading, blockquote or whole list). A click inside the block that is already loaded, playing or
-  paused seeks the audio to that word (no request). The gesture waits out a 250 ms double-click
-  window, so double and triple clicks still select text; drags, modified clicks, links, task-list
-  checkboxes and clicks in the margin or between lines start nothing. Code, diagrams, math and the
-  other F6 exclusions are refused silently at any depth. The webview resolves the click with
-  `caretPositionFromPoint`/`caretRangeFromPoint`, maps the caret into the block's offset map,
-  snaps to the word and slices the extraction from there; the re-render rebind keeps the start
-  offset. Partial block reads send the words before the cut as `previous_text`.
-  - **Table cells are reading units**: a click in a cell reads from that word to the end of the
-    cell (a cell containing math, or a table inside a code chunk, is refused). No per-cell button.
-  - Setting `markdown-preview-enhanced.readAloudClickToRead` (default `true`), carried in the
-    `readAloudConfig` message as `clickToRead` and applied live without a preview reload.
-  - New core helpers `resolveClick`, `caretToTextOffset`, `wordAt`, `sliceExtraction` in
-    `media/read-aloud-core.js`; new mocha suite `test/read-aloud/click-to-read.test.js` (17
-    tests; 229 total). The webview traces every click decision at `console.debug` level
-    (`read-aloud: click scheduled | refused | missed the word | seeked | starting`), visible in
-    the webview developer tools with the Verbose level on.
+- **Read aloud** in the preview (`resources/spec.md`; desktop VS Code only), spoken by the local
+  **Kokoro** engine: the open-weight, Apache-licensed Kokoro-82M model served on this machine
+  by a Kokoro-FastAPI server. Free, offline, no key, nothing leaves the machine.
+  - A play button on every readable block (paragraphs, headings h1–h6, blockquotes, lists
+    including task lists with the checkbox unspoken, admonition-style containers with visible
+    text), a player bar with play/pause, stop, elapsed/total time, the block label, the voice
+    and 0.25x–4x speed (`HTMLMediaElement.playbackRate`, never re-synthesised), and word-by-word
+    highlighting from the server's own timestamps. Code fences, code chunks, diagrams (mermaid,
+    PlantUML, WaveDrom, Vega, D2, …), display math, images, embeds, tables, the TOC and footnote
+    definitions are skipped at any depth.
+  - **Read to the end of the document** (spec F15): a play button or a click on a word reads
+    from that point through every readable block that follows, in document order. The webview
+    sends one request carrying the text and the block boundaries (`options.blocks`, each with
+    the block's content hash and its range of the text); the host sanitises and chunks every
+    block on its own, so no chunk ever crosses a block boundary, and every `readAloudAudio`
+    carries its `blockIndex`. The pills and the button state hand over to the next block as its
+    first chunk starts playing, the bar label follows, and the audio of finished blocks is
+    released so a document-length read is never held in memory in full. On a re-render the
+    read re-locates every block by its content hash in document order (two blocks with the
+    same text stay apart); it stops when the block being read is gone, or when the next block
+    is gone as its turn comes, and continues through edits anywhere else. The read ends at the
+    last block with the _Finished_ state.
+  - **Prefetch window** instead of a playback gate: the host keeps `PREFETCH_CHUNKS = 2` chunks
+    synthesised ahead of the chunk the webview reports playing (`readAloudPlaying`) and requests
+    the next as soon as the previous response is in — about 90 s of audio, which is what carries
+    the read across block boundaries with no audible gap. Chunking stays sentence-based with a
+    ~250-character first chunk (fast first sound) and ~700-character chunks after it; one
+    request in flight at a time.
+  - **Click to read** (spec F17): a plain left click anywhere inside a readable block starts at
+    the nearest word — on the word, on a space, in the margin, between lines or past the end of
+    a line (the caret the browser places at the point decides; there is no glyph-box test) — and
+    reads to the end of the document. A click on a word whose audio is already synthesised
+    (the current block or a prefetched one) seeks the audio; any other click starts a new read.
+    Playable text shows a **pointer cursor** while `readAloudClickToRead` is on (class
+    `mpe-ra-click` on the preview root, toggled live from `readAloudConfig`); excluded content
+    keeps the default cursor, links and checkboxes their own. The 250 ms double-click wait and
+    the drag, modifier, link and checkbox refusals are unchanged.
+  - **Table cells are reading units and a cell read ends at the cell**: a click in a cell reads
+    from that word to the end of the cell and stops; it does not continue to the end of the
+    document. Tables are skipped by a continuous read. A selection within a single cell is read;
+    one spanning two cells is refused with _Select text within a single table cell_.
+  - **Inline math is skipped, not refused**: a paragraph (or list, blockquote, container, table
+    cell) that contains `$…$` is read with the math left out, the same way a nested fence or
+    table is skipped; a click or selection on the math itself is refused. Display math is its own
+    block and stays skipped. LaTeX is never spoken.
+  - Selection reading (spec F2): a floating _Read aloud_ affordance and `Alt+R` read the current
+    preview selection, bounded to the selection, across as many readable blocks as it covers.
+  - Speakable text only (spec F5, `src/read-aloud/speakable.ts`): letters, marks and digits of
+    any script, whitespace and sentence punctuation reach the server; markdown residue, brackets,
+    symbols and emoji are dropped with an offset map back to the preview text, and the HTTP
+    client refuses any request that still carries an unspeakable character.
+  - Kokoro transport and alignment: `POST /dev/captioned_speech`, non-streaming mp3 with word
+    timestamps and the server's normaliser off (`kokoro-client.ts`, `kokoro-types.ts`);
+    `kokoro-alignment.ts` aligns the server's per-token timestamps with the webview's words
+    (punctuation dropped, hyphenated and dotted tokens split, contractions joined, untimed runs
+    interpolated — which also covers the server dropping timestamps after a bare `$`).
+  - On-disk LRU audio cache keyed by chunk text, voice and model (`readAloudCacheSizeMB`,
+    default 100); a hit replays instantly and a neighbour edit never invalidates it. The _MPE
+    Read Aloud_ output channel logs the plan of every read and one line per chunk (block, length,
+    voice, status, duration, hit or miss), never more than 80 characters of text.
+  - Errors (`error-mapping.ts`): server not running → inline, retryable _Could not reach the
+    Kokoro server at … Start it and try again._; unknown voice → a short message naming the
+    voice; _Input contains no speakable text_ → silent; 5xx → _Kokoro server error: …_; 429 →
+    1 s / 2 s / 4 s backoff.
+  - Reading decoration: every rendered line of the block being read sits on a rounded pill and
+    the spoken word gets a darker box (`.mpe-ra-pill` / `.mpe-ra-word`, text nodes split and
+    merged back so the offset map stays valid); `readAloudHighlightTheme` (`blue` default,
+    `orange`, `yellow`, `green`), light or dark variant chosen from the preview background.
+  - Settings: `markdown-preview-enhanced.readAloudEnabled` (default `true`),
+    `readAloudClickToRead` (`true`), `kokoroVoice` (`af_heart`; `+` blends allowed),
+    `kokoroBaseUrl` (`http://127.0.0.1:8880`, machine scope; plain http on localhost only),
+    `readAloudSpeed` (0.25–4, default 1), `readAloudHighlightTheme`, `readAloudCacheSizeMB`.
+    Changes to any of them except `readAloudEnabled` apply live without reloading the preview.
+  - Commands: `markdown-preview-enhanced.readAloud.readSelection` (`Alt+R`),
+    `.togglePlayPause` (`Alt+Space`), `.stop` (`Alt+Esc`), `.chooseVoice` (QuickPick over
+    `GET /v1/audio/voices` with grade, language and gender), `.clearCache`, `.showLog`; the
+    player bar's voice button opens _Read aloud setup_ with **Check Kokoro Server**
+    (`GET /health` plus the voice count).
+  - Messages: webview → host `readAloudSynthesize` `[sourceUri, requestId, text, { kind,
+blockId?, blocks? }]`, `readAloudCancel`, `readAloudPlaying`, `readAloudSetSpeed`,
+    `readAloudOpenSetup`; host → webview `readAloudAudio` (with `blockIndex`), `readAloudError`,
+    `readAloudConfig`, `readAloudControl`. Every payload is validated in
+    `src/read-aloud/messages.ts` before the controller sees it.
+  - Files: `src/read-aloud/*.ts` (controller, chunker, speakable, cache, messages, settings,
+    error mapping, log, Kokoro client, types, voices, alignment, word spans),
+    `media/read-aloud{,-core}.js` and `media/read-aloud.css` (webview, injected through the
+    preview `head` like the lightbox), `src/types/intl-segmenter.d.ts`, `install.sh` (build,
+    package and install the `.vsix` in one step), and fourteen mocha suites under
+    `test/read-aloud/` wired into `test:unit`, among them `continuous-read.test.js` for the
+    joined extraction and the re-render remap. devDependency `jsdom@23.2.0`.
 
 ### Changed
 
-- ElevenLabs is no longer the default read-aloud engine; set
-  `markdown-preview-enhanced.readAloudProvider` to `elevenlabs` to use it again. Its behaviour,
-  settings and commands are unchanged.
-- Read-aloud cost and latency pass (2026-09-02). A free-tier probe showed the whole 10,000-credit
-  monthly quota gone after a day of use, and a several-second wait before every block: both came
-  from synthesising an entire block (or selection) in one request on the most expensive model.
-  - **Lazy synthesis inside a read.** The chunker now packs sentences towards a ~250-character
-    first chunk and ~700-character chunks after it (`FIRST_CHUNK_TARGET_CHARS`,
-    `CHUNK_TARGET_CHARS` in `src/read-aloud/chunker.ts`) instead of filling the model limit, and
-    the host holds the request for chunk _k_ until the webview reports chunk _k−1_ playing
-    (new webview → host message `readAloudPlaying` `[sourceUri, requestId, chunkIndex]`, posted
-    from `playChunk`). Audio starts after a one-or-two-sentence request, a stop or pause never
-    pays for more than one chunk beyond what was heard, and cache hits are posted without
-    waiting. Nothing beyond the block (or selection) the user asked for is ever requested;
-    auto-advance/prefetch (spec F15) stays unbuilt by design.
-  - **Default model is now `eleven_flash_v2_5`** (half the per-character cost of Multilingual v2
-    and the lowest latency). `eleven_multilingual_v2` remains one setting away for documents
-    where number and date normalisation matters; `package.nls.json` descriptions updated.
-  - **Cache key is content only** — SHA-256 of `text + voiceId + modelId`. The `previous_text`
-    / `next_text` prosody context is no longer part of the key: it changed whenever a neighbour
-    was edited or a click landed on a different word, turning most re-reads into billable
-    misses. The context itself is still sent (ElevenLabs quoted the same credit cost for a
-    request with and without 600 characters of context, so it is free).
-  - **Audio format `mp3_44100_64`** instead of the endpoint default `mp3_44100_128`: half the
-    base64 payload, `postMessage` and disk footprint, no paid tier needed.
-  - The cache entry is written after the audio is posted to the webview, and eviction only
-    re-scans the directory when a running size estimate crosses the cap (previously a stat of
-    every entry on every write).
-  - New mocha tests: chunk targets (6), `parsePlayingArgs` (3), content-only cache key (1);
-    `cache.test.js` key test adjusted to three parts.
-- **Only speakable characters are sent to ElevenLabs** (F5). New pure module
-  `src/read-aloud/speakable.ts`: `sanitizeForSpeech` keeps letters, marks and digits of any
-  script, whitespace and the sentence punctuation `.,;:!?` quotes `()…¿¡` dashes and
-  `% $ € £ ¥ ° & + = / @`; drops markdown residue (`**`, `#`, `>`, `[x]`, backticks, `~~`),
-  brackets, symbols and emoji; turns `_` and `|` into word separators; keeps `-` only between
-  two letters or digits (`read-aloud`, `2024-09-02`), and collapses the result the way the
-  webview collapses whitespace. The controller sanitises the text and the `previous_text` /
-  `next_text` context of every job before chunking, keeps the offset map back to the text the
-  webview sent, and maps every word span back through it, so highlighting is unchanged. The
-  cost guard and the cache key see the sanitised (billed) text. As the last line of defence
-  `ElevenLabsClient.synthesizeWithTimestamps` throws before any request when a field contains
-  a character outside the set. Not `[a-z0-9]` on purpose: the punctuation carries the pauses
-  and intonation, the apostrophe and decimal point carry "don't" and "3.5", and the preview is
-  not English-only. New suite `test/read-aloud/speakable.test.js` (20 tests) plus a client test
-  that the guard never issues a request.
-- Single-cell table selection is decided by the cells the range covers with text, not by the
-  containers it starts and ends in. Chromium switches to cell-based ranges (anchored on the row)
-  as soon as a drag brushes a cell border, which made a selection inside one cell unreadable in
-  practice; such a range now reads the one cell it covers, and still refuses two or more with the
-  _Select text within a single table cell_ hint. `selection.test.js` gains a test for the four
-  range shapes.
-- Word highlighting no longer uses the CSS Custom Highlight API named in spec F4: `::highlight()`
-  cannot draw padding or rounded corners, so it cannot produce the pill-and-box look. The webview
-  now wraps the spoken word in transient `<span>`s (text nodes split with `splitText` and merged
-  back into the original node on every change, so the offset map stays valid) and wraps each
-  inline run of the block in a pill span while it is read. All wrappers are removed when the read
-  ends; the script swallows its own MutationObserver records so decoration never triggers a
-  re-decorate. Auto-scroll now targets the word span instead of a Range.
-- `engines.vscode` raised from `^1.70.0` to `^1.82.0` and `@types/vscode` from `1.70.0` to
-  `1.82.0`, so the extension host can use native `fetch` for the ElevenLabs calls (no SDK
-  dependency).
+- `engines.vscode` raised from `^1.70.0` to `^1.82.0` and `@types/vscode` to `1.82.0`, so the
+  extension host can use native `fetch` for the Kokoro calls (no SDK dependency).
 - Changes to the read-aloud settings (all but `readAloudEnabled`) no longer reload every preview
   panel, so a speed or voice change does not interrupt playback. Every other
   `markdown-preview-enhanced.*` change still refreshes the previews as before.
-- `README.md` gained a "Read aloud (ElevenLabs)" section (setup, voice, model, speed,
-  eligibility, privacy, cost guard, keybindings, limitations) and three rows in the shortcut
-  table.
+- Single-cell table selection is decided by the cells the range covers with text, not by the
+  containers it starts and ends in (Chromium switches to cell-based ranges as soon as a drag
+  brushes a cell border).
+- Word highlighting does not use the CSS Custom Highlight API named in spec F4: `::highlight()`
+  cannot draw padding or rounded corners, so the webview wraps the spoken word and each inline
+  run in transient spans instead and removes them when the read ends.
+- `README.md` gained the "Read aloud (Kokoro)" section (server setup, settings, reading to the
+  end of the document, click to read, selection, speed, highlight theme, what is sent, privacy,
+  cache and log, keybindings, limitations) and three rows in the shortcut table.
+
+### Removed
+
+- ElevenLabs support (client, key storage, voice and model resolution, cost guard, prosody
+  context, the sent-text log and its `logs/` handling, the `readAloudProvider`,
+  `elevenLabsVoiceId`, `elevenLabsModelId`, `elevenLabsBaseUrl` and `readAloudConfirmAbove`
+  settings and the `readAloud.setApiKey` / `.clearApiKey` commands) was built and then removed
+  before the first release; Kokoro is the only engine. The implementation remains in history
+  (commit `3e25dc4`, _Read aloud: ElevenLabs + Kokoro, before cleanup_).
 
 ### Fixed
 
-- A whole-block read (play button, and now a click) of a blockquote or list item that contains a
-  code fence, table, diagram, embed or code chunk no longer speaks that nested content: text
-  extraction skips every nested F6 exclusion, the same way the reading decoration already left
-  them undecorated. Prose beside the nested block is still read.
+- **Reads no longer stop after the first chunk.** VS Code's webview iframe is not granted the
+  `autoplay` permission, so Chromium lets a media element play only if `play()` was first called
+  on it within about five seconds of a click or key press in the preview. The player used to
+  create a fresh `<audio>` per chunk: the first chunk (~250 characters, "a few sentences")
+  always played and every later one was refused with `NotAllowedError`, which is what made
+  every read die after a sentence or two. The webview now keeps a pool of two `<audio>`
+  elements, unlocks them on the user's own gesture (mousedown, click or keydown, by playing
+  100 ms of silence) and reuses them for every chunk of every read, one playing while the other
+  preloads the next chunk (`media/read-aloud.js` §11a). A chunk keeps its blob URL until its
+  block is finished and hands its element back the moment it ends. If a read is started with
+  no gesture in the preview at all (a command from the palette on a fresh preview), the bar
+  says _Audio is blocked until you click in the preview_ instead of _Could not play the audio_.
+  New mocha suite `test/read-aloud/player.test.js` (7 tests) drives the real player under jsdom
+  with fake media elements through a multi-block read, the loading state between chunks, a
+  re-render, the hand-off, the release of finished audio and a second read with no new gesture.
+- `readAloudCancel` now carries a third argument, the webview's reason for giving the job up
+  (`stop`, `superseded by a new read`, `audio: NotAllowedError: …`, `next block gone`, …), which
+  the host writes into the _MPE Read Aloud_ channel as `tts cancelled … reason=webview (…)`; an
+  audio failure also names the DOMException in the bar and in the webview console.
+- A whole-block read of a blockquote or list item that contains a code fence, table, diagram,
+  embed or code chunk does not speak that nested content: text extraction skips every nested
+  exclusion, the same way the reading decoration leaves them undecorated. Prose beside the nested
+  block is still read.
 
 ### Security
 
-- The ElevenLabs API key is stored only in VS Code SecretStorage (`mpe.elevenlabs.apiKey`),
-  entered through the Set ElevenLabs API Key prompt and validated against
-  `GET /v1/user/subscription`; it is never written to settings, the webview, the output log or
-  exports.
-- Text is sent to ElevenLabs only when the user presses play, uses the selection affordance or
-  runs a read-aloud command; opening a preview makes no request. ElevenLabs keeps request
-  history by default (see the README privacy note).
-- `elevenLabsBaseUrl` is declared with `"scope": "machine"` so a workspace's `.vscode/settings.json`
-  cannot redirect the host that receives the key.
-- `.env` and `.env.*` (local key for the smoke script) are ignored by git (`.gitignore`) and
-  excluded from the packaged `.vsix` (`.vscodeignore`).
+- Text is sent to the local Kokoro server only when the user presses play, clicks a word, uses
+  the selection affordance or runs a read-aloud command; opening a preview makes no request.
+- `kokoroBaseUrl` is declared with `"scope": "machine"` so a workspace's `.vscode/settings.json`
+  cannot redirect the text of a document to another host, and the setting accepts plain `http`
+  on the loopback interface only; anything else must be `https`.
+- Every webview → host read-aloud message is validated for shape, and the ones that carry a
+  `sourceUri` must match the panel's current target before they are dispatched.
 
 ## [0.8.32-personal] - 2026-09-01
 

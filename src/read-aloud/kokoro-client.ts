@@ -1,4 +1,3 @@
-import type { ResponseMeta } from './elevenlabs-client';
 import type { KokoroWord } from './kokoro-alignment';
 import type {
   CaptionedSpeechRequestWire,
@@ -13,16 +12,23 @@ import type {
 import { assertSpeakable } from './speakable';
 
 /**
- * The Kokoro-FastAPI transport: the local, free, offline alternative to
- * ElevenLabs. Same shape as `ElevenLabsClient` — plain `fetch`, no `vscode`
- * import, one request per method call, a stubbed `fetchImpl` for tests — but
- * no API key, no credits and no per-model character limits: the server runs
- * on this machine and chunks internally.
+ * The Kokoro-FastAPI transport: the local, free, offline text-to-speech
+ * server behind every read. Plain `fetch`, no `vscode` import, one request
+ * per method call, a stubbed `fetchImpl` for tests; no API key, no credits
+ * and no per-model character limits: the server runs on this machine and
+ * chunks internally.
  *
- * Only the timestamped endpoint is used for speech, so the word highlight
- * works exactly as with ElevenLabs; see `kokoro-alignment.ts` for how the
- * server's per-token times become word spans.
+ * Only the timestamped endpoint is used for speech, which is what drives the
+ * word highlight; see `kokoro-alignment.ts` for how the server's per-token
+ * times become word spans.
  */
+
+/** Status and timing of one server response, for the output channel. */
+export interface ResponseMeta {
+  status: number;
+  requestId: string | null;
+  durationMs: number;
+}
 
 export const DEFAULT_KOKORO_BASE_URL = 'http://127.0.0.1:8880';
 
@@ -34,8 +40,8 @@ export const KOKORO_MODEL_ID = 'kokoro';
 
 /**
  * A local synthesis of a ~700-character chunk takes a second or two on Apple
- * Silicon and well under a minute on any CPU; the ElevenLabs 30 s would cut
- * off a slow machine's first (cold) request.
+ * Silicon and well under a minute on any CPU; a shorter timeout would cut
+ * off a slow machine's first (cold) request while the model warms up.
  */
 export const KOKORO_TIMEOUT_MS = 60000;
 
@@ -285,7 +291,7 @@ export class KokoroClient {
    * and the server's text normaliser off (see `kokoro-types.ts`).
    *
    * Refuses (throws before any request) when the text carries a character
-   * outside the speakable set, exactly like the ElevenLabs client (F5).
+   * outside the speakable set (F5).
    */
   public async synthesize(
     params: KokoroSynthesizeParams,
@@ -423,9 +429,6 @@ export class KokoroClient {
       const meta: ResponseMeta = {
         status: response.status,
         requestId: headerOf(response, 'x-request-id'),
-        characterCost: null,
-        region: null,
-        concurrentRequests: null,
         durationMs: Date.now() - startedAt,
       };
       this.logTransport(options.method, options.path, meta);
@@ -468,7 +471,7 @@ export class KokoroClient {
       return;
     }
     this.log(
-      `http ${method} ${path} status=${meta.status} dur=${meta.durationMs}ms provider=kokoro`,
+      `http ${method} ${path} status=${meta.status} dur=${meta.durationMs}ms`,
     );
   }
 }

@@ -5,10 +5,9 @@ import { segmentWords, type WordSpan } from './word-spans';
  *
  * Pure module: no `vscode`, no I/O.
  *
- * ElevenLabs returns one timing per *character* of the text we sent, so
- * `toWordSpans` can demand `characters.join('') === sentText`. Kokoro-FastAPI
- * returns one timing per *token of its own G2P*, and those tokens do not line
- * up one-to-one with the webview's `Intl.Segmenter` words:
+ * Kokoro-FastAPI returns one timing per *token of its own G2P*, not per
+ * character of the text we sent, and those tokens do not line up one-to-one
+ * with the webview's `Intl.Segmenter` words:
  *
  * - punctuation is its own token (`.`, `,`, `(`, `"`), which we drop;
  * - a hyphenated or dotted run is one token (`read-aloud`, `2024-09-02`,
@@ -233,8 +232,8 @@ function interpolate(
  * Align Kokoro's word timestamps with the word-like segments of `sentText`.
  *
  * `undefined` when the text has no words, when there are no usable tokens,
- * or when not a single word could be matched — the same "no word highlight"
- * outcome as an ElevenLabs alignment that fails its guard.
+ * or when not a single word could be matched: the audio then plays with no
+ * word highlight and a line in the output channel.
  */
 export function alignKokoroWords(
   sentText: string,

@@ -1,15 +1,15 @@
 import * as vscode from 'vscode';
-import type { ResponseMeta } from './elevenlabs-client';
+import type { ResponseMeta } from './kokoro-client';
 
 /**
  * The "MPE Read Aloud" diagnostic channel (F10, F14).
  *
  * Mirrors the "MPE AI Translation" channel in `src/ai-translator.ts`: the
- * ElevenLabs calls run in the Node extension host, so the webview's Network
+ * Kokoro calls run in the Node extension host, so the webview's Network
  * panel never sees them.
  *
- * The channel never contains the API key, and never more than the first 80
- * characters of any text sent for synthesis (F14).
+ * The channel never contains more than the first 80 characters of any text
+ * sent for synthesis (F14).
  */
 
 const CHANNEL_NAME = 'MPE Read Aloud';
@@ -59,6 +59,7 @@ export interface RequestLogFields {
   kind: string;
   requestId: string;
   chunk: string;
+  block: number;
   textLength: number;
   text: string;
   model: string;
@@ -76,14 +77,12 @@ export function logRequest(fields: RequestLogFields): void {
     `kind=${fields.kind}`,
     `req=${fields.requestId}`,
     `chunk=${fields.chunk}`,
+    `block=${fields.block}`,
     `text=${fields.textLength}ch "${redactText(fields.text)}"`,
     `model=${fields.model}`,
     `voice=${fields.voice}`,
     `status=${meta ? meta.status : 'n/a'}`,
     `request-id=${meta?.requestId ?? 'null'}`,
-    `character-cost=${meta?.characterCost ?? 'null'}`,
-    `x-region=${meta?.region ?? 'null'}`,
-    `concurrent=${meta?.concurrentRequests ?? 'null'}`,
     `dur=${meta?.durationMs ?? 0}ms`,
     `cache=${fields.cache}`,
   ];

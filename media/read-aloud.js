@@ -1,5 +1,5 @@
 /*
- * Read aloud (ElevenLabs) — preview app (spec F1, F2, F3, F4, F13 webview side).
+ * Read aloud (Kokoro) — preview app (spec F1, F2, F3, F4, F13, F15, F17 webview side).
  *
  * Injected into the live preview only (never into an export) through the `head`
  * argument of generateHTMLTemplateForPreview, next to media/read-aloud.css and
@@ -53,24 +53,22 @@
   var USER_SCROLL_IDLE_MS = 3000;
   var PROGRAMMATIC_SCROLL_MS = 1200;
   var GUTTER_MIN_PX = 28;
-  // Click to read (F17): wait out the double-click window before starting,
-  // and accept a click this far outside the word's glyph box.
+  // Click to read (F17): wait out the double-click window before starting.
   var CLICK_READ_DELAY_MS = 250;
-  var CLICK_HIT_PAD_PX = 4;
+  // Class on the preview root while click to read is on: playable text
+  // shows a pointer (media/read-aloud.css).
+  var CLICK_CLASS = 'mpe-ra-click';
+  // Media elements (autoplay policy, see section 11a): two <audio> elements
+  // reused for every chunk, unlocked on the user's gesture with 100 ms of
+  // silence (8 kHz, 8-bit mono wav).
+  var MEDIA_POOL_SIZE = 2;
+  var SILENT_WAV =
+    'data:audio/wav;base64,UklGRkQDAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YSADAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgA==';
 
-  // Codes the host has already surfaced (notification) or that need no UI.
+  // Codes that need no UI: a cancelled job, and text with nothing to say.
   var SILENT_CODES = {
     cancelled: true,
-    text_too_short: true,
     empty_text: true,
-    insufficient_credits: true,
-    feature_not_available: true,
-    subscription_required: true,
-  };
-  var KEY_CODES = {
-    missing_api_key: true,
-    invalid_api_key: true,
-    unauthorized: true,
   };
 
   var NAV_KEYS = {
@@ -148,6 +146,7 @@
   var floatSelection = null;
   var floatRect = null;
   var pendingClick = null;
+  var mediaPool = null;
 
   var record = emptyRecord();
 
@@ -156,13 +155,18 @@
       state: 'idle',
       requestId: null,
       kind: null,
-      blockKey: null,
       blockEl: null,
       blockEls: [],
-      // The element a click can seek within, and where record.text starts
-      // in that element's whole text (F17). Null for drag selections.
-      unitEl: null,
-      startOffset: 0,
+      // The blocks of the read in document order (F15, decision 5), each
+      // `{ key, el, start, end, startOffset, label, missing }`: `key` is the
+      // content hash (null for a table cell), [start, end) the block's range
+      // of record.text, `startOffset` where the first block's text starts in
+      // its element's whole text (a click on a word, F17). Empty for a drag
+      // selection, which can neither seek nor survive a re-render.
+      readBlocks: [],
+      // Index into readBlocks of the block that carries the decoration and
+      // the button state; −1 for a drag selection.
+      blockIndex: -1,
       wordSpans: [],
       label: '',
       text: '',
@@ -245,14 +249,6 @@
     var minutes = Math.floor(value / 60);
     var rest = value % 60;
     return minutes + ':' + (rest < 10 ? '0' : '') + rest;
-  }
-
-  function tail(text, max) {
-    return text.length <= max ? text : text.slice(text.length - max);
-  }
-
-  function head(text, max) {
-    return text.length <= max ? text : text.slice(0, max);
   }
 
   function clearTimer(id) {
@@ -532,13 +528,6 @@
     number.setAttribute('aria-label', 'Playback speed');
 
     var voice = makeButton('setup', 'Read aloud setup', 'mpe-ra-bar-voice');
-    var setKey = makeButton(
-      'setup',
-      'Set ElevenLabs API key',
-      'mpe-ra-bar-setkey',
-    );
-    setKey.textContent = 'Set API key…';
-    setKey.hidden = true;
 
     var status = document.createElement('span');
     status.className = 'mpe-ra-bar-status';
@@ -553,7 +542,6 @@
     bar.appendChild(select);
     bar.appendChild(number);
     bar.appendChild(voice);
-    bar.appendChild(setKey);
     bar.appendChild(status);
     document.body.appendChild(bar);
 
@@ -565,7 +553,6 @@
       select: select,
       number: number,
       voice: voice,
-      setKey: setKey,
       status: status,
     };
 
@@ -599,7 +586,7 @@
     if (!barParts) {
       return;
     }
-    var name = config.voiceName || 'ElevenLabs voice';
+    var name = config.voiceName || 'Kokoro voice';
     barParts.voice.textContent = name;
     barParts.voice.setAttribute(
       'title',
@@ -618,9 +605,6 @@
       'aria-label',
       record.state === 'playing' ? 'Pause' : 'Play',
     );
-    barParts.setKey.hidden = !(
-      record.state === 'error' && KEY_CODES[record.errorCode]
-    );
     syncSpeedControls();
     syncVoiceLabel();
     updateTimeDisplay();
@@ -632,7 +616,6 @@
       bar.hidden = true;
       if (barParts) {
         barParts.status.textContent = '';
-        barParts.setKey.hidden = true;
       }
     }
   }
@@ -655,9 +638,10 @@
       total += length;
     }
     if (record.current >= 0 && record.chunks[record.current]) {
+      var playing = record.chunks[record.current];
       elapsed =
         record.offsets[record.current] +
-        record.chunks[record.current].audio.currentTime;
+        (playing.slot ? playing.slot.el.currentTime : 0);
     }
     var text = formatTime(elapsed) + ' / ' + formatTime(total);
     if (text !== lastTimeText) {
@@ -713,10 +697,11 @@
 
   function applyRate(value, persist) {
     rate = normaliseRate(value);
-    for (var i = 0; i < record.chunks.length; i++) {
-      var audio = record.chunks[i].audio;
-      audio.preservesPitch = true;
-      audio.playbackRate = rate;
+    if (mediaPool) {
+      for (var i = 0; i < mediaPool.length; i++) {
+        mediaPool[i].el.preservesPitch = true;
+        mediaPool[i].el.playbackRate = rate;
+      }
     }
     syncSpeedControls();
     if (!persist) {
@@ -985,8 +970,21 @@
       }
     }
     applyThemeAttributes();
+    applyClickClass();
     applyGutter();
     rebindAfterRender();
+  }
+
+  /** Playable text shows a pointer only while click to read is on (F17). */
+  function applyClickClass() {
+    if (!root) {
+      return;
+    }
+    if (config.enabled && config.clickToRead) {
+      root.classList.add(CLICK_CLASS);
+    } else {
+      root.classList.remove(CLICK_CLASS);
+    }
   }
 
   function removeDecorations() {
@@ -1002,58 +1000,95 @@
       marked[j].classList.remove('mpe-ra-block');
     }
     removeThemeAttributes();
+    if (root) {
+      root.classList.remove(CLICK_CLASS);
+    }
     blocks = [];
     blocksByKey = Object.create(null);
     blocksByElement = new Map();
   }
 
-  /** After a re-render: rebind the playing block by key, or stop cleanly (F1). */
+  /**
+   * After a re-render (F1, decision 6): re-locate every block of the read by
+   * its content hash — in document order, so two blocks with the same text
+   * stay apart — rebuild the offset map and rebind the decoration. The read
+   * stops when the block being read is gone; a later block that is gone
+   * stops it when its first chunk is about to play (enterBlock).
+   */
   function rebindAfterRender() {
     if (record.state === 'idle') {
       return;
     }
-    if (record.kind !== 'block') {
-      endJob({ next: 'idle' });
+    if (record.kind !== 'block' || !record.readBlocks.length) {
+      endJob({ next: 'idle', reason: 'selection read; document re-rendered' });
       return;
     }
-    var entry = blocksByKey[record.blockKey];
-    if (!entry) {
+    var readBlocks = record.readBlocks;
+    var cursor = 0;
+    for (var b = 0; b < readBlocks.length; b++) {
+      var rb = readBlocks[b];
+      rb.el = null;
+      rb.missing = true;
+      for (var j = cursor; j < blocks.length; j++) {
+        if (blocks[j].key === rb.key) {
+          rb.el = blocks[j].el;
+          rb.missing = false;
+          cursor = j + 1;
+          break;
+        }
+      }
+    }
+    var current = readBlocks[record.blockIndex] || null;
+    if (!current || current.missing) {
       if (record.state === 'error') {
         clearTransientError();
       } else {
-        endJob({ next: 'idle' });
+        endJob({ next: 'idle', reason: 'current block gone after re-render' });
       }
       return;
     }
+    var entry = entryForElement(current.el);
     if (record.state === 'error') {
-      record.blockEl = entry.el;
-      ensureButton(entry);
-      setButtonState(entry.el, 'error', record.errorMessage);
+      record.blockEl = current.el;
+      if (entry) {
+        ensureButton(entry);
+      }
+      setButtonState(current.el, 'error', record.errorMessage);
       return;
     }
-    record.blockEl = entry.el;
     var lastSpan = record.lastSpan;
     // The word spans must go before the map is rebuilt: they split text nodes.
     clearWordBox();
     var previousEls = record.blockEls;
     record.blockEls = [];
-    if (previousEls.length !== 1 || previousEls[0] !== entry.el) {
+    if (previousEls.length !== 1 || previousEls[0] !== current.el) {
       undecorateBlocks(previousEls);
     }
-    record.unitEl = entry.el;
-    record.map = core.sliceExtraction(
-      core.extractText(entry.el),
-      record.startOffset,
-    ).map;
+    var remapped = core.remapBlocks(record.text, readBlocks);
+    for (var m = 0; m < remapped.missing.length; m++) {
+      readBlocks[remapped.missing[m]].missing = true;
+      readBlocks[remapped.missing[m]].el = null;
+    }
+    if (current.missing) {
+      endJob({
+        next: 'idle',
+        reason: 'current block text changed after re-render',
+      });
+      return;
+    }
+    record.map = remapped.map;
+    record.blockEl = current.el;
     for (var i = 0; i < record.allSpans.length; i++) {
       record.allSpans[i]._range = null;
       record.allSpans[i]._rangeMap = null;
     }
     record.spanIndex = 0;
     record.lastSpan = null;
-    ensureButton(entry);
-    setButtonState(entry.el, record.state, '');
-    record.blockEls = [entry.el];
+    if (entry) {
+      ensureButton(entry);
+    }
+    setButtonState(current.el, record.state, '');
+    record.blockEls = [current.el];
     decorateBlocks(record.blockEls);
     if (lastSpan) {
       // Keep the word visible across a re-render, also while paused.
@@ -1104,22 +1139,41 @@
   // 10. Job lifecycle (contract §3.6)
   // ---------------------------------------------------------------------------
 
+  /** Drop a chunk's audio and its blob; the chunk record itself stays. */
+  function releaseChunkAudio(chunk) {
+    if (chunk.released) {
+      return;
+    }
+    chunk.released = true;
+    if (chunk.slot) {
+      releaseSlot(chunk.slot);
+    }
+    try {
+      URL.revokeObjectURL(chunk.url);
+    } catch (error) {
+      /* ignore */
+    }
+  }
+
+  /**
+   * Memory rule of a continuous read: only the block being played and the
+   * prefetched chunks keep their audio; every chunk of an earlier block is
+   * released once the read moves on. Its spans and duration stay, so the time
+   * display and the seek rule (a released chunk needs a new read) still work.
+   */
+  function releaseBlocksBefore(blockIndex) {
+    for (var i = 0; i < record.chunks.length; i++) {
+      var chunk = record.chunks[i];
+      if (chunk.blockIndex < blockIndex) {
+        releaseChunkAudio(chunk);
+      }
+    }
+  }
+
   function releaseChunks() {
     stopLoop();
     for (var i = 0; i < record.chunks.length; i++) {
-      var chunk = record.chunks[i];
-      chunk.released = true;
-      try {
-        chunk.audio.pause();
-      } catch (error) {
-        /* ignore */
-      }
-      chunk.audio.removeAttribute('src');
-      try {
-        URL.revokeObjectURL(chunk.url);
-      } catch (error) {
-        /* ignore */
-      }
+      releaseChunkAudio(record.chunks[i]);
     }
     record.chunks = [];
     record.chunkCount = 0;
@@ -1146,7 +1200,8 @@
 
     record.requestId = null;
     if (postCancel && oldId) {
-      post('readAloudCancel', [sourceUri, oldId]);
+      // The reason lands in the host's output channel next to the job.
+      post('readAloudCancel', [sourceUri, oldId, options.reason || 'end']);
     }
 
     var blockEl = record.blockEl;
@@ -1173,7 +1228,8 @@
 
     setButtonState(blockEl, 'idle', '');
     record.blockEl = null;
-    record.blockKey = null;
+    record.readBlocks = [];
+    record.blockIndex = -1;
     record.label = '';
     record.errorCode = '';
     record.errorMessage = '';
@@ -1198,7 +1254,8 @@
     record.state = 'idle';
     record.kind = null;
     record.blockEl = null;
-    record.blockKey = null;
+    record.readBlocks = [];
+    record.blockIndex = -1;
     record.label = '';
     record.errorCode = '';
     record.errorMessage = '';
@@ -1217,7 +1274,7 @@
     if (record.state === 'error') {
       clearTransientError();
     } else if (record.state !== 'idle') {
-      endJob({ next: 'idle' });
+      endJob({ next: 'idle', reason: 'superseded by a new read' });
     }
 
     record = emptyRecord();
@@ -1227,16 +1284,18 @@
     record.text = options.text;
     record.map = options.map;
     record.label = options.label;
-    record.blockEl = options.blockEl || null;
-    record.blockKey = options.blockKey || null;
-    record.blockEls =
-      options.blocks && options.blocks.length
+    record.readBlocks = options.readBlocks ? options.readBlocks.slice() : [];
+    record.blockIndex = record.readBlocks.length ? 0 : -1;
+    record.blockEl = record.readBlocks.length
+      ? record.readBlocks[0].el
+      : options.blockEl || null;
+    record.blockEls = record.readBlocks.length
+      ? [record.readBlocks[0].el]
+      : options.blocks && options.blocks.length
         ? options.blocks.slice()
         : record.blockEl
           ? [record.blockEl]
           : [];
-    record.unitEl = options.unitEl || null;
-    record.startOffset = options.startOffset > 0 ? options.startOffset : 0;
     applyThemeAttributes();
     decorateBlocks(record.blockEls);
 
@@ -1244,11 +1303,11 @@
     if (options.blockId) {
       payload.blockId = options.blockId;
     }
-    if (options.previousText) {
-      payload.previousText = options.previousText;
-    }
-    if (options.nextText) {
-      payload.nextText = options.nextText;
+    if (options.kind === 'block' && record.readBlocks.length) {
+      // Decision 5: the host chunks block by block, never across a boundary.
+      payload.blocks = record.readBlocks.map(function (rb) {
+        return { key: rb.key, start: rb.start, end: rb.end };
+      });
     }
     post('readAloudSynthesize', [
       sourceUri,
@@ -1262,45 +1321,61 @@
   }
 
   /**
-   * Read a block from its start, or from text offset `startOffset` of its
-   * whole text (a click on a word, F17). A partial read gets the words before
-   * the cut as `previous_text`, so prosody continues as if the whole block
-   * were spoken.
+   * Read from `entry` to the end of the document (F15, decision 4): from the
+   * start of the block, or from text offset `startOffset` of its whole text
+   * (a click on a word, F17). Every eligible block after it goes into the
+   * same request with its boundaries, so the host never merges two blocks
+   * into one chunk (decision 5) and the next block's audio is synthesised
+   * while this one plays. A document longer than the request bound is read
+   * up to the last block that still fits.
    */
   function startBlockRead(entry, startOffset) {
     var start = startOffset > 0 ? startOffset : 0;
-    var whole = core.extractText(entry.el);
-    var extracted = start > 0 ? core.sliceExtraction(whole, start) : whole;
-    if (!extracted.text) {
+    var position = blocks.indexOf(entry);
+    if (position < 0) {
       return;
     }
-    var previous = null;
-    var next = null;
-    for (var i = 0; i < blocks.length; i++) {
-      if (blocks[i] === entry) {
-        previous = i > 0 ? blocks[i - 1] : null;
-        next = i + 1 < blocks.length ? blocks[i + 1] : null;
+    var elements = [];
+    var total = 0;
+    for (var i = position; i < blocks.length; i++) {
+      var length = blocks[i].text.length + 1;
+      if (elements.length && total + length > core.MAX_TEXT_CHARS) {
         break;
       }
+      elements.push(blocks[i].el);
+      total += length;
     }
-    var previousText = '';
-    if (start > 0) {
-      previousText = tail(whole.text.slice(0, start).replace(/\s+$/, ''), 300);
-    } else if (previous) {
-      previousText = tail(previous.text, 300);
+    var extracted = core.extractBlocks(elements, start);
+    if (!extracted.text || extracted.text.length > core.MAX_TEXT_CHARS) {
+      return;
+    }
+    var readBlocks = [];
+    for (var k = 0; k < extracted.blocks.length; k++) {
+      var block = extracted.blocks[k];
+      var item = entryForElement(block.el);
+      var first = block.el === entry.el;
+      var text = extracted.text.slice(block.start, block.end);
+      readBlocks.push({
+        key: item ? item.key : core.blockKey(block.el, text),
+        el: block.el,
+        start: block.start,
+        end: block.end,
+        startOffset: first ? start : 0,
+        label:
+          !first || start > 0 || !item ? core.blockLabel(text) : item.label,
+        missing: false,
+      });
+    }
+    if (!readBlocks.length) {
+      return;
     }
     startRead({
       kind: 'block',
       text: extracted.text,
       map: extracted.map,
-      label: start > 0 ? core.blockLabel(extracted.text) : entry.label,
-      blockEl: entry.el,
-      blockKey: entry.key,
+      label: readBlocks[0].label,
       blockId: entry.key + '#' + entry.index + (start > 0 ? '@' + start : ''),
-      previousText: previousText,
-      nextText: next ? head(next.text, 300) : '',
-      unitEl: entry.el,
-      startOffset: start,
+      readBlocks: readBlocks,
     });
   }
 
@@ -1351,40 +1426,6 @@
     return null;
   }
 
-  /**
-   * True when the client point lies on the clicked word's glyph boxes (with
-   * a small pad). A click in the margin, between lines or past the end of a
-   * line then starts nothing: every read costs a request.
-   */
-  function clickHitsWord(resolved, x, y) {
-    var range = null;
-    try {
-      range = core.spanToRange(
-        resolved.wholeMap,
-        { charStart: resolved.start, charEnd: resolved.wordEnd },
-        document,
-      );
-    } catch (error) {
-      return false;
-    }
-    if (!range || typeof range.getClientRects !== 'function') {
-      return false;
-    }
-    var rects = range.getClientRects();
-    for (var i = 0; i < rects.length; i++) {
-      var rect = rects[i];
-      if (
-        x >= rect.left - CLICK_HIT_PAD_PX &&
-        x <= rect.right + CLICK_HIT_PAD_PX &&
-        y >= rect.top - CLICK_HIT_PAD_PX &&
-        y <= rect.bottom + CLICK_HIT_PAD_PX
-      ) {
-        return true;
-      }
-    }
-    return false;
-  }
-
   function cancelPendingClickRead() {
     if (pendingClick) {
       clearTimeout(pendingClick.timer);
@@ -1403,9 +1444,12 @@
   }
 
   /**
-   * A plain left click on a word (no drag, no modifier, not a link or a
-   * checkbox) schedules a read from that word. The delay lets a double or
-   * triple click, whose second press cancels the timer, select text as usual.
+   * A plain left click inside an eligible block (no drag, no modifier, not a
+   * link or a checkbox) schedules a read from the nearest word: the caret
+   * the browser places at the point snaps to the word under it, or to the
+   * word before a space or a line end, so a click in the margin or between
+   * lines starts too (decision 9). The delay lets a double or triple click,
+   * whose second press cancels the timer, select text as usual.
    */
   function maybeClickToRead(event, element) {
     if (
@@ -1454,11 +1498,10 @@
       traceClick('refused', resolved.reason);
       return;
     }
-    if (!clickHitsWord(resolved, event.clientX, event.clientY)) {
-      traceClick(
-        'missed the word',
-        resolved.wholeText.slice(resolved.start, resolved.wordEnd),
-      );
+    if (!resolved.el.contains(element)) {
+      // The caret snapped into a neighbouring block: the click landed between
+      // blocks, not inside this one's box.
+      traceClick('outside the block box', resolved.unit);
       return;
     }
     traceClick('scheduled', {
@@ -1475,12 +1518,32 @@
     };
   }
 
+  /** The block of the current read that `el` is, or null. */
+  function readBlockFor(el) {
+    for (var i = 0; i < record.readBlocks.length; i++) {
+      if (record.readBlocks[i].el === el) {
+        return record.readBlocks[i];
+      }
+    }
+    return null;
+  }
+
+  /**
+   * The offset into record.text of text offset `start` in the whole text of
+   * `el`, when `el` is a block of the current read and `start` is at or after
+   * where the read began in it; −1 otherwise.
+   */
+  function readOffsetOf(el, start) {
+    var rb = readBlockFor(el);
+    if (!rb || rb.missing || start < rb.startOffset) {
+      return -1;
+    }
+    return rb.start + (start - rb.startOffset);
+  }
+
   /** The click landed inside the text of the read that is already loaded. */
   function clickTargetsCurrentRead(resolved) {
-    if (!record.unitEl || record.unitEl !== resolved.el) {
-      return false;
-    }
-    if (resolved.start < record.startOffset) {
+    if (readOffsetOf(resolved.el, resolved.start) < 0) {
       return false;
     }
     return (
@@ -1493,7 +1556,9 @@
   /**
    * Move playback of the current read to the word whose text starts at
    * `relative` (an offset into record.text), when the chunk holding it has
-   * arrived. No request, no cost. False when a new read is needed instead.
+   * arrived and still has its audio. No request. False when a new read is
+   * needed instead (the chunk is not synthesised yet, or its block is
+   * finished and its audio released).
    */
   function seekToOffset(relative) {
     var spans = record.allSpans;
@@ -1522,6 +1587,9 @@
       return false;
     }
     var chunk = record.chunks[chunkIndex];
+    if (chunk.released) {
+      return false;
+    }
     var local = spans[k].start - record.offsets[chunkIndex];
     if (!(local >= 0)) {
       local = 0;
@@ -1529,22 +1597,22 @@
     stopLoop();
     clearWordBox();
     var playing = record.chunks[record.current];
-    if (playing && record.current !== chunkIndex) {
+    if (playing && playing !== chunk && playing.slot) {
+      // Abandoned mid-way: rewind it, so a later pass starts at its top.
       try {
-        playing.audio.pause();
+        playing.slot.el.pause();
+        playing.slot.el.currentTime = 0;
       } catch (error) {
         /* ignore */
       }
     }
-    for (var j = chunkIndex + 1; j < record.chunks.length; j++) {
-      try {
-        record.chunks[j].audio.currentTime = 0;
-      } catch (error) {
-        /* ignore */
-      }
+    var slot = loadChunk(chunk);
+    if (!slot) {
+      return false;
     }
     try {
-      chunk.audio.currentTime = local;
+      // Before the metadata has loaded this sets the start position.
+      slot.el.currentTime = local;
     } catch (error) {
       return false;
     }
@@ -1566,11 +1634,11 @@
     if (!el.isConnected || !root.contains(el)) {
       return;
     }
-    if (
-      clickTargetsCurrentRead(resolved) &&
-      seekToOffset(resolved.start - record.startOffset)
-    ) {
-      traceClick('seeked', resolved.start - record.startOffset);
+    var offset = clickTargetsCurrentRead(resolved)
+      ? readOffsetOf(resolved.el, resolved.start)
+      : -1;
+    if (offset >= 0 && seekToOffset(offset)) {
+      traceClick('seeked', offset);
       hideFloat();
       return;
     }
@@ -1588,6 +1656,8 @@
         return;
       }
     }
+    // A table cell is its own reading unit and the read ends at the cell
+    // (decision 7): no continuation to the end of the document.
     var sliced = core.sliceExtraction(core.extractText(el), resolved.start);
     if (!sliced.text || sliced.text.length > core.MAX_TEXT_CHARS) {
       return;
@@ -1597,9 +1667,17 @@
       text: sliced.text,
       map: sliced.map,
       label: core.blockLabel(sliced.text),
-      blocks: [el],
-      unitEl: el,
-      startOffset: resolved.start,
+      readBlocks: [
+        {
+          key: null,
+          el: el,
+          start: 0,
+          end: sliced.text.length,
+          startOffset: resolved.start,
+          label: core.blockLabel(sliced.text),
+          missing: false,
+        },
+      ],
     });
   }
 
@@ -1607,19 +1685,189 @@
   // 11. Playback (F3, F4)
   // ---------------------------------------------------------------------------
 
+  // ---------------------------------------------------------------------------
+  // 11a. Media elements (autoplay policy)
+  //
+  // VS Code's webview iframe is cross-origin and is not granted the
+  // `autoplay` permission, so Chromium lets a media element play only once
+  // play() has been called on it with transient user activation: within
+  // about five seconds of a click or key press in the preview. A fresh
+  // <audio> per chunk therefore played the first chunk of a read and was
+  // refused with NotAllowedError on every later one. Two elements are
+  // created once, unlocked on the user's own gesture (mousedown, click,
+  // keydown: 100 ms of silence is played on them) and reused for every chunk
+  // of every read: one plays while the other preloads the next chunk, so
+  // the hand-off stays gapless. A chunk keeps its blob URL until its block
+  // is finished; the element it played on is handed back as soon as it ends.
+  // ---------------------------------------------------------------------------
+
+  function ensureMediaPool() {
+    if (mediaPool) {
+      return mediaPool;
+    }
+    mediaPool = [];
+    for (var i = 0; i < MEDIA_POOL_SIZE; i++) {
+      var el = new Audio();
+      el.preload = 'auto';
+      el.preservesPitch = true;
+      el.playbackRate = rate;
+      var slot = { el: el, chunk: null, unlocked: false };
+      attachSlotEvents(slot);
+      mediaPool.push(slot);
+    }
+    return mediaPool;
+  }
+
+  function attachSlotEvents(slot) {
+    var el = slot.el;
+    el.addEventListener('loadedmetadata', function () {
+      var chunk = slot.chunk;
+      if (!chunk || chunk.released) {
+        return;
+      }
+      if (isFinite(el.duration)) {
+        chunk.duration = el.duration;
+        updateTimeDisplay();
+      }
+    });
+    el.addEventListener('ended', function () {
+      var chunk = slot.chunk;
+      if (!chunk || chunk.released) {
+        return;
+      }
+      onChunkEnded(chunk);
+    });
+    el.addEventListener('error', function () {
+      var chunk = slot.chunk;
+      if (!chunk || chunk.released || record.chunks.indexOf(chunk) === -1) {
+        return;
+      }
+      if (record.current >= 0 && record.chunks[record.current] === chunk) {
+        handleAudioFailure('error event', el);
+      } else {
+        // A preload failed: forget it, playChunk loads the chunk again.
+        detachSlot(slot);
+      }
+    });
+  }
+
+  function markUnlocked(slot) {
+    return function () {
+      slot.unlocked = true;
+    };
+  }
+
+  function ignoreRejection() {
+    /* a play() refused outside a gesture leaves the element locked */
+  }
+
+  /**
+   * Unlock every idle element while the user's gesture is fresh. Called from
+   * the capture-phase mousedown, click and keydown listeners; cheap once the
+   * elements are unlocked, and never touches an element that holds a chunk.
+   */
+  function unlockMediaPool() {
+    var pool = ensureMediaPool();
+    for (var i = 0; i < pool.length; i++) {
+      var slot = pool[i];
+      if (slot.unlocked || slot.chunk) {
+        continue;
+      }
+      try {
+        slot.el.src = SILENT_WAV;
+        var promise = slot.el.play();
+        if (promise && typeof promise.then === 'function') {
+          promise.then(markUnlocked(slot), ignoreRejection);
+        }
+      } catch (error) {
+        /* ignore */
+      }
+    }
+  }
+
+  function freeSlot() {
+    var pool = ensureMediaPool();
+    for (var i = 0; i < pool.length; i++) {
+      if (!pool[i].chunk) {
+        return pool[i];
+      }
+    }
+    return null;
+  }
+
+  function detachSlot(slot) {
+    if (slot.chunk) {
+      slot.chunk.slot = null;
+      slot.chunk = null;
+    }
+  }
+
+  /** Hand an element back: detach its chunk and drop the loaded resource. */
+  function releaseSlot(slot) {
+    var el = slot.el;
+    detachSlot(slot);
+    try {
+      el.pause();
+    } catch (error) {
+      /* ignore */
+    }
+    el.removeAttribute('src');
+    try {
+      el.load();
+    } catch (error) {
+      /* ignore */
+    }
+  }
+
+  /**
+   * Bind `chunk` to an element and start loading its audio: the element it
+   * already has, else a free one, else the element of whichever chunk is not
+   * the one playing. Null only when nothing can be freed.
+   */
+  function loadChunk(chunk) {
+    if (chunk.slot) {
+      return chunk.slot;
+    }
+    var slot = freeSlot();
+    if (!slot) {
+      var pool = ensureMediaPool();
+      var playing = record.current >= 0 ? record.chunks[record.current] : null;
+      for (var i = 0; i < pool.length; i++) {
+        if (pool[i].chunk !== playing) {
+          releaseSlot(pool[i]);
+          slot = pool[i];
+          break;
+        }
+      }
+    }
+    if (!slot) {
+      return null;
+    }
+    slot.chunk = chunk;
+    chunk.slot = slot;
+    slot.el.playbackRate = rate;
+    slot.el.preservesPitch = true;
+    slot.el.src = chunk.url;
+    return slot;
+  }
+
+  // ---------------------------------------------------------------------------
+  // 11b. Chunks
+  // ---------------------------------------------------------------------------
+
   function appendChunk(message) {
     var index = record.chunks.length;
     var blob = base64ToBlob(message.audioBase64, message.mimeType);
     var url = URL.createObjectURL(blob);
-    var audio = new Audio(url);
-    audio.preload = 'auto';
-    audio.preservesPitch = true;
-    audio.playbackRate = rate;
 
     var chunk = {
-      audio: audio,
       url: url,
+      slot: null,
       released: false,
+      blockIndex:
+        typeof message.blockIndex === 'number' && message.blockIndex >= 0
+          ? message.blockIndex
+          : 0,
       duration: null,
       durationHint:
         typeof message.durationHint === 'number' ? message.durationHint : null,
@@ -1652,69 +1900,114 @@
       }
     }
 
-    audio.addEventListener('loadedmetadata', function () {
-      if (chunk.released) {
-        return;
-      }
-      if (isFinite(audio.duration)) {
-        chunk.duration = audio.duration;
-        updateTimeDisplay();
-      }
-    });
-    audio.addEventListener('ended', onChunkEnded);
-    audio.addEventListener('error', function () {
-      // A chunk torn down by a stop or a supersede fires `error` when its src
-      // goes away; that must never fail the job that replaced it.
-      if (chunk.released || record.chunks.indexOf(chunk) === -1) {
-        return;
-      }
-      handleAudioFailure();
-    });
-
     record.chunks.push(chunk);
+    if (record.current >= 0 && index === record.current + 1) {
+      // The chunk after the one playing: preload it on the idle element.
+      loadChunk(chunk);
+    }
     return index;
+  }
+
+  /**
+   * Hand the decoration and the button state over to block `blockIndex` of
+   * the read (F15): the previous block is undecorated and its button reset,
+   * the new one pilled, the bar label updated, and the audio of every block
+   * before it released. Auto-scroll follows with the first painted word.
+   * False, with the read stopped, when the block is gone after a re-render
+   * (decision 6).
+   */
+  function enterBlock(blockIndex) {
+    if (blockIndex === record.blockIndex || !record.readBlocks.length) {
+      return true;
+    }
+    var rb = record.readBlocks[blockIndex];
+    if (!rb) {
+      return true;
+    }
+    if (rb.missing || !rb.el || !rb.el.isConnected) {
+      endJob({ next: 'idle', reason: 'next block gone (document changed)' });
+      return false;
+    }
+    clearWordBox();
+    var previousEls = record.blockEls;
+    record.blockEls = [];
+    undecorateBlocks(previousEls);
+    if (record.blockEl && record.blockEl !== rb.el) {
+      setButtonState(record.blockEl, 'idle', '');
+    }
+    record.blockIndex = blockIndex;
+    record.blockEl = rb.el;
+    record.label = rb.label || record.label;
+    record.blockEls = [rb.el];
+    decorateBlocks(record.blockEls);
+    releaseBlocksBefore(blockIndex);
+    return true;
   }
 
   function playChunk(index) {
     var chunk = record.chunks[index];
-    if (!chunk) {
+    if (!chunk || chunk.released) {
+      return;
+    }
+    if (!enterBlock(chunk.blockIndex)) {
+      return;
+    }
+    var slot = loadChunk(chunk);
+    if (!slot) {
+      handleAudioFailure('no media element free');
       return;
     }
     record.current = index;
     record.spanIndex = chunk.spanStart;
     record.lastSpan = null;
     record.state = 'playing';
-    // Lazy synthesis (F11): the host holds the request for the chunk after
-    // this one until it hears that this one is playing, so stopping early
-    // never pays for audio that was not about to be heard.
+    // Prefetch window (F11): the host requests up to two chunks beyond the
+    // one it hears playing, so the next block's audio is ready before this
+    // one ends and a stop wastes little synthesis.
     if (record.requestId !== null) {
       post('readAloudPlaying', [sourceUri, record.requestId, index]);
     }
-    chunk.audio.playbackRate = rate;
-    chunk.audio.preservesPitch = true;
-    var promise = chunk.audio.play();
+    slot.el.playbackRate = rate;
+    slot.el.preservesPitch = true;
+    var promise = slot.el.play();
     if (promise && typeof promise.catch === 'function') {
-      promise.catch(function () {
-        handleAudioFailure();
+      promise.catch(function (reason) {
+        // A play() cut short by our own pause, seek or reload is not a
+        // failure; only the chunk that is still meant to be playing counts.
+        if (
+          slot.chunk === chunk &&
+          !chunk.released &&
+          record.state === 'playing' &&
+          record.chunks[record.current] === chunk
+        ) {
+          handleAudioFailure(reason, slot.el);
+        }
       });
     }
     startLoop();
     setButtonState(record.blockEl, 'playing', '');
     showBar('');
+    var next = record.chunks[index + 1];
+    if (next && !next.released && !next.slot) {
+      loadChunk(next);
+    }
   }
 
-  function onChunkEnded(event) {
+  function onChunkEnded(chunk) {
     // E6 guard (A-03).
     if (
       record.state !== 'playing' ||
       record.requestId === null ||
       record.current < 0 ||
-      !record.chunks[record.current] ||
-      event.target !== record.chunks[record.current].audio
+      record.chunks[record.current] !== chunk
     ) {
       return;
     }
     var finished = record.current;
+    if (chunk.slot) {
+      // Hand the element back so the chunk after next can preload on it.
+      releaseSlot(chunk.slot);
+    }
     if (record.chunks[finished + 1]) {
       playChunk(finished + 1);
       return;
@@ -1730,16 +2023,47 @@
     endJob({ next: 'idle', finished: true });
   }
 
-  function handleAudioFailure() {
+  /** Why an HTMLMediaElement failed, for the bar and the host log. */
+  function describeAudioFailure(reason, audio) {
+    var parts = [];
+    if (reason && typeof reason === 'object' && reason.name) {
+      parts.push(reason.name + (reason.message ? ': ' + reason.message : ''));
+    } else if (typeof reason === 'string') {
+      parts.push(reason);
+    }
+    try {
+      if (audio && audio.error) {
+        parts.push(
+          'MediaError ' + audio.error.code + ' ' + (audio.error.message || ''),
+        );
+      }
+    } catch (error) {
+      /* ignore */
+    }
+    return parts.join('; ');
+  }
+
+  function handleAudioFailure(reason, audio) {
     if (record.state === 'idle' || record.state === 'error') {
       return;
     }
+    var detail = describeAudioFailure(reason, audio);
+    if (window.console && console.error) {
+      console.error('read-aloud: audio failure', detail, reason);
+    }
+    var blocked =
+      !!reason &&
+      typeof reason === 'object' &&
+      reason.name === 'NotAllowedError';
     // E7 (A-38): a local failure, but the host job may still be running.
     endJob({
       next: 'error',
       forceCancel: true,
       code: 'audio_error',
-      message: 'Could not play the audio.',
+      message: blocked
+        ? 'Audio is blocked until you click in the preview. Click a word or a play button to start.'
+        : 'Could not play the audio.' + (detail ? ' (' + detail + ')' : ''),
+      reason: 'audio: ' + (detail || 'unknown'),
     });
   }
 
@@ -1766,7 +2090,9 @@
     if (!chunk) {
       return;
     }
-    var time = record.offsets[record.current] + chunk.audio.currentTime;
+    var time =
+      record.offsets[record.current] +
+      (chunk.slot ? chunk.slot.el.currentTime : 0);
     var spans = record.allSpans;
     while (
       record.spanIndex < spans.length &&
@@ -1788,8 +2114,8 @@
 
   function pausePlayback() {
     var chunk = record.chunks[record.current];
-    if (chunk) {
-      chunk.audio.pause();
+    if (chunk && chunk.slot) {
+      chunk.slot.el.pause();
     }
     stopLoop();
     record.state = 'paused';
@@ -1868,7 +2194,7 @@
       clearTransientError();
       return;
     }
-    endJob({ next: 'idle' });
+    endJob({ next: 'idle', reason: 'stop' });
   }
 
   function handleAction(action) {
@@ -1934,7 +2260,7 @@
     try {
       index = appendChunk(message);
     } catch (error) {
-      handleAudioFailure();
+      handleAudioFailure(error);
       return;
     }
     if (record.state === 'loading') {
@@ -2006,6 +2332,7 @@
       decorate();
     } else {
       applyThemeAttributes();
+      applyClickClass();
     }
     syncVoiceLabel();
     syncSpeedControls();
@@ -2065,6 +2392,7 @@
   // ---------------------------------------------------------------------------
 
   function onDocumentClick(event) {
+    unlockMediaPool();
     var target = event.target;
     var element = target && target.nodeType === 1 ? target : null;
     if (!element && target && target.parentElement) {
@@ -2134,6 +2462,8 @@
     document.addEventListener(
       'mousedown',
       function (event) {
+        // A gesture: the moment the media elements can be unlocked (11a).
+        unlockMediaPool();
         // Any new press, including the second one of a double click,
         // cancels a click-to-read that is still waiting out its delay.
         cancelPendingClickRead();
@@ -2159,11 +2489,16 @@
     window.addEventListener('wheel', markUserScroll, { passive: true });
     window.addEventListener('touchmove', markUserScroll, { passive: true });
     window.addEventListener('scroll', markUserScroll, { passive: true });
-    window.addEventListener('keydown', function (event) {
-      if (NAV_KEYS[event.key]) {
-        markUserScroll();
-      }
-    });
+    window.addEventListener(
+      'keydown',
+      function (event) {
+        unlockMediaPool();
+        if (NAV_KEYS[event.key]) {
+          markUserScroll();
+        }
+      },
+      true,
+    );
     window.addEventListener('scroll', hideFloat, { passive: true });
   }
 

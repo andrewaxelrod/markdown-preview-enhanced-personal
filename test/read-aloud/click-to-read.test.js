@@ -285,7 +285,16 @@ suite('read-aloud click to read: resolveClick (F17)', function () {
     assert.strictEqual(inCode.hint, core.HINT_INELIGIBLE);
 
     assert.strictEqual(click(textNodeOf('diagram'), 2).reason, 'ineligible');
-    assert.strictEqual(click(textNodeOf('mathp'), 2).reason, 'ineligible');
+
+    // Decision 8: a click on the prose beside inline math reads the prose,
+    // a click on the math itself is refused.
+    const besideMath = click(textNodeOf('mathp'), 2);
+    assert.strictEqual(besideMath.ok, true);
+    assert.strictEqual(besideMath.el.id, 'mathp');
+    assert.strictEqual(besideMath.wholeText, 'Inline: and more.');
+    const onMath = click(doc.querySelector('#mathp mi').firstChild, 0);
+    assert.strictEqual(onMath.ok, false);
+    assert.strictEqual(onMath.reason, 'ineligible');
 
     const nested = doc
       .getElementById('qfence')
@@ -306,10 +315,17 @@ suite('read-aloud click to read: resolveClick (F17)', function () {
     );
   });
 
-  test('a cell that contains math, or a table inside a code chunk, is refused', function () {
+  test('math inside a cell is skipped, a table inside a code chunk is refused', function () {
     const mathCell = click(textNodeOf('mathcell'), 1);
-    assert.strictEqual(mathCell.ok, false);
-    assert.strictEqual(mathCell.reason, 'ineligible');
+    assert.strictEqual(mathCell.ok, true);
+    assert.strictEqual(mathCell.unit, 'cell');
+    assert.strictEqual(mathCell.wholeText, 'Math');
+    const onCellMath = click(
+      doc.getElementById('mathcell').querySelector('.katex').firstChild,
+      0,
+    );
+    assert.strictEqual(onCellMath.ok, false);
+    assert.strictEqual(onCellMath.reason, 'ineligible');
 
     const plainCell = click(textNodeOf('cell4'), 0);
     assert.strictEqual(plainCell.ok, true);

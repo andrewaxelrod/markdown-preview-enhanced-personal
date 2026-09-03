@@ -1,9 +1,9 @@
 /* global suite, test, suiteSetup, suiteTeardown */
 
 /**
- * T-06 … T-09 — `src/read-aloud/chunker.ts` and `src/read-aloud/models.ts` (F11).
+ * T-06 … T-08 — `src/read-aloud/chunker.ts` (F11, decision 5).
  *
- * Both modules are pure, so each is compiled on the fly with esbuild exactly
+ * The module is pure, so it is compiled on the fly with esbuild exactly
  * like `test/block-id-helpers.test.js`.
  */
 
@@ -13,30 +13,15 @@ const fs = require('fs');
 const esbuild = require('esbuild');
 
 let chunker;
-let models;
-const tmpFiles = [];
+let tmpFile;
 
 const SENTENCES =
   'One two three. Four five six. Seven eight nine. Ten eleven twelve.';
 
-async function compile(moduleName) {
-  const result = await esbuild.build({
-    entryPoints: [
-      path.join(__dirname, '..', '..', 'src', 'read-aloud', `${moduleName}.ts`),
-    ],
-    bundle: true,
-    platform: 'node',
-    format: 'cjs',
-    target: 'node18',
-    write: false,
-    logLevel: 'silent',
-    external: ['vscode', 'crossnote'],
-  });
-  const tmpFile = path.join(__dirname, `.${moduleName}.bundle.cjs`);
-  fs.writeFileSync(tmpFile, result.outputFiles[0].text);
-  tmpFiles.push(tmpFile);
-  return require(tmpFile);
-}
+const LONG = Array.from(
+  { length: 12 },
+  (_, i) => `Sentence number ${i + 1} is here to fill the paragraph out.`,
+).join(' ');
 
 function stripWhitespace(value) {
   return value.replace(/\s+/g, '');
@@ -46,15 +31,26 @@ suite('read-aloud/chunker', function () {
   this.timeout(20000);
 
   suiteSetup(async function () {
-    chunker = await compile('chunker');
-    models = await compile('models');
+    const result = await esbuild.build({
+      entryPoints: [
+        path.join(__dirname, '..', '..', 'src', 'read-aloud', 'chunker.ts'),
+      ],
+      bundle: true,
+      platform: 'node',
+      format: 'cjs',
+      target: 'node18',
+      write: false,
+      logLevel: 'silent',
+      external: ['vscode', 'crossnote'],
+    });
+    tmpFile = path.join(__dirname, '.chunker.bundle.cjs');
+    fs.writeFileSync(tmpFile, result.outputFiles[0].text);
+    chunker = require(tmpFile);
   });
 
   suiteTeardown(function () {
-    for (const tmpFile of tmpFiles) {
-      if (fs.existsSync(tmpFile)) {
-        fs.unlinkSync(tmpFile);
-      }
+    if (tmpFile && fs.existsSync(tmpFile)) {
+      fs.unlinkSync(tmpFile);
     }
   });
 
@@ -84,6 +80,7 @@ suite('read-aloud/chunker', function () {
         assert.ok(chunk.text.length <= plan.limit, chunk.text);
         assert.strictEqual(chunk.text, chunk.text.trim());
         assert.ok(chunk.text.length > 0);
+        assert.strictEqual(chunk.blockIndex, 0);
       }
     });
 
@@ -95,14 +92,8 @@ suite('read-aloud/chunker', function () {
     });
   });
 
-  // Lazy synthesis: a short first chunk, larger ones after it, never above
-  // the limit.
+  // A short first chunk, larger ones after it, never above the limit.
   suite('T-06b chunk targets', function () {
-    const LONG = Array.from(
-      { length: 12 },
-      (_, i) => `Sentence number ${i + 1} is here to fill the paragraph out.`,
-    ).join(' ');
-
     test('defaults are 250 for the first chunk and 700 after it', function () {
       assert.strictEqual(chunker.FIRST_CHUNK_TARGET_CHARS, 250);
       assert.strictEqual(chunker.CHUNK_TARGET_CHARS, 700);
@@ -138,7 +129,7 @@ suite('read-aloud/chunker', function () {
     });
 
     test('explicit targets pack the first chunk and the rest differently', function () {
-      const plan = chunker.planChunks(SENTENCES, 10000, 'en', undefined, {
+      const plan = chunker.planChunks(SENTENCES, 10000, 'en', {
         first: 20,
         rest: 40,
       });
@@ -160,7 +151,7 @@ suite('read-aloud/chunker', function () {
     });
 
     test('targets never exceed the effective limit', function () {
-      const plan = chunker.planChunks(SENTENCES, 34, 'en', undefined, {
+      const plan = chunker.planChunks(SENTENCES, 34, 'en', {
         first: 1000,
         rest: 1000,
       });
@@ -170,27 +161,6 @@ suite('read-aloud/chunker', function () {
           'One two three. Four five six.',
           'Seven eight nine.',
           'Ten eleven twelve.',
-        ],
-      );
-    });
-
-    test('replanFrom honours the targets too', function () {
-      const replanned = chunker.replanFrom(
-        SENTENCES,
-        15,
-        10000,
-        'en',
-        undefined,
-        {
-          first: 20,
-          rest: 40,
-        },
-      );
-      assert.deepStrictEqual(
-        replanned.map((chunk) => [chunk.charOffset, chunk.text]),
-        [
-          [15, 'Four five six.'],
-          [30, 'Seven eight nine. Ten eleven twelve.'],
         ],
       );
     });
@@ -208,65 +178,8 @@ suite('read-aloud/chunker', function () {
     });
   });
 
-  // T-07
-  suite('T-07 context windows', function () {
-    test('contextTail and contextHead cap at 300 characters', function () {
-      assert.strictEqual(chunker.CONTEXT_WINDOW_CHARS, 300);
-      const long = 'abcdefghij'.repeat(40);
-      assert.strictEqual(long.length, 400);
-      assert.strictEqual(chunker.contextTail(long).length, 300);
-      assert.strictEqual(chunker.contextTail(long), long.slice(100));
-      assert.strictEqual(chunker.contextHead(long).length, 300);
-      assert.strictEqual(chunker.contextHead(long), long.slice(0, 300));
-      assert.strictEqual(chunker.contextTail('short'), 'short');
-      assert.strictEqual(chunker.contextHead('short'), 'short');
-      assert.strictEqual(chunker.contextTail(''), '');
-    });
-
-    test('inner chunks carry their neighbours, outer context only the edges', function () {
-      const plan = chunker.planChunks(SENTENCES, 34, 'en', {
-        previousText: 'PREV',
-        nextText: 'NEXT',
-      });
-      assert.deepStrictEqual(
-        plan.chunks.map((chunk) => [chunk.previousText, chunk.nextText]),
-        [
-          ['PREV', 'Seven eight nine.'],
-          ['One two three. Four five six.', 'Ten eleven twelve.'],
-          ['Seven eight nine.', 'NEXT'],
-        ],
-      );
-    });
-
-    test('a single chunk carries only the outer context', function () {
-      const plan = chunker.planChunks('Hello world.', 10000, 'en', {
-        previousText: 'BEFORE',
-        nextText: 'AFTER',
-      });
-      assert.strictEqual(plan.chunks.length, 1);
-      assert.strictEqual(plan.chunks[0].previousText, 'BEFORE');
-      assert.strictEqual(plan.chunks[0].nextText, 'AFTER');
-    });
-
-    test('outer context is itself truncated to 300 characters', function () {
-      const long = 'abcdefghij'.repeat(40);
-      const plan = chunker.planChunks('Hello world.', 10000, 'en', {
-        previousText: long,
-        nextText: long,
-      });
-      assert.strictEqual(plan.chunks[0].previousText, long.slice(100));
-      assert.strictEqual(plan.chunks[0].nextText, long.slice(0, 300));
-    });
-
-    test('missing outer context becomes an empty string', function () {
-      const plan = chunker.planChunks('Hello world.', 10000, 'en');
-      assert.strictEqual(plan.chunks[0].previousText, '');
-      assert.strictEqual(plan.chunks[0].nextText, '');
-    });
-  });
-
   // T-08
-  suite('T-08 offsets, hard splits and re-planning', function () {
+  suite('T-08 offsets and hard splits', function () {
     test('every chunk satisfies the charOffset substring invariant', function () {
       for (const limit of [34, 60, 120, 10000]) {
         const plan = chunker.planChunks(SENTENCES, limit, 'en');
@@ -326,50 +239,6 @@ suite('read-aloud/chunker', function () {
       );
     });
 
-    test('replanFrom keeps offsets relative to the full text (G-07)', function () {
-      const from = 30;
-      const replanned = chunker.replanFrom(SENTENCES, from, 16, 'en', {
-        previousText: 'TAIL',
-        nextText: 'NEXT',
-      });
-      assert.ok(replanned.length > 0);
-      assert.strictEqual(replanned[0].previousText, 'TAIL');
-      assert.strictEqual(replanned[replanned.length - 1].nextText, 'NEXT');
-      for (const chunk of replanned) {
-        assert.ok(chunk.charOffset >= from, `${chunk.charOffset} < ${from}`);
-        assert.strictEqual(
-          SENTENCES.slice(
-            chunk.charOffset,
-            chunk.charOffset + chunk.text.length,
-          ),
-          chunk.text,
-        );
-      }
-    });
-
-    test('posted plus re-planned chunks cover the text gap-free', function () {
-      const from = 30;
-      const posted = chunker
-        .planChunks(SENTENCES, 34, 'en')
-        .chunks.filter((chunk) => chunk.charOffset < from);
-      const replanned = chunker.replanFrom(SENTENCES, from, 16, 'en');
-      const covered = posted
-        .concat(replanned)
-        .map((chunk) => stripWhitespace(chunk.text))
-        .join('');
-      assert.strictEqual(covered, stripWhitespace(SENTENCES));
-    });
-
-    test('replanFrom clamps an out-of-range offset', function () {
-      assert.deepStrictEqual(
-        chunker.replanFrom(SENTENCES, SENTENCES.length, 100, 'en'),
-        [],
-      );
-      const fromNegative = chunker.replanFrom(SENTENCES, -5, 10000, 'en');
-      assert.strictEqual(fromNegative.length, 1);
-      assert.strictEqual(fromNegative[0].charOffset, 0);
-    });
-
     test('splitSentences returns contiguous segments', function () {
       const segments = chunker.splitSentences(SENTENCES, 'en');
       assert.deepStrictEqual(segments, [
@@ -381,135 +250,92 @@ suite('read-aloud/chunker', function () {
     });
   });
 
-  // T-09
-  suite('T-09 per-model limits', function () {
-    test('the R2 §8.1 fallback table', function () {
-      assert.strictEqual(models.DEFAULT_MODEL_ID, 'eleven_flash_v2_5');
-      assert.deepStrictEqual(models.FALLBACK_LIMITS, {
-        eleven_v3: 5000,
-        eleven_flash_v2_5: 40000,
-        eleven_flash_v2: 30000,
-        eleven_multilingual_v2: 10000,
-      });
+  // Decision 5: a continuous read is chunked block by block.
+  suite('T-08b planReadChunks never crosses a block boundary', function () {
+    const BLOCKS = [
+      'Heading',
+      'Para one. Para one continues here.',
+      'Para two.',
+    ];
+
+    test('every chunk is cut from exactly one block, in document order', function () {
+      const plan = chunker.planReadChunks(BLOCKS, 10000, 'en');
       assert.deepStrictEqual(
-        models.limitFromModel(undefined, false, 'eleven_multilingual_v2'),
-        {
-          modelId: 'eleven_multilingual_v2',
-          maxChars: 10000,
-          source: 'fallback',
-        },
+        plan.chunks.map((chunk) => [chunk.index, chunk.blockIndex, chunk.text]),
+        [
+          [0, 0, 'Heading'],
+          [1, 1, 'Para one. Para one continues here.'],
+          [2, 2, 'Para two.'],
+        ],
       );
+      for (const chunk of plan.chunks) {
+        const block = BLOCKS[chunk.blockIndex];
+        assert.strictEqual(
+          block.slice(chunk.charOffset, chunk.charOffset + chunk.text.length),
+          chunk.text,
+          'charOffset is relative to the chunk’s own block',
+        );
+      }
+    });
+
+    test('a tiny block is never merged into the next one', function () {
+      const plan = chunker.planReadChunks(['A.', 'B.'], 10000, 'en');
       assert.deepStrictEqual(
-        models.limitFromModel(undefined, true, 'eleven_v3'),
-        {
-          modelId: 'eleven_v3',
-          maxChars: 5000,
-          source: 'fallback',
-        },
+        plan.chunks.map((chunk) => [chunk.blockIndex, chunk.text]),
+        [
+          [0, 'A.'],
+          [1, 'B.'],
+        ],
       );
     });
 
-    test('an unknown model falls back to 5000', function () {
-      assert.strictEqual(models.FALLBACK_LIMIT_UNKNOWN_MODEL, 5000);
+    test('a block with no speakable text contributes nothing', function () {
+      const plan = chunker.planReadChunks(['', '   ', 'Hi.'], 10000, 'en');
       assert.deepStrictEqual(
-        models.limitFromModel(undefined, false, 'eleven_made_up'),
-        {
-          modelId: 'eleven_made_up',
-          maxChars: 5000,
-          source: 'fallback',
-        },
-      );
-    });
-
-    test('free users get the free limit, subscribers the subscribed one', function () {
-      const model = {
-        model_id: 'eleven_multilingual_v2',
-        max_characters_request_free_user: 2500,
-        max_characters_request_subscribed_user: 10000,
-      };
-      assert.deepStrictEqual(
-        models.limitFromModel(model, true, 'eleven_multilingual_v2'),
-        {
-          modelId: 'eleven_multilingual_v2',
-          maxChars: 2500,
-          source: 'api',
-        },
+        plan.chunks.map((chunk) => [chunk.index, chunk.blockIndex, chunk.text]),
+        [[0, 2, 'Hi.']],
       );
       assert.deepStrictEqual(
-        models.limitFromModel(model, false, 'eleven_multilingual_v2'),
-        {
-          modelId: 'eleven_multilingual_v2',
-          maxChars: 10000,
-          source: 'api',
-        },
+        chunker.planReadChunks([], 10000, 'en').chunks,
+        [],
       );
     });
 
-    test('maximum_text_length_per_request wins when it is smaller', function () {
-      const model = {
-        model_id: 'eleven_flash_v2_5',
-        max_characters_request_free_user: 2500,
-        max_characters_request_subscribed_user: 40000,
-        maximum_text_length_per_request: 8000,
-      };
-      assert.strictEqual(
-        models.limitFromModel(model, false, 'eleven_flash_v2_5').maxChars,
-        8000,
+    test('only the first chunk of the read uses the small first target', function () {
+      const plan = chunker.planReadChunks([LONG, LONG], 10000, 'en');
+      const first = plan.chunks.filter((chunk) => chunk.blockIndex === 0);
+      const second = plan.chunks.filter((chunk) => chunk.blockIndex === 1);
+      assert.ok(first[0].text.length <= 250, first[0].text);
+      assert.ok(
+        second[0].text.length > 250,
+        'the second block packs its first chunk to the large target',
       );
-      assert.strictEqual(
-        models.limitFromModel(model, true, 'eleven_flash_v2_5').maxChars,
-        2500,
+      assert.ok(second.length < first.length);
+      assert.deepStrictEqual(
+        plan.chunks.map((chunk) => chunk.index),
+        plan.chunks.map((_, i) => i),
+        'indexes run over the whole read',
       );
+      const blockIndexes = plan.chunks.map((chunk) => chunk.blockIndex);
+      assert.deepStrictEqual(blockIndexes, blockIndexes.slice().sort());
     });
 
-    test('a row with no usable number falls back to the table', function () {
-      const model = { model_id: 'eleven_v3' };
-      assert.deepStrictEqual(models.limitFromModel(model, true, 'eleven_v3'), {
-        modelId: 'eleven_v3',
-        maxChars: 5000,
-        source: 'fallback',
-      });
-    });
-
-    test('the missing free limit falls back to the subscribed one and vice versa', function () {
-      const subscribedOnly = {
-        model_id: 'eleven_v3',
-        max_characters_request_subscribed_user: 5000,
-      };
+    test('the request limit still bounds every chunk of every block', function () {
+      const plan = chunker.planReadChunks([SENTENCES, SENTENCES], 34, 'en');
+      assert.strictEqual(plan.limit, 32);
+      assert.strictEqual(plan.chunks.length, 6);
+      for (const chunk of plan.chunks) {
+        assert.ok(chunk.text.length <= plan.limit, chunk.text);
+      }
       assert.strictEqual(
-        models.limitFromModel(subscribedOnly, true, 'eleven_v3').maxChars,
-        5000,
+        stripWhitespace(
+          plan.chunks
+            .filter((chunk) => chunk.blockIndex === 1)
+            .map((chunk) => chunk.text)
+            .join(''),
+        ),
+        stripWhitespace(SENTENCES),
       );
-      const freeOnly = {
-        model_id: 'eleven_v3',
-        max_characters_request_free_user: 500,
-      };
-      assert.strictEqual(
-        models.limitFromModel(freeOnly, false, 'eleven_v3').maxChars,
-        500,
-      );
-    });
-
-    test('isFreeSubscription is fail-closed', function () {
-      assert.strictEqual(models.isFreeSubscription(undefined, undefined), true);
-      assert.strictEqual(models.isFreeSubscription('free', 'free'), true);
-      assert.strictEqual(
-        models.isFreeSubscription('free_disabled', 'starter'),
-        true,
-      );
-      assert.strictEqual(models.isFreeSubscription('active', 'Free'), true);
-      assert.strictEqual(models.isFreeSubscription('active', 'creator'), false);
-      assert.strictEqual(
-        models.isFreeSubscription('trialing', 'starter'),
-        false,
-      );
-    });
-
-    test('findModel matches on model_id', function () {
-      const list = [{ model_id: 'a' }, { model_id: 'eleven_v3' }];
-      assert.strictEqual(models.findModel(list, 'eleven_v3'), list[1]);
-      assert.strictEqual(models.findModel(list, 'missing'), undefined);
-      assert.strictEqual(models.findModel([], 'eleven_v3'), undefined);
     });
   });
 });

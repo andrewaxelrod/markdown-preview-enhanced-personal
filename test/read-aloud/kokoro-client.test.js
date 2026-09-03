@@ -6,7 +6,7 @@
  *
  * Driven through a stubbed `fetchImpl`; no request ever leaves the test. The
  * module has no `vscode` import, so it is compiled on the fly with esbuild
- * like `test/read-aloud/elevenlabs-client.test.js`.
+ * like `test/read-aloud/chunker.test.js`.
  */
 
 const assert = require('node:assert');
@@ -177,7 +177,6 @@ suite('read-aloud/kokoro-client', function () {
       calls[0].init.headers['Content-Type'],
       'application/json',
     );
-    assert.strictEqual(calls[0].init.headers['xi-api-key'], undefined);
     assert.deepStrictEqual(JSON.parse(calls[0].init.body), {
       model: 'kokoro',
       input: 'Hello.',
@@ -194,7 +193,8 @@ suite('read-aloud/kokoro-client', function () {
       { word: '.', start: 0.4, end: 0.5 },
     ]);
     assert.strictEqual(result.meta.status, 200);
-    assert.strictEqual(result.meta.characterCost, null);
+    assert.strictEqual(result.meta.requestId, null);
+    assert.ok(typeof result.meta.durationMs === 'number');
   });
 
   test('synthesize refuses unspeakable text before any request (F5)', async function () {

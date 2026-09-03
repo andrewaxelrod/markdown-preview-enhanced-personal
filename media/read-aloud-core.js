@@ -1,5 +1,5 @@
 /*
- * Read aloud (ElevenLabs) — pure DOM helpers.
+ * Read aloud (Kokoro) — pure DOM helpers.
  *
  * Shared by media/read-aloud.js (the preview app) and the jsdom unit tests.
  * The module touches no DOM global at load time: documents are reached through
@@ -59,7 +59,16 @@
   var INELIGIBLE_BLOCK_SELECTOR =
     '.md-toc, .code-chunk, .mermaid, .plantuml, .puml, .wavedrom, .bitfield, .bit-field, .graphviz, .viz, .dot, .vega, .vega-lite, .wsd, .d2, .d2-diagram, .tikz, .katex, .katex-display, math, pre, table, img, iframe, video, audio, object, embed, svg, canvas, script, style, .footnotes, .footnotes-sep';
 
-  // Rule 0 (contract B17): a block that matches *or contains* math is never read.
+  // Rule 4: a prose container (admonition, raw HTML block) is refused when it
+  // holds one of these. Math is deliberately not in the list: inline math
+  // inside prose is skipped by the extractor and the prose is read
+  // (decision 8), exactly as for a paragraph.
+  var CONTAINER_INELIGIBLE_SELECTOR =
+    '.md-toc, .code-chunk, .mermaid, .plantuml, .puml, .wavedrom, .bitfield, .bit-field, .graphviz, .viz, .dot, .vega, .vega-lite, .wsd, .d2, .d2-diagram, .tikz, pre, table, img, iframe, video, audio, object, embed, svg, canvas, script, style, .footnotes, .footnotes-sep';
+
+  // Rule 0: a block that *is* math (display math, a bare MathML element) is
+  // never read. Math *inside* a block contributes no text (EXTRACT_SKIP_SELECTOR)
+  // and a click on it is refused, so LaTeX is never spoken (decision 8).
   var MATH_CLASSES = ['katex', 'katex-display'];
   var MATH_SELECTOR = '.katex, .katex-display, math';
 
@@ -85,8 +94,8 @@
   // Reading decoration (F4 look): the block being read gets READING_CLASS, each
   // run of inline content inside it is wrapped in a PILL_CLASS span (one rounded
   // "pill" per rendered line via box-decoration-break: clone) and the spoken
-  // word is wrapped in WORD_CLASS spans. Palettes are the ElevenLabs Reader
-  // "Player highlight theme" colours, see media/read-aloud.css.
+  // word is wrapped in WORD_CLASS spans. The palettes live in
+  // media/read-aloud.css.
   var READING_CLASS = 'mpe-ra-reading';
   var PILL_CLASS = 'mpe-ra-pill';
   var WORD_CLASS = 'mpe-ra-word';
@@ -282,25 +291,13 @@
     return false;
   }
 
-  /**
-   * `el.matches(MATH_SELECTOR) || el.querySelector(MATH_SELECTOR) !== null`,
-   * written with `getElementsBy*` so classification of a large document stays
-   * inside the §6 performance budget (rule 0, contract B17).
-   */
-  function isOrContainsMath(el, set) {
+  /** `el.matches(MATH_SELECTOR)`: the element itself is math (rule 0). */
+  function isMathElement(el, set) {
     if (setHasAnyClass(set, MATH_CLASSES)) {
       return true;
     }
     var tag = el.tagName;
-    if (tag === 'MATH' || tag === 'math') {
-      return true;
-    }
-    for (var i = 0; i < MATH_CLASSES.length; i++) {
-      if (el.getElementsByClassName(MATH_CLASSES[i]).length > 0) {
-        return true;
-      }
-    }
-    return el.getElementsByTagName('math').length > 0;
+    return tag === 'MATH' || tag === 'math';
   }
 
   /** True for every code point JavaScript's `\s` matches. */
@@ -404,9 +401,11 @@
     var tag = el.tagName;
     var set = classSet(el);
 
-    // Rule 0 — math first, fail-closed (contract B17/G-02): any block that is
-    // or contains KaTeX/MathML would speak LaTeX, so it is never read.
-    if (isOrContainsMath(el, set)) {
+    // Rule 0 — a block that *is* math (display math, MathML) would speak
+    // LaTeX, so it is never read. A block that merely contains inline math is
+    // classified by the rules below; the extractor skips the math and the
+    // prose around it is read (decision 8).
+    if (isMathElement(el, set)) {
       return verdict(false, 'math', 'math markup');
     }
 
@@ -476,7 +475,7 @@
       // Rule 4 — other divs (admonitions, raw HTML prose).
       if (
         matchesSelector(el, INELIGIBLE_BLOCK_SELECTOR) ||
-        containsSelector(el, INELIGIBLE_BLOCK_SELECTOR)
+        containsSelector(el, CONTAINER_INELIGIBLE_SELECTOR)
       ) {
         return verdict(false, 'container', 'ineligible content');
       }
@@ -720,6 +719,75 @@
       blocks: blocks,
       eligibleCount: eligibleCount,
     };
+  }
+
+  /**
+   * The text of a continuous read (F15, decision 5): `elements` in order,
+   * the first one from text offset `startOffset` of its whole text, the rest
+   * whole, '\n'-joined like extractRange. Each surviving element is reported
+   * as `{ el, start, end }`, the half-open range of `text` it produced;
+   * elements with no text are dropped. `map` covers the whole text.
+   */
+  function extractBlocks(elements, startOffset) {
+    var state = createState();
+    var blocks = [];
+    for (var i = 0; i < elements.length; i++) {
+      var el = elements[i];
+      var whole = extractText(el);
+      var extracted =
+        i === 0 && startOffset > 0
+          ? sliceExtraction(whole, startOffset)
+          : whole;
+      if (!extracted.text) {
+        continue;
+      }
+      var start = state.text.length > 0 ? state.text.length + 1 : 0;
+      appendBlockState(state, {
+        text: extracted.text,
+        segments: extracted.map.segments,
+      });
+      blocks.push({ el: el, start: start, end: state.text.length });
+    }
+    return { text: state.text, map: toMap(state), blocks: blocks };
+  }
+
+  /**
+   * Rebuild the offset map of a continuous read after a re-render
+   * (decision 6). `blocks` is the read's block table with `el` re-bound to
+   * the new DOM (or null when the block is gone) and `startOffset` for the
+   * first block; a block whose fresh extraction is exactly
+   * `text.slice(start, end)` contributes its segments at those offsets, any
+   * other block contributes nothing and its index is reported in `missing`.
+   */
+  function remapBlocks(text, blocks) {
+    var segments = [];
+    var missing = [];
+    for (var i = 0; i < blocks.length; i++) {
+      var block = blocks[i];
+      if (!block.el) {
+        missing.push(i);
+        continue;
+      }
+      var whole = extractText(block.el);
+      var extracted =
+        block.startOffset > 0
+          ? sliceExtraction(whole, block.startOffset)
+          : whole;
+      if (extracted.text !== text.slice(block.start, block.end)) {
+        missing.push(i);
+        continue;
+      }
+      var subs = extracted.map.segments;
+      for (var k = 0; k < subs.length; k++) {
+        segments.push({
+          textStart: subs[k].textStart + block.start,
+          textEnd: subs[k].textEnd + block.start,
+          node: subs[k].node,
+          domStart: subs[k].domStart,
+        });
+      }
+    }
+    return { map: { text: text, segments: segments }, missing: missing };
   }
 
   // ---------------------------------------------------------------------------
@@ -1008,13 +1076,15 @@
   /**
    * Decide what a click at the caret (node, offset) reads (F17): the reading
    * unit is the table cell around the caret, else the top-level block, and
-   * reading starts at the word under the caret and ends where the unit's
-   * play button would end. The result carries the whole-unit extraction so
-   * the caller can hit-test the word's rects and slice after any teardown.
+   * reading starts at the word under the caret (the nearest word when the
+   * caret sits on a space or at the end of a line, decision 9). The result
+   * carries the whole-unit extraction so the caller can slice it after any
+   * teardown.
    *
    * Refusals: `outside` (not in the preview), `interactive` (a link, a
-   * checkbox, our own UI), `ineligible` (F6, at any depth), `empty` (no
-   * word at the caret).
+   * checkbox, our own UI), `ineligible` (F6, at any depth: a click *on*
+   * inline math or a nested fence is refused, one on the prose beside it is
+   * not), `empty` (no word at the caret).
    */
   function resolveClick(node, offset, root) {
     if (!node || !root || !isInsideRoot(root, node)) {
@@ -1030,7 +1100,6 @@
     if (cell) {
       var table = closestWithin(cell, 'table', root);
       if (
-        isOrContainsMath(cell, classSet(cell)) ||
         closestWithin(el, INELIGIBLE_BLOCK_SELECTOR, cell) ||
         (table && nestedIneligibleAncestor(table.parentElement, root))
       ) {
@@ -1389,6 +1458,8 @@
     collectBlocks: collectBlocks,
     extractText: extractText,
     extractRange: extractRange,
+    extractBlocks: extractBlocks,
+    remapBlocks: remapBlocks,
     offsetToDom: offsetToDom,
     spanToRange: spanToRange,
     resolveSelection: resolveSelection,

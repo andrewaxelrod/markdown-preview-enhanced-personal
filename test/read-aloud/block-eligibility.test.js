@@ -161,7 +161,7 @@ suite('read-aloud: block eligibility (F6)', function () {
   });
 
   // T-14
-  test('T-14 mpe-test.md: 20 direct children, 10 eligible blocks in order', function () {
+  test('T-14 mpe-test.md: 20 direct children, 11 eligible blocks in order', function () {
     const children = smoke.root.children;
     assert.strictEqual(
       children.length,
@@ -179,13 +179,14 @@ suite('read-aloud: block eligibility (F6)', function () {
       'UL:list',
       'BLOCKQUOTE:blockquote',
       'H2:heading',
+      'P:paragraph', // "Inline: $…$": the prose is read, the math skipped
       'H2:heading',
       'H2:heading',
       'H2:heading',
     ]);
     assert.deepStrictEqual(
       blocks.map((b) => b.index),
-      [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+      [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
       'index is the ordinal among eligible blocks',
     );
 
@@ -209,9 +210,15 @@ suite('read-aloud: block eligibility (F6)', function () {
       'Blockquote with a footnote.',
     );
     assert.strictEqual(blocks[6].el.id, 'math-katex');
-    assert.strictEqual(blocks[7].el.id, 'mermaid');
-    assert.strictEqual(blocks[8].el.id, 'code-chunk-press--on-the-line-below');
-    assert.strictEqual(blocks[9].el.id, 'syntax-highlighting');
+    assert.strictEqual(
+      core.extractText(blocks[7].el).text,
+      'Inline:',
+      'decision 8: the paragraph with inline math reads its prose only',
+    );
+    assert.ok(blocks[7].el.querySelector('.katex'), 'the math is still there');
+    assert.strictEqual(blocks[8].el.id, 'mermaid');
+    assert.strictEqual(blocks[9].el.id, 'code-chunk-press--on-the-line-below');
+    assert.strictEqual(blocks[10].el.id, 'syntax-highlighting');
   });
 
   // T-14
@@ -220,7 +227,6 @@ suite('read-aloud: block eligibility (F6)', function () {
     const expected = [
       [2, 'DIV', 'toc'],
       [6, 'TABLE', 'table'],
-      [9, 'P', 'math'], // inline math paragraph, rule 0 / B17
       [10, 'SPAN', 'math'], // display math
       [12, 'DIV', 'diagram'], // mermaid
       [14, 'DIV', 'code-chunk'],
@@ -237,9 +243,12 @@ suite('read-aloud: block eligibility (F6)', function () {
       assert.strictEqual(info.eligible, false, 'eligible at child ' + index);
     }
 
-    // The two blocks under "## Math (KaTeX)" are the ones F1 calls out.
+    // The two blocks under "## Math (KaTeX)": the inline-math paragraph is
+    // read with the math skipped (decision 8), the display math never is.
     assert.strictEqual(children[9].getAttribute('data-source-line'), '29');
     assert.ok(children[9].querySelector('.katex'), 'inline KaTeX span present');
+    assert.strictEqual(core.classifyBlock(children[9]).kind, 'paragraph');
+    assert.strictEqual(core.classifyBlock(children[9]).eligible, true);
     assert.ok(children[10].classList.contains('katex-display'));
     assert.ok(children[2].querySelector('.md-toc'), 'TOC container');
     assert.ok(children[12].classList.contains('mermaid'));

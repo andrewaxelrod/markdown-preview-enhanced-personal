@@ -3,8 +3,8 @@
 /**
  * T-30 — `src/read-aloud/speakable.ts` (F5; cost pass 2026-09-02).
  *
- * Only letters, digits, whitespace and sentence punctuation may reach
- * ElevenLabs. The module is pure, so it is compiled on the fly with esbuild
+ * Only letters, digits, whitespace and sentence punctuation may reach the
+ * Kokoro server. The module is pure, so it is compiled on the fly with esbuild
  * exactly like `test/block-id-helpers.test.js`.
  */
 
@@ -226,10 +226,10 @@ suite('read-aloud/speakable', function () {
         speakable.assertSpeakable('fine text.', 'text'),
       );
       assert.throws(
-        () => speakable.assertSpeakable('**bad** # text', 'previous_text'),
+        () => speakable.assertSpeakable('**bad** # text', 'input'),
         (error) =>
           error instanceof Error &&
-          error.message.includes('previous_text') &&
+          error.message.includes('input') &&
           error.message.includes('"*#"'),
       );
       assert.strictEqual(

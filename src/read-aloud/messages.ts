@@ -9,13 +9,16 @@ import type { WordSpan } from './word-spans';
  * exact F13 shape is dropped.
  */
 
-/** Defence in depth: the model limit is applied later, in the chunker. */
+/** Defence in depth: the request limit is applied later, in the chunker. */
 export const MAX_TEXT_CHARS = 200000;
 
-/** F11 — `previous_text` / `next_text` windows. */
-export const MAX_CONTEXT_CHARS = 300;
-
 export const MAX_BLOCK_ID_CHARS = 128;
+
+/** A block key is `blockKey()` of read-aloud-core.js: `b` + 32-bit hex. */
+export const MAX_BLOCK_KEY_CHARS = 64;
+
+/** More blocks than any document has eligible children; a rogue-message bound. */
+export const MAX_REQUEST_BLOCKS = 20000;
 
 export const REQUEST_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
@@ -24,9 +27,8 @@ export const SPEED_MIN = 0.25;
 export const SPEED_MAX = 4;
 
 /**
- * F4 — the ElevenLabs Reader "Player highlight theme" palettes. Same list as
- * `HIGHLIGHT_THEMES` in media/read-aloud-core.js; the colours live in
- * media/read-aloud.css.
+ * F4 — the four highlight palettes. Same list as `HIGHLIGHT_THEMES` in
+ * media/read-aloud-core.js; the colours live in media/read-aloud.css.
  */
 export const HIGHLIGHT_THEMES = ['blue', 'orange', 'yellow', 'green'] as const;
 export type ReadAloudHighlightTheme = (typeof HIGHLIGHT_THEMES)[number];
@@ -43,11 +45,23 @@ export function normaliseHighlightTheme(
 
 export type ReadAloudKind = 'block' | 'selection';
 
+/**
+ * One block of a continuous read (F15, decision 5): the half-open range
+ * `[start, end)` of the request text that came from one eligible block, in
+ * document order. The chunker never crosses one of these boundaries, and
+ * every chunk reports which block it belongs to.
+ */
+export interface RequestBlock {
+  key: string;
+  start: number;
+  end: number;
+}
+
 export interface SynthesizeOptions {
   kind: ReadAloudKind;
   blockId?: string;
-  previousText?: string;
-  nextText?: string;
+  /** Absent for a selection or a single-unit read: the text is one block. */
+  blocks?: RequestBlock[];
 }
 
 export interface SynthesizeRequest {
@@ -60,7 +74,12 @@ export interface SynthesizeRequest {
 export interface CancelRequest {
   sourceUri: string;
   requestId: string;
+  /** Why the webview gave the job up; for the output channel only. */
+  reason?: string;
 }
+
+/** A cancel reason is a short diagnostic string, never shown to the user. */
+export const MAX_CANCEL_REASON_CHARS = 200;
 
 /** `readAloudPlaying`: the webview started playing chunk `chunkIndex`. */
 export interface PlayingRequest {
@@ -74,8 +93,11 @@ export interface ReadAloudAudioMessage {
   requestId: string;
   chunkIndex: number;
   chunkCount: number;
+  /** Index into the request's `blocks` (0 when the request had none). */
+  blockIndex: number;
   audioBase64: string;
   mimeType: 'audio/mpeg';
+  /** Offsets into the request text the webview sent. */
   spans: WordSpan[] | null;
   durationHint?: number;
 }
@@ -117,26 +139,45 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function optionalContext(
+function isIndex(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0;
+}
+
+/**
+ * `options.blocks`: an array of `{ key, start, end }` with non-empty,
+ * ascending, non-overlapping ranges inside `[0, textLength]`. `undefined`
+ * when the field is absent; `null` when it is present but malformed.
+ */
+function parseBlocks(
   value: unknown,
-  take: 'tail' | 'head',
-): { ok: boolean; value?: string } {
+  textLength: number,
+): RequestBlock[] | null | undefined {
   if (value === undefined || value === null) {
-    return { ok: true };
+    return undefined;
   }
-  if (typeof value !== 'string') {
-    return { ok: false };
+  if (!Array.isArray(value) || value.length > MAX_REQUEST_BLOCKS) {
+    return null;
   }
-  if (value.length <= MAX_CONTEXT_CHARS) {
-    return { ok: true, value };
+  const blocks: RequestBlock[] = [];
+  let cursor = 0;
+  for (const raw of value as unknown[]) {
+    if (!isPlainObject(raw)) {
+      return null;
+    }
+    const { key, start, end } = raw;
+    if (typeof key !== 'string' || key.length > MAX_BLOCK_KEY_CHARS) {
+      return null;
+    }
+    if (!isIndex(start) || !isIndex(end)) {
+      return null;
+    }
+    if (start < cursor || end <= start || end > textLength) {
+      return null;
+    }
+    blocks.push({ key, start, end });
+    cursor = end;
   }
-  return {
-    ok: true,
-    value:
-      take === 'tail'
-        ? value.slice(value.length - MAX_CONTEXT_CHARS)
-        : value.slice(0, MAX_CONTEXT_CHARS),
-  };
+  return blocks;
 }
 
 /**
@@ -184,42 +225,44 @@ export function parseSynthesizeArgs(
     }
     options.blockId = blockId;
   }
-  const previousText = optionalContext(rawOptions.previousText, 'tail');
-  if (!previousText.ok) {
+  const blocks = parseBlocks(rawOptions.blocks, text.length);
+  if (blocks === null) {
     return undefined;
   }
-  if (previousText.value !== undefined) {
-    options.previousText = previousText.value;
-  }
-  const nextText = optionalContext(rawOptions.nextText, 'head');
-  if (!nextText.ok) {
-    return undefined;
-  }
-  if (nextText.value !== undefined) {
-    options.nextText = nextText.value;
+  if (blocks !== undefined && blocks.length > 0) {
+    options.blocks = blocks;
   }
   return { sourceUri, requestId, text, options };
 }
 
-/** `readAloudCancel` -> `[sourceUri, requestId]` (F13). */
+/** `readAloudCancel` -> `[sourceUri, requestId, reason?]` (F13). */
 export function parseCancelArgs(args: unknown): CancelRequest | undefined {
-  if (!Array.isArray(args) || args.length !== 2) {
+  if (!Array.isArray(args) || args.length < 2 || args.length > 3) {
     return undefined;
   }
-  const [sourceUri, requestId] = args as unknown[];
+  const [sourceUri, requestId, rawReason] = args as unknown[];
   if (typeof sourceUri !== 'string' || sourceUri.length === 0) {
     return undefined;
   }
   if (typeof requestId !== 'string' || !REQUEST_ID_RE.test(requestId)) {
     return undefined;
   }
-  return { sourceUri, requestId };
+  const request: CancelRequest = { sourceUri, requestId };
+  if (rawReason !== undefined && rawReason !== null) {
+    if (typeof rawReason !== 'string') {
+      return undefined;
+    }
+    request.reason = rawReason
+      .slice(0, MAX_CANCEL_REASON_CHARS)
+      .replace(/[\r\n]+/g, ' ');
+  }
+  return request;
 }
 
 /**
- * `readAloudPlaying` -> `[sourceUri, requestId, chunkIndex]` (F11 lazy
- * synthesis): the host requests the next billable chunk only after this one
- * is playing. A non-integer or negative index is dropped.
+ * `readAloudPlaying` -> `[sourceUri, requestId, chunkIndex]`: the prefetch
+ * window (F11) advances from the chunk the webview reports playing. A
+ * non-integer or negative index is dropped.
  */
 export function parsePlayingArgs(args: unknown): PlayingRequest | undefined {
   if (!Array.isArray(args) || args.length !== 3) {
@@ -232,11 +275,7 @@ export function parsePlayingArgs(args: unknown): PlayingRequest | undefined {
   if (typeof requestId !== 'string' || !REQUEST_ID_RE.test(requestId)) {
     return undefined;
   }
-  if (
-    typeof chunkIndex !== 'number' ||
-    !Number.isInteger(chunkIndex) ||
-    chunkIndex < 0
-  ) {
+  if (!isIndex(chunkIndex)) {
     return undefined;
   }
   return { sourceUri, requestId, chunkIndex };

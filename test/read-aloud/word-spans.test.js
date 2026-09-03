@@ -1,7 +1,8 @@
 /* global suite, test, suiteSetup, suiteTeardown */
 
 /**
- * T-01 … T-05 — `src/read-aloud/word-spans.ts` (F4).
+ * T-01 … T-05 — `src/read-aloud/word-spans.ts` (F4): the word segmentation
+ * the Kokoro alignment is built on.
  *
  * The module is pure (no `vscode`, no I/O), so it is compiled on the fly with
  * esbuild exactly like `test/block-id-helpers.test.js`.
@@ -12,48 +13,19 @@ const path = require('path');
 const fs = require('fs');
 const esbuild = require('esbuild');
 
-let alignmentFromWire;
-let buildCodeUnitIndex;
-let charIndexAtCodeUnit;
 let segmentWords;
-let toWordSpans;
 let tmpFile;
 
-/** Times are `codeUnitOffset / 10`, so both alignment shapes agree exactly. */
-function at(codeUnit) {
-  return codeUnit / 10;
+function shape(segments) {
+  return segments.map((segment) => [segment.segment, segment.index]);
 }
 
-/** One alignment entry per UTF-16 code unit. */
-function perCodeUnitAlignment(text) {
-  const characters = text.split('');
-  return {
-    characters,
-    characterStartTimesSeconds: characters.map((_, i) => at(i)),
-    characterEndTimesSeconds: characters.map((_, i) => at(i + 1)),
-  };
-}
-
-/** One alignment entry per code point (astral characters stay whole). */
-function perCodePointAlignment(text) {
-  const characters = Array.from(text);
-  const starts = [];
-  const ends = [];
-  let offset = 0;
-  for (const character of characters) {
-    starts.push(at(offset));
-    offset += character.length;
-    ends.push(at(offset));
-  }
-  return {
-    characters,
-    characterStartTimesSeconds: starts,
-    characterEndTimesSeconds: ends,
-  };
-}
-
-function shape(spans) {
-  return spans.map((span) => [span.text, span.charStart, span.charEnd]);
+/** The reference: `Intl.Segmenter` word granularity, word-like only. */
+function reference(text, locale) {
+  const segmenter = new Intl.Segmenter(locale, { granularity: 'word' });
+  return Array.from(segmenter.segment(text))
+    .filter((data) => data.isWordLike)
+    .map((data) => ({ index: data.index, segment: data.segment }));
 }
 
 suite('read-aloud/word-spans', function () {
@@ -74,12 +46,7 @@ suite('read-aloud/word-spans', function () {
     });
     tmpFile = path.join(__dirname, '.word-spans.bundle.cjs');
     fs.writeFileSync(tmpFile, result.outputFiles[0].text);
-    const mod = require(tmpFile);
-    alignmentFromWire = mod.alignmentFromWire;
-    buildCodeUnitIndex = mod.buildCodeUnitIndex;
-    charIndexAtCodeUnit = mod.charIndexAtCodeUnit;
-    segmentWords = mod.segmentWords;
-    toWordSpans = mod.toWordSpans;
+    segmentWords = require(tmpFile).segmentWords;
   });
 
   suiteTeardown(function () {
@@ -90,267 +57,122 @@ suite('read-aloud/word-spans', function () {
 
   // T-01
   suite('T-01 Latin grouping', function () {
-    test('"Hello brave new world" becomes four spans', function () {
-      const text = 'Hello brave new world';
-      const spans = toWordSpans(text, perCodeUnitAlignment(text), 'en');
-      assert.deepStrictEqual(spans, [
-        { text: 'Hello', charStart: 0, charEnd: 5, start: at(0), end: at(5) },
-        { text: 'brave', charStart: 6, charEnd: 11, start: at(6), end: at(11) },
-        { text: 'new', charStart: 12, charEnd: 15, start: at(12), end: at(15) },
-        {
-          text: 'world',
-          charStart: 16,
-          charEnd: 21,
-          start: at(16),
-          end: at(21),
-        },
-      ]);
+    test('"Hello brave new world" becomes four segments with their offsets', function () {
+      assert.deepStrictEqual(
+        shape(segmentWords('Hello brave new world', 'en')),
+        [
+          ['Hello', 0],
+          ['brave', 6],
+          ['new', 12],
+          ['world', 16],
+        ],
+      );
     });
 
-    test('times come from the first and last character of the word', function () {
-      const text = 'Hello brave new world';
-      const alignment = perCodeUnitAlignment(text);
-      const spans = toWordSpans(text, alignment, 'en');
-      for (const span of spans) {
+    test('segments index their own text and are in ascending order', function () {
+      const text = 'Read aloud, from here to the end of the document.';
+      const segments = segmentWords(text, 'en');
+      assert.ok(segments.length >= 9);
+      let last = -1;
+      for (const segment of segments) {
         assert.strictEqual(
-          span.start,
-          alignment.characterStartTimesSeconds[span.charStart],
+          text.slice(segment.index, segment.index + segment.segment.length),
+          segment.segment,
         );
-        assert.strictEqual(
-          span.end,
-          alignment.characterEndTimesSeconds[span.charEnd - 1],
-        );
-      }
-    });
-
-    test('spans are emitted in ascending charStart', function () {
-      const text = 'Hello brave new world';
-      const spans = toWordSpans(text, perCodeUnitAlignment(text), 'en');
-      for (let i = 1; i < spans.length; i++) {
-        assert.ok(spans[i].charStart > spans[i - 1].charStart);
+        assert.ok(segment.index > last);
+        last = segment.index;
       }
     });
   });
 
   // T-02
-  suite('T-02 punctuation, quotes and em-dashes', function () {
-    const text = 'He said, “don’t stop” — really!';
-
-    test('punctuation, curly quotes and the em-dash produce no spans', function () {
-      const spans = toWordSpans(text, perCodeUnitAlignment(text), 'en');
-      assert.deepStrictEqual(shape(spans), [
-        ['He', 0, 2],
-        ['said', 3, 7],
-        ['don’t', 10, 15],
-        ['stop', 16, 20],
-        ['really', 24, 30],
+  suite('T-02 punctuation, quotes and dashes', function () {
+    test('punctuation, curly quotes and the em-dash produce no segments', function () {
+      const text = 'Wait, “really”—yes!';
+      assert.deepStrictEqual(shape(segmentWords(text, 'en')), [
+        ['Wait', 0],
+        ['really', 7],
+        ['yes', 15],
       ]);
     });
 
-    test("straight-quoted don't is a single span", function () {
-      const plain = "I don't stop";
-      const spans = toWordSpans(plain, perCodeUnitAlignment(plain), 'en');
-      assert.deepStrictEqual(shape(spans), [
-        ['I', 0, 1],
-        ["don't", 2, 7],
-        ['stop', 8, 12],
+    test("straight-quoted don't is a single segment", function () {
+      assert.deepStrictEqual(shape(segmentWords("I don't know", 'en')), [
+        ['I', 0],
+        ["don't", 2],
+        ['know', 8],
       ]);
-    });
-
-    test('no span text contains a quote, comma, dash or exclamation mark', function () {
-      const spans = toWordSpans(text, perCodeUnitAlignment(text), 'en');
-      for (const span of spans) {
-        assert.ok(!/[,!“”—]/.test(span.text), span.text);
-      }
     });
   });
 
   // T-03
   suite('T-03 numerals, dates, currency, URLs and code', function () {
-    test('v2.5, 2026-09-01 and $1,000', function () {
-      const text = 'v2.5 released 2026-09-01 for $1,000';
-      const spans = toWordSpans(text, perCodeUnitAlignment(text), 'en');
-      assert.deepStrictEqual(shape(spans), [
-        ['v2.5', 0, 4],
-        ['released', 5, 13],
-        ['2026', 14, 18],
-        ['09', 19, 21],
-        ['01', 22, 24],
-        ['for', 25, 28],
-        ['1,000', 30, 35],
-      ]);
-      assert.ok(!spans.some((span) => span.text.includes('$')));
+    test('matches the Intl.Segmenter reference for mixed technical text', function () {
+      for (const text of [
+        'Version v2.5 shipped on 2026-09-01 for $1,000.',
+        'See https://example.com/docs?x=1 or `inline code` now.',
+        'A read-aloud pass over 10,000-credit quotas.',
+      ]) {
+        assert.deepStrictEqual(segmentWords(text, 'en'), reference(text, 'en'));
+      }
     });
 
     test('a URL is split into word-like parts, separators excluded', function () {
-      const text = 'See https://example.com/read-aloud now';
-      const spans = toWordSpans(text, perCodeUnitAlignment(text), 'en');
-      assert.deepStrictEqual(shape(spans), [
-        ['See', 0, 3],
-        ['https', 4, 9],
-        ['example.com', 12, 23],
-        ['read', 24, 28],
-        ['aloud', 29, 34],
-        ['now', 35, 38],
-      ]);
-    });
-
-    test('backticks around inline code are not spoken as words', function () {
-      const text = 'Use `npm run build` today';
-      const spans = toWordSpans(text, perCodeUnitAlignment(text), 'en');
-      assert.deepStrictEqual(shape(spans), [
-        ['Use', 0, 3],
-        ['npm', 5, 8],
-        ['run', 9, 12],
-        ['build', 13, 18],
-        ['today', 20, 25],
-      ]);
-      assert.ok(!spans.some((span) => span.text.includes('`')));
+      const segments = segmentWords('https://example.com/docs', 'en').map(
+        (segment) => segment.segment,
+      );
+      assert.ok(segments.includes('https'));
+      // A dot between letters is word-internal for the segmenter, like v2.5.
+      assert.ok(segments.includes('example.com'));
+      assert.ok(segments.includes('docs'));
+      for (const segment of segments) {
+        assert.ok(!/[:/]/.test(segment), segment);
+      }
     });
   });
 
   // T-04
   suite('T-04 CJK and astral characters', function () {
     test('CJK is segmented into dictionary words, not characters', function () {
-      const text = '你好世界';
-      const spans = toWordSpans(text, perCodeUnitAlignment(text), 'zh-CN');
-      assert.deepStrictEqual(shape(spans), [
-        ['你好', 0, 2],
-        ['世界', 2, 4],
-      ]);
-      assert.deepStrictEqual(segmentWords(text, 'zh-CN'), [
+      assert.deepStrictEqual(segmentWords('你好世界', 'zh-CN'), [
         { index: 0, segment: '你好' },
         { index: 2, segment: '世界' },
       ]);
     });
 
-    test('buildCodeUnitIndex / charIndexAtCodeUnit handle a surrogate pair', function () {
-      const text = 'Hi 😀 ok';
-      const perPoint = perCodePointAlignment(text);
-      assert.strictEqual(perPoint.characters.length, 7);
-      const prefix = buildCodeUnitIndex(perPoint.characters);
-      assert.deepStrictEqual(prefix, [0, 1, 2, 3, 5, 6, 7, 8]);
-      assert.strictEqual(charIndexAtCodeUnit(prefix, 3), 3);
-      assert.strictEqual(charIndexAtCodeUnit(prefix, 4), 3);
-      assert.strictEqual(charIndexAtCodeUnit(prefix, 6), 5);
-      assert.strictEqual(charIndexAtCodeUnit(prefix, -1), -1);
-      assert.strictEqual(charIndexAtCodeUnit(prefix, 8), -1);
-    });
-
-    test('per-code-unit and per-code-point alignments give identical spans', function () {
-      const text = 'Hi 😀 ok';
-      const byUnit = toWordSpans(text, perCodeUnitAlignment(text), 'en');
-      const byPoint = toWordSpans(text, perCodePointAlignment(text), 'en');
-      assert.deepStrictEqual(shape(byUnit), [
-        ['Hi', 0, 2],
-        ['ok', 6, 8],
+    test('indexes are UTF-16 code units, so an emoji counts twice', function () {
+      assert.deepStrictEqual(shape(segmentWords('Hi 😀 ok', 'en')), [
+        ['Hi', 0],
+        ['ok', 6],
       ]);
-      assert.deepStrictEqual(byPoint, byUnit);
     });
   });
 
   // T-05
-  suite('T-05 guards', function () {
-    test('undefined when characters.join("") does not equal the text', function () {
-      const text = 'Hello world';
-      const alignment = perCodeUnitAlignment('Hello  world');
-      assert.strictEqual(toWordSpans(text, alignment, 'en'), undefined);
-    });
-
-    test('alignmentFromWire rejects null, undefined and non-objects', function () {
-      assert.strictEqual(alignmentFromWire(null), undefined);
-      assert.strictEqual(alignmentFromWire(undefined), undefined);
-      assert.strictEqual(alignmentFromWire('nope'), undefined);
-    });
-
-    test('alignmentFromWire rejects absent, empty and unequal arrays', function () {
-      assert.strictEqual(alignmentFromWire({ characters: ['a'] }), undefined);
-      assert.strictEqual(
-        alignmentFromWire({
-          characters: [],
-          character_start_times_seconds: [],
-          character_end_times_seconds: [],
-        }),
-        undefined,
-      );
-      assert.strictEqual(
-        alignmentFromWire({
-          characters: ['a', 'b'],
-          character_start_times_seconds: [0],
-          character_end_times_seconds: [0.1, 0.2],
-        }),
-        undefined,
+  suite('T-05 fallbacks', function () {
+    test('an unusable locale falls back to English segmentation', function () {
+      assert.deepStrictEqual(
+        segmentWords('Hello world', 'not-a-locale-at-all-!!'),
+        reference('Hello world', 'en'),
       );
     });
 
-    test('alignmentFromWire rejects non-numbers and non-strings', function () {
-      assert.strictEqual(
-        alignmentFromWire({
-          characters: ['a'],
-          character_start_times_seconds: ['0'],
-          character_end_times_seconds: [0.1],
-        }),
-        undefined,
-      );
-      assert.strictEqual(
-        alignmentFromWire({
-          characters: ['a'],
-          character_start_times_seconds: [Number.NaN],
-          character_end_times_seconds: [0.1],
-        }),
-        undefined,
-      );
-      assert.strictEqual(
-        alignmentFromWire({
-          characters: [1],
-          character_start_times_seconds: [0],
-          character_end_times_seconds: [0.1],
-        }),
-        undefined,
-      );
+    test('without Intl.Segmenter, whitespace-delimited runs are the words', function () {
+      const original = Intl.Segmenter;
+      try {
+        Intl.Segmenter = undefined;
+        assert.deepStrictEqual(shape(segmentWords('Hello, world!', 'en')), [
+          ['Hello,', 0],
+          ['world!', 7],
+        ]);
+      } finally {
+        Intl.Segmenter = original;
+      }
     });
 
-    test('alignmentFromWire copies a well-formed payload to camelCase', function () {
-      const alignment = alignmentFromWire({
-        characters: ['H', 'i'],
-        character_start_times_seconds: [0, 0.1],
-        character_end_times_seconds: [0.1, 0.2],
-      });
-      assert.deepStrictEqual(alignment, {
-        characters: ['H', 'i'],
-        characterStartTimesSeconds: [0, 0.1],
-        characterEndTimesSeconds: [0.1, 0.2],
-      });
-    });
-
-    test('an end time before the start time is clamped to the start', function () {
-      const text = 'ab';
-      const spans = toWordSpans(
-        text,
-        {
-          characters: ['a', 'b'],
-          characterStartTimesSeconds: [0.5, 0.6],
-          characterEndTimesSeconds: [0.6, 0.2],
-        },
-        'en',
-      );
-      assert.deepStrictEqual(spans, [
-        { text: 'ab', charStart: 0, charEnd: 2, start: 0.5, end: 0.5 },
-      ]);
-    });
-
-    test('undefined when a looked-up time is missing', function () {
-      const text = 'ab';
-      const spans = toWordSpans(
-        text,
-        {
-          characters: ['a', 'b'],
-          characterStartTimesSeconds: [0.5],
-          characterEndTimesSeconds: [0.6],
-        },
-        'en',
-      );
-      assert.strictEqual(spans, undefined);
+    test('empty text has no segments', function () {
+      assert.deepStrictEqual(segmentWords('', 'en'), []);
+      assert.deepStrictEqual(segmentWords('   ', 'en'), []);
     });
   });
 });

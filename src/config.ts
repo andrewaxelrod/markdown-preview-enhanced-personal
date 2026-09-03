@@ -53,15 +53,10 @@ type VSCodeMPEConfigKey =
   | 'aiTranslationAutoUpdate'
   | 'readAloudEnabled'
   | 'readAloudClickToRead'
-  | 'readAloudProvider'
-  | 'elevenLabsVoiceId'
-  | 'elevenLabsModelId'
   | 'kokoroVoice'
   | 'readAloudSpeed'
   | 'readAloudHighlightTheme'
-  | 'readAloudConfirmAbove'
   | 'readAloudCacheSizeMB'
-  | 'elevenLabsBaseUrl'
   | 'kokoroBaseUrl';
 
 type ConfigKey = keyof NotebookConfig | VSCodeMPEConfigKey;

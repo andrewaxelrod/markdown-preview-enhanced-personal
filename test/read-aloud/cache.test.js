@@ -22,7 +22,6 @@ function entry(audioBase64, spans) {
     audioBase64,
     spans: spans === undefined ? null : spans,
     mimeType: 'audio/mpeg',
-    characterCost: 42,
     createdAt: 1756684800000,
   };
 }
@@ -31,8 +30,8 @@ function parts(overrides) {
   return Object.assign(
     {
       text: 'Hello world',
-      voiceId: 'voice-1',
-      modelId: 'eleven_multilingual_v2',
+      voiceId: 'af_heart',
+      modelId: 'kokoro',
     },
     overrides,
   );
@@ -86,21 +85,13 @@ suite('read-aloud/cache', function () {
       const base = cacheModule.cacheKey(parts());
       const changed = [
         { text: 'Goodbye world' },
-        { voiceId: 'voice-2' },
-        { modelId: 'eleven_flash_v2_5' },
+        { voiceId: 'bm_george' },
+        { modelId: 'kokoro-v2' },
       ].map((override) => cacheModule.cacheKey(parts(override)));
       for (const key of changed) {
         assert.notStrictEqual(key, base);
       }
       assert.strictEqual(new Set(changed).size, 3);
-    });
-
-    test('ignores the prosody context, so a neighbour edit keeps the hit', function () {
-      const base = cacheModule.cacheKey(parts());
-      const withContext = cacheModule.cacheKey(
-        parts({ previousText: 'edited neighbour', nextText: 'other' }),
-      );
-      assert.strictEqual(withContext, base);
     });
 
     test('is separator-sensitive, so shifted boundaries do not collide (B5)', function () {

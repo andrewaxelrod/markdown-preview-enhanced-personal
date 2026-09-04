@@ -148,7 +148,7 @@ eight controls, left to right:
 | Control            | What it does                                                                                                                                           |
 | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Volume**         | Opens a slider, 0–100 %. Applies to the audio straight away and persists in `markdown-preview-enhanced.readAloudVolume`. The glyph follows the level.  |
-| **Theme settings** | Opens the theme settings sheet: the player font, the player font size and the highlight theme (below).                                                 |
+| **Theme settings** | Opens the theme settings sheet: the global theme, the player font, the player font size, the line height, the column width and the highlight theme.    |
 | **−10 s**          | Skips back ten seconds **inside the block being read**. Landing before its first word restarts the block rather than going back into the previous one. |
 | **Play / pause**   | With nothing loaded, reads from the first block still on screen to the end of the document — the same read a play button in the gutter starts.         |
 | **+10 s**          | Skips forward ten seconds. Landing past the last synthesised word of the block does nothing, and the button greys out when that is the case.           |
@@ -167,24 +167,63 @@ immediately mid-playback and never triggers re-synthesis. The chosen value persi
 
 ### Reading rhythm
 
-While read aloud is on, the preview is set to one vertical rhythm — a 1.85 line height and even
-spacing between paragraphs, lists and headings — and the pills of the block being read are drawn
-inside it, with their padding cancelled by a negative margin. Starting a read therefore moves
-nothing: the text keeps its size, its line breaks and its position. Every measurement is in `em`,
-so zooming the preview scales the whole canvas, decoration included.
+While read aloud is on, the preview is set to one vertical rhythm — the low-strain page's line
+height (1.6 by default, 1.4–1.8 from the sheet; 1.85 with the page off) and even spacing between
+paragraphs, lists and headings — and the pills of the block being read are drawn inside it, with
+their padding cancelled by a negative margin. The pill padding is derived from the line height,
+so the lines of the block always overlap and read as one shape. Starting a read therefore moves nothing: the text
+keeps its size, its line breaks and its position. Every measurement is in `em`, so zooming the
+preview scales the whole canvas, decoration included.
 
 ### Theme settings
 
-The second button of the panel opens a sheet with three controls. Each takes effect at once,
-also mid-playback.
+The second button of the panel opens a sheet with six controls and a reset. Each takes effect at
+once, also mid-playback, and none reloads the preview.
 
-| Control                    | What it does                                                                                                                  |
-| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| **Player font**            | Overrides the preview theme's own font family. Persists in `markdown-preview-enhanced.readAloudFont`.                         |
-| **Player font size**       | The preview's zoom — the same one behind _Zoom In_ / _Zoom Out_ in the preview's context menu. Not persisted, like that zoom. |
-| **Player highlight theme** | Five palettes shown as sample cards. Persists in `markdown-preview-enhanced.readAloudHighlightTheme`.                         |
+| Control                    | What it does                                                                                                                                                                                                                 |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Global theme**           | _Auto · Light · Dark_: the low-strain reading page (below), in place of the preview theme. _Auto_ follows the VS Code colour theme. Persists in `markdown-preview-enhanced.readAloudGlobalTheme`; `off` is a Settings value. |
+| **Player font**            | Overrides the page's face (or, with the page off, the preview theme's font). Persists in `markdown-preview-enhanced.readAloudFont`.                                                                                          |
+| **Player font size**       | The preview's zoom — the same one behind _Zoom In_ / _Zoom Out_ in the preview's context menu. Not persisted, like that zoom.                                                                                                |
+| **Line height**            | 1.4–1.8 in 0.1 steps. Persists in `markdown-preview-enhanced.readAloudLineHeight`. No effect while the page is off.                                                                                                          |
+| **Column width**           | 50–75 characters of the body font. Persists in `markdown-preview-enhanced.readAloudColumnWidth`. No effect while the page is off.                                                                                            |
+| **Player highlight theme** | Five palettes shown as sample cards. Persists in `markdown-preview-enhanced.readAloudHighlightTheme`.                                                                                                                        |
+| **Reset page settings**    | Clears the global theme, line height, column width and font settings (so their defaults apply again) and puts the zoom back to 1. Speed, volume and the highlight palette are left alone.                                    |
 
-_Global theme_ from the reference design is not built yet.
+The foot of the sheet carries one line of reader guidance: match the screen's brightness to the
+room, and every 20 minutes look 20 feet away for 20 seconds.
+
+#### The low-strain reading page
+
+With the global theme at _Auto_, _Light_ or _Dark_ (the default is _Auto_) the live preview is
+restyled as a reading page built to `featrues/05-eye-strain.md`: the Atkinson Hyperlegible Next
+face, bundled with the extension (`media/fonts/`, SIL Open Font License 1.1, 48 KB, never
+fetched), 20 px body text (18 px in a pane narrower than 48 rem), a 66-character column (centred
+on a slightly darker canvas in the light scheme), weights 400 and 600 only, underlined links, and colour tokens for every
+surface a preview theme paints — text, rules, code, quotes, tables, admonitions, callouts, focus
+rings, a syntax palette for code blocks — in a light set checked at WCAG AAA and a dark set
+checked with APCA (`test/read-aloud/page-tokens.test.js` computes both). Selections and `==marks==`
+pass the requirement's dual contrast test in both schemes.
+
+What it overrides, and what it does not:
+
+- While the page is on, `previewTheme`, `previewColorScheme` and `codeBlockTheme` have no visible
+  effect in the live preview; they still decide every **export**, which never loads the page.
+  Set `markdown-preview-enhanced.readAloudGlobalTheme` to `off` in Settings to get the preview
+  theme back exactly as it was; on the sheet `off` shows as no segment selected, and choosing one
+  turns the page on again.
+- Diagram themes are not overridden: a `default` mermaid diagram stays a light box on the dark
+  page. Set `mermaidTheme: dark` alongside _Dark_.
+- The player, its popovers, both sheets and the reading pills follow the page's scheme, and the
+  prose inside a pill is the page's text colour rather than pure black or white.
+- The page lives on the `<html>` element (`data-mpe-ra-page`), which crossnote never rewrites, and
+  is applied before the body is parsed, so a cold load never flashes the wrong theme. The
+  stylesheet is `media/read-aloud-page.css`; its rules are prefixed with `html[data-mpe-ra-page]`,
+  so a user `style.less` that wants to win must use the same prefix or `!important`.
+- A selection drawn over the pills of the block being read paints on the pill, not on the page's
+  surface; it is still visible, but the dual test is defined against the surface.
+- Presentation mode (reveal.js) is never restyled, and the page is desktop-only, like the rest of
+  read aloud.
 
 ### Help: explain the selection
 
@@ -242,11 +281,12 @@ shell is asked; failing that, set `readAloudHelpBinaryPath`. The model's answer 
 untrusted markdown: raw HTML is escaped and executable link targets are neutralised before
 anything is rendered.
 
-**Player font.** Ten choices — the theme's own font, the system UI font, Helvetica, Verdana,
+**Player font.** Ten choices — the default (the low-strain page's Atkinson Hyperlegible Next, or
+the preview theme's own font with the page off), the system UI font, Helvetica, Verdana,
 Trebuchet MS, Georgia, Palatino, Baskerville, Times New Roman and Menlo. Each is a stack that
 degrades to a generic family where the first name is missing, and every family is one the
-machine already has: no font is ever fetched over the network. The override is applied to the
-preview root, so code, diagrams and maths keep their own font.
+machine already has or ships with the extension: no font is ever fetched over the network. The
+override is applied to the preview root, so code, diagrams and maths keep their own font.
 
 **Player font size** is not a font setting at all — it is the preview's zoom, in the same 0.1
 steps the context menu's _Zoom In_ and _Zoom Out_ use, between 0.6 and 2. The label names the
@@ -322,6 +362,8 @@ Rebind those two commands in _Keyboard Shortcuts_ if you use Windows.
 - Help explains a **selection**. Explaining the block being read without selecting it first is
   not built yet, and neither is asking for help on the explanation itself — use the question
   box for that.
+- The low-strain page restyles the live preview only; exports keep the preview theme. Diagram
+  themes are not overridden, and a selection over the block being read paints on its pills.
 
 ## Identity
 

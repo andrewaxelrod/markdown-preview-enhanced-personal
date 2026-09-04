@@ -67,6 +67,24 @@
   var HINT_MS = 2500;
   var SPEED_DEBOUNCE_MS = 300;
   var VOLUME_DEBOUNCE_MS = 300;
+  // The low-strain page (featrues/05-eye-strain.spec.md): the two typographic
+  // sliders persist on the same debounce as the speed.
+  var LINE_HEIGHT_DEBOUNCE_MS = 300;
+  var COLUMN_WIDTH_DEBOUNCE_MS = 300;
+  // The page's whole state lives on <html>, which crossnote never touches
+  // (05 §4.3): the scheme as an attribute, the two slider values as custom
+  // properties that media/read-aloud-page.css reads.
+  var PAGE_ATTR = 'data-mpe-ra-page';
+  var PAGE_LINE_HEIGHT_PROP = '--mpe-ra-page-line-height';
+  var PAGE_MEASURE_PROP = '--mpe-ra-page-measure';
+  var GLOBAL_THEME_LABELS = { auto: 'Auto', light: 'Light', dark: 'Dark' };
+  var FONT_DEFAULT_LABEL_PAGE = 'Default \u2014 Atkinson Hyperlegible';
+  var FONT_DEFAULT_LABEL_OFF = 'Default \u2014 preview theme';
+  var PAGE_OFF_HINT =
+    'Off in Settings \u2014 choose a theme to turn the page on';
+  // Requirement §9, as one muted line at the foot of the sheet (D14).
+  var READER_GUIDANCE =
+    'Match the screen\u2019s brightness to the room; every 20 minutes, look 20 feet away for 20 seconds.';
   var SELECTION_SETTLE_MS = 150;
   var USER_SCROLL_IDLE_MS = 3000;
   var PROGRAMMATIC_SCROLL_MS = 1200;
@@ -193,6 +211,10 @@
     modelId: '',
     highlightTheme: core.DEFAULT_HIGHLIGHT_THEME,
     font: core.DEFAULT_PLAYER_FONT,
+    // The low-strain page (05 §4.1, §9.3).
+    globalTheme: core.DEFAULT_GLOBAL_THEME,
+    lineHeight: core.DEFAULT_LINE_HEIGHT,
+    columnWidth: core.DEFAULT_COLUMN_WIDTH,
     // Help (04-help-module §7.1). `helpAvailable` is false in the web build,
     // where no process can be spawned, and hides the button entirely.
     helpAvailable: false,
@@ -222,6 +244,9 @@
           parsed.highlightTheme,
         );
         config.font = core.normalisePlayerFont(parsed.font);
+        config.globalTheme = core.normaliseGlobalTheme(parsed.globalTheme);
+        config.lineHeight = core.clampLineHeight(parsed.lineHeight);
+        config.columnWidth = core.clampColumnWidth(parsed.columnWidth);
         applyHelpConfig(parsed);
       }
     }
@@ -245,6 +270,11 @@
   var requestCounter = 0;
 
   var rootObserver = null;
+  // crossnote's React root owns the preview root's `class` attribute and
+  // rewrites it on every render — including renders that change no child
+  // node, which the root observer never sees. This one watches the attribute
+  // itself and puts the player's own classes back (see restoreRootClasses).
+  var rootClassObserver = null;
   var bodyObserver = null;
   var viewportObserver = null;
   var decorateScheduled = false;
@@ -261,7 +291,13 @@
   var hintTimer = 0;
   var speedTimer = 0;
   var volumeTimer = 0;
+  var lineHeightTimer = 0;
+  var columnWidthTimer = 0;
   var selectionTimer = 0;
+  // The scheme the low-strain page is showing — 'light', 'dark', or null
+  // while it is off (05 §4). Kept apart from `config.globalTheme` because
+  // `auto` resolves to one of the two and can change under us.
+  var pageScheme = null;
 
   // The preview's zoom, as the theme settings sheet means it to be. It is
   // driven through crossnote's own ctrl+wheel handler (section 7b), whose
@@ -315,6 +351,14 @@
   var lastGestureWasKey = false;
 
   var record = emptyRecord();
+
+  // The low-strain page is applied here, at script evaluation (05 §4.3): this
+  // script sits in <head> and is not deferred, so the attribute is on <html>
+  // before <body> is parsed and the first paint is already the page — no
+  // flash of the wrong theme on a cold load. There is no body yet, so `auto`
+  // falls back to prefers-color-scheme; start() re-resolves with the body
+  // classes once they exist.
+  applyPage();
 
   function emptyRecord() {
     return {
@@ -536,6 +580,12 @@
    * sets it on <body>), then VS Code's body classes, then the OS preference.
    */
   function detectScheme() {
+    // The low-strain page decides (05 §4.5): with a 150 ms background
+    // transition a luminance read mid-switch could answer wrongly, and the
+    // page's own attribute cannot.
+    if (pageScheme) {
+      return pageScheme;
+    }
     var el = root;
     while (el) {
       var luminance = null;
@@ -596,6 +646,101 @@
     if (root) {
       root.removeAttribute('data-mpe-ra-theme');
       root.removeAttribute('data-mpe-ra-scheme');
+    }
+  }
+
+  // ------------------------------------------ the low-strain page (05 §4)
+
+  function prefersDarkScheme() {
+    try {
+      return !!(
+        window.matchMedia &&
+        window.matchMedia('(prefers-color-scheme: dark)').matches
+      );
+    } catch (error) {
+      return false;
+    }
+  }
+
+  /**
+   * Resolve the Global theme to a scheme and publish it on <html>, with the
+   * two slider values as custom properties (05 §4.3). With `off`, or with
+   * read aloud disabled, the attribute and the properties are removed and
+   * media/read-aloud-page.css matches nothing. Returns true when the scheme
+   * changed, so callers know whether the decoration and the panel must
+   * follow.
+   */
+  function applyPage() {
+    var html = document.documentElement;
+    if (!html) {
+      return false;
+    }
+    var next = config.enabled
+      ? core.resolvePageScheme(config.globalTheme, {
+          bodyClasses: document.body ? document.body.className : '',
+          prefersDark: prefersDarkScheme(),
+        })
+      : null;
+    try {
+      if (next) {
+        html.setAttribute(PAGE_ATTR, next);
+        html.style.setProperty(
+          PAGE_LINE_HEIGHT_PROP,
+          String(config.lineHeight),
+        );
+        html.style.setProperty(PAGE_MEASURE_PROP, config.columnWidth + 'ch');
+      } else {
+        html.removeAttribute(PAGE_ATTR);
+        html.style.removeProperty(PAGE_LINE_HEIGHT_PROP);
+        html.style.removeProperty(PAGE_MEASURE_PROP);
+      }
+    } catch (error) {
+      /* cosmetic only */
+    }
+    var changed = next !== pageScheme;
+    pageScheme = next;
+    return changed;
+  }
+
+  function pageIsOn() {
+    return pageScheme !== null;
+  }
+
+  /**
+   * VS Code rewrites the body classes without reloading the webview when the
+   * colour theme changes, and prefers-color-scheme follows it; under `auto`
+   * the page follows both, without a reload and without a message from the
+   * host (05 §4.4).
+   */
+  function onPageEnvironmentChange() {
+    if (config.globalTheme !== 'auto') {
+      return;
+    }
+    if (applyPage()) {
+      applyThemeAttributes();
+      syncSheet();
+    }
+  }
+
+  function watchPageEnvironment() {
+    if (typeof MutationObserver === 'function' && document.body) {
+      new MutationObserver(function () {
+        onPageEnvironmentChange();
+      }).observe(document.body, {
+        attributes: true,
+        attributeFilter: ['class'],
+      });
+    }
+    try {
+      var media =
+        window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)');
+      if (media && typeof media.addEventListener === 'function') {
+        media.addEventListener('change', onPageEnvironmentChange);
+      } else if (media && typeof media.addListener === 'function') {
+        media.addListener(onPageEnvironmentChange);
+      }
+    } catch (error) {
+      /* no media queries here: the body classes still carry the theme */
     }
   }
 
@@ -807,6 +952,37 @@
     head.appendChild(title);
     head.appendChild(close);
 
+    // Global theme (05 §9.1): the row the reference had and 03 left out.
+    var pageLabel = document.createElement('span');
+    pageLabel.className = 'mpe-ra-sheet-label';
+    pageLabel.textContent = 'Global theme';
+    var seg = document.createElement('div');
+    seg.className = 'mpe-ra-seg';
+    seg.setAttribute('role', 'radiogroup');
+    seg.setAttribute('aria-label', 'Global theme');
+    var segments = Object.create(null);
+    for (var g = 0; g < core.GLOBAL_THEMES.length; g++) {
+      var choice = core.GLOBAL_THEMES[g];
+      if (!GLOBAL_THEME_LABELS[choice]) {
+        // `off` is a Settings value, not a segment (D2).
+        continue;
+      }
+      var segment = document.createElement('button');
+      segment.type = 'button';
+      segment.className = 'mpe-ra-ui mpe-ra-seg-btn';
+      segment.setAttribute('data-mpe-ra-action', 'globalTheme');
+      segment.setAttribute('data-mpe-ra-page-choice', choice);
+      segment.setAttribute('role', 'radio');
+      segment.setAttribute('aria-checked', 'false');
+      segment.textContent = GLOBAL_THEME_LABELS[choice];
+      segments[choice] = segment;
+      seg.appendChild(segment);
+    }
+    var pageHint = document.createElement('p');
+    pageHint.className = 'mpe-ra-sheet-hint';
+    pageHint.textContent = PAGE_OFF_HINT;
+    pageHint.hidden = true;
+
     var fontLabel = document.createElement('label');
     fontLabel.className = 'mpe-ra-sheet-label';
     fontLabel.textContent = 'Player font';
@@ -838,6 +1014,35 @@
     sizeRange.setAttribute('aria-label', 'Player font size');
     sizeLabel.appendChild(sizeRange);
 
+    // Line height and column width (05 §9.3), built like the size slider.
+    var lineHeightLabel = document.createElement('label');
+    lineHeightLabel.className = 'mpe-ra-sheet-label';
+    var lineHeightText = document.createTextNode('');
+    lineHeightLabel.appendChild(lineHeightText);
+    var lineHeightRange = document.createElement('input');
+    lineHeightRange.className =
+      'mpe-ra-ui mpe-ra-pop-range mpe-ra-sheet-range mpe-ra-sheet-line-height';
+    lineHeightRange.type = 'range';
+    lineHeightRange.min = String(core.LINE_HEIGHT_MIN);
+    lineHeightRange.max = String(core.LINE_HEIGHT_MAX);
+    lineHeightRange.step = String(core.LINE_HEIGHT_STEP);
+    lineHeightRange.setAttribute('aria-label', 'Line height');
+    lineHeightLabel.appendChild(lineHeightRange);
+
+    var widthLabel = document.createElement('label');
+    widthLabel.className = 'mpe-ra-sheet-label';
+    var widthText = document.createTextNode('');
+    widthLabel.appendChild(widthText);
+    var widthRange = document.createElement('input');
+    widthRange.className =
+      'mpe-ra-ui mpe-ra-pop-range mpe-ra-sheet-range mpe-ra-sheet-column-width';
+    widthRange.type = 'range';
+    widthRange.min = String(core.COLUMN_WIDTH_MIN);
+    widthRange.max = String(core.COLUMN_WIDTH_MAX);
+    widthRange.step = String(core.COLUMN_WIDTH_STEP);
+    widthRange.setAttribute('aria-label', 'Column width');
+    widthLabel.appendChild(widthRange);
+
     var themeLabel = document.createElement('span');
     themeLabel.className = 'mpe-ra-sheet-label';
     themeLabel.textContent = 'Player highlight theme';
@@ -854,18 +1059,46 @@
       swatches.appendChild(swatch);
     }
 
+    // Reset page settings, and the reader guidance (05 §9.4).
+    var footer = document.createElement('div');
+    footer.className = 'mpe-ra-sheet-footer';
+    var reset = document.createElement('button');
+    reset.type = 'button';
+    reset.className = 'mpe-ra-ui mpe-ra-sheet-reset';
+    reset.setAttribute('data-mpe-ra-action', 'resetPage');
+    reset.textContent = 'Reset page settings';
+    var note = document.createElement('p');
+    note.className = 'mpe-ra-sheet-note';
+    note.textContent = READER_GUIDANCE;
+    footer.appendChild(reset);
+    footer.appendChild(note);
+
     sheet.appendChild(head);
+    sheet.appendChild(pageLabel);
+    sheet.appendChild(seg);
+    sheet.appendChild(pageHint);
     sheet.appendChild(fontLabel);
     sheet.appendChild(sizeLabel);
+    sheet.appendChild(lineHeightLabel);
+    sheet.appendChild(widthLabel);
     sheet.appendChild(themeLabel);
     sheet.appendChild(swatches);
+    sheet.appendChild(footer);
 
     return {
       root: sheet,
+      segments: segments,
+      hint: pageHint,
       font: fontSelect,
+      fontDefaultOption: fontSelect.options[0],
       sizeRange: sizeRange,
       sizeText: sizeText,
+      lineHeightRange: lineHeightRange,
+      lineHeightText: lineHeightText,
+      widthRange: widthRange,
+      widthText: widthText,
       swatches: swatchByTheme,
+      reset: reset,
     };
   }
 
@@ -1187,6 +1420,20 @@
     });
     sheet.sizeRange.addEventListener('input', function () {
       applyZoom(parseFloat(sheet.sizeRange.value), sheet.sizeRange);
+    });
+    sheet.lineHeightRange.addEventListener('input', function () {
+      applyLineHeight(
+        parseFloat(sheet.lineHeightRange.value),
+        true,
+        sheet.lineHeightRange,
+      );
+    });
+    sheet.widthRange.addEventListener('input', function () {
+      applyColumnWidth(
+        parseFloat(sheet.widthRange.value),
+        true,
+        sheet.widthRange,
+      );
     });
     helpSheet.input.addEventListener('keydown', function (event) {
       if (event.key === 'Enter') {
@@ -1702,6 +1949,63 @@
     root.classList.toggle('mpe-ra-font', !!stack);
   }
 
+  /**
+   * The Global theme (05 §4.4): the page switches at once, the decoration
+   * and the panel follow through the same attribute, and the host persists
+   * the choice — its settings-change broadcast brings every other preview
+   * along, the way a highlight-theme change does.
+   */
+  function applyGlobalTheme(value, persist) {
+    config.globalTheme = core.normaliseGlobalTheme(value);
+    applyPage();
+    applyThemeAttributes();
+    syncSheet();
+    if (persist) {
+      post('readAloudSetGlobalTheme', [config.globalTheme]);
+    }
+  }
+
+  /** The line height slider (05 §9.3): reflows the column only. */
+  function applyLineHeight(value, persist, from) {
+    config.lineHeight = core.clampLineHeight(value);
+    applyPage();
+    syncSheet(from);
+    if (!persist) {
+      return;
+    }
+    lineHeightTimer = clearTimer(lineHeightTimer);
+    lineHeightTimer = setTimeout(function () {
+      lineHeightTimer = 0;
+      post('readAloudSetLineHeight', [config.lineHeight]);
+    }, LINE_HEIGHT_DEBOUNCE_MS);
+  }
+
+  /** The column width slider (05 §9.3). */
+  function applyColumnWidth(value, persist, from) {
+    config.columnWidth = core.clampColumnWidth(value);
+    applyPage();
+    syncSheet(from);
+    if (!persist) {
+      return;
+    }
+    columnWidthTimer = clearTimer(columnWidthTimer);
+    columnWidthTimer = setTimeout(function () {
+      columnWidthTimer = 0;
+      post('readAloudSetColumnWidth', [config.columnWidth]);
+    }, COLUMN_WIDTH_DEBOUNCE_MS);
+  }
+
+  /**
+   * Reset page settings (05 §9.4): the host clears the four page settings
+   * and its broadcast restores the sheet; the zoom is not a setting, so the
+   * sheet puts it back itself. The highlight palette, speed and volume are
+   * player preferences and are left alone.
+   */
+  function resetPage() {
+    post('readAloudResetPage', []);
+    applyZoom(1);
+  }
+
   /** The highlight palette: applied at once, persisted through the host. */
   function applyHighlightTheme(value, persist) {
     config.highlightTheme = core.normaliseHighlightTheme(value);
@@ -1718,9 +2022,55 @@
       return;
     }
     var sheet = barParts.sheet;
+    var on = pageIsOn();
+    // Global theme: under `off` no segment is checked, the hint shows and
+    // the two page sliders are disabled (05 §9.1).
+    for (var g = 0; g < core.GLOBAL_THEMES.length; g++) {
+      var choice = core.GLOBAL_THEMES[g];
+      if (sheet.segments[choice]) {
+        sheet.segments[choice].setAttribute(
+          'aria-checked',
+          on && choice === config.globalTheme ? 'true' : 'false',
+        );
+      }
+    }
+    sheet.hint.hidden = config.globalTheme !== 'off';
+    // `default` means the page's own face while the page is on (05 §9.2).
+    var defaultLabel = on ? FONT_DEFAULT_LABEL_PAGE : FONT_DEFAULT_LABEL_OFF;
+    if (sheet.fontDefaultOption.textContent !== defaultLabel) {
+      sheet.fontDefaultOption.textContent = defaultLabel;
+    }
     if (sheet.font.value !== config.font) {
       sheet.font.value = config.font;
     }
+    sheet.lineHeightText.data = 'Line height: ' + config.lineHeight;
+    sheet.lineHeightRange.setAttribute(
+      'aria-valuetext',
+      'line height ' + config.lineHeight,
+    );
+    if (sheet.lineHeightRange !== from) {
+      sheet.lineHeightRange.value = String(config.lineHeight);
+    }
+    setRangeFill(
+      sheet.lineHeightRange,
+      (config.lineHeight - core.LINE_HEIGHT_MIN) /
+        (core.LINE_HEIGHT_MAX - core.LINE_HEIGHT_MIN),
+    );
+    sheet.lineHeightRange.disabled = !on;
+    sheet.widthText.data = 'Column width: ' + config.columnWidth + ' ch';
+    sheet.widthRange.setAttribute(
+      'aria-valuetext',
+      config.columnWidth + ' characters',
+    );
+    if (sheet.widthRange !== from) {
+      sheet.widthRange.value = String(config.columnWidth);
+    }
+    setRangeFill(
+      sheet.widthRange,
+      (config.columnWidth - core.COLUMN_WIDTH_MIN) /
+        (core.COLUMN_WIDTH_MAX - core.COLUMN_WIDTH_MIN),
+    );
+    sheet.widthRange.disabled = !on;
     var px = Math.round(baseFontSize() * zoomIntent);
     sheet.sizeText.data = 'Player font size: ' + px + 'px';
     sheet.sizeRange.setAttribute(
@@ -4264,6 +4614,18 @@
       );
       return;
     }
+    // ------------------------------------------ the low-strain page (05 §9)
+    if (action === 'globalTheme') {
+      applyGlobalTheme(
+        element ? element.getAttribute('data-mpe-ra-page-choice') : '',
+        true,
+      );
+      return;
+    }
+    if (action === 'resetPage') {
+      resetPage();
+      return;
+    }
     // ------------------------------------------- help (04-help-module §4)
     if (action === 'help') {
       closePopovers();
@@ -4441,6 +4803,18 @@
       config.font = core.normalisePlayerFont(message.font);
       applyFontToRoot();
     }
+    // The low-strain page (05 §4.4): from Settings, or another preview's
+    // sheet, or a Reset — the page follows the way the font does.
+    if (typeof message.globalTheme === 'string') {
+      config.globalTheme = core.normaliseGlobalTheme(message.globalTheme);
+    }
+    if (typeof message.lineHeight === 'number') {
+      config.lineHeight = core.clampLineHeight(message.lineHeight);
+    }
+    if (typeof message.columnWidth === 'number') {
+      config.columnWidth = core.clampColumnWidth(message.columnWidth);
+    }
+    applyPage();
     // A model or effort change re-labels an open sheet at once (§7.1).
     applyHelpConfig(message);
     if (typeof message.speed === 'number') {
@@ -4623,6 +4997,9 @@
     if (rootObserver) {
       rootObserver.disconnect();
     }
+    if (rootClassObserver) {
+      rootClassObserver.disconnect();
+    }
     root = candidate;
     rootObserver = new MutationObserver(function (mutations) {
       if (isSelfMutation(mutations)) {
@@ -4631,11 +5008,54 @@
       scheduleDecorate();
     });
     rootObserver.observe(root, { childList: true, subtree: true });
+    rootClassObserver = new MutationObserver(restoreRootClasses);
+    rootClassObserver.observe(root, {
+      attributes: true,
+      attributeFilter: ['class'],
+    });
     decorate();
+  }
+
+  /**
+   * Put the player's root classes back after crossnote rewrote the `class`
+   * attribute (`setAttribute("class", "crossnote markdown-preview …")` on
+   * every React render). Without them the reading canvas loses its rhythm,
+   * the pills their padding variables, click-to-read its pointer and the
+   * panel its clearance. A no-op when nothing is missing, so re-adding the
+   * classes — which is itself an attribute mutation — cannot loop.
+   */
+  function restoreRootClasses() {
+    if (!root || !config.enabled) {
+      return;
+    }
+    var wanted = [CANVAS_CLASS];
+    if (config.clickToRead) {
+      wanted.push(CLICK_CLASS);
+    }
+    if (barVisible()) {
+      wanted.push(PANEL_CLASS);
+    }
+    if (core.playerFontStack(config.font)) {
+      wanted.push('mpe-ra-font');
+    }
+    for (var i = 0; i < wanted.length; i++) {
+      if (!root.classList.contains(wanted[i])) {
+        applyClickClass();
+        applyCanvasClasses();
+        applyFontToRoot();
+        applyGutter();
+        return;
+      }
+    }
   }
 
   function start() {
     sourceUri = readSourceUriFromPage();
+    // The body classes carry VS Code's colour theme kind now that the body
+    // exists (05 §4.3); if they disagree with the media query the page
+    // switches once, here, before the root is decorated.
+    applyPage();
+    watchPageEnvironment();
     attachRoot(document.querySelector(core.ROOT_SELECTOR));
     if (config.enabled) {
       // The control panel is part of the page, not just of a running read.

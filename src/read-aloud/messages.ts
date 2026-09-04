@@ -83,6 +83,58 @@ export function normalisePlayerFont(value: unknown): ReadAloudFont {
 }
 
 /**
+ * The low-strain reading page (`featrues/05-eye-strain.spec.md` §4, §9.3):
+ * the Global theme of the theme settings sheet, and the two typographic
+ * sliders. `off` is a Settings-only value that restores the preview theme
+ * exactly as it was before the page existed (D2). The webview mirrors the
+ * three normalisers in media/read-aloud-core.js.
+ */
+export const GLOBAL_THEMES = ['auto', 'light', 'dark', 'off'] as const;
+export type ReadAloudGlobalTheme = (typeof GLOBAL_THEMES)[number];
+export const DEFAULT_GLOBAL_THEME: ReadAloudGlobalTheme = 'auto';
+
+export function normaliseGlobalTheme(value: unknown): ReadAloudGlobalTheme {
+  return typeof value === 'string' &&
+    (GLOBAL_THEMES as readonly string[]).includes(value)
+    ? (value as ReadAloudGlobalTheme)
+    : DEFAULT_GLOBAL_THEME;
+}
+
+/** Requirement 6.2: line height 1.4–1.8 in 0.1 steps, default 1.6. */
+export const LINE_HEIGHT_MIN = 1.4;
+export const LINE_HEIGHT_MAX = 1.8;
+export const LINE_HEIGHT_STEP = 0.1;
+export const DEFAULT_LINE_HEIGHT = 1.6;
+
+/** Requirement 6.3: the measure, 50–75 ch in 5 ch steps, default 66 ch. */
+export const COLUMN_WIDTH_MIN = 50;
+export const COLUMN_WIDTH_MAX = 75;
+export const COLUMN_WIDTH_STEP = 5;
+export const DEFAULT_COLUMN_WIDTH = 66;
+
+/**
+ * Clamp to the slider's range and round to the step's precision (two
+ * decimals), never to the step itself: a hand-edited 1.55 is honoured.
+ */
+export function clampLineHeight(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return DEFAULT_LINE_HEIGHT;
+  }
+  const clamped = Math.min(LINE_HEIGHT_MAX, Math.max(LINE_HEIGHT_MIN, value));
+  return Math.round(clamped * 100) / 100;
+}
+
+/** Whole characters, clamped to the range: a hand-edited 63 is honoured. */
+export function clampColumnWidth(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return DEFAULT_COLUMN_WIDTH;
+  }
+  return Math.round(
+    Math.min(COLUMN_WIDTH_MAX, Math.max(COLUMN_WIDTH_MIN, value)),
+  );
+}
+
+/**
  * `help` is the help sheet's own read (`featrues/04-help-module.md` §5): a
  * bounded multi-block read, like a selection, whose scope is the sheet body
  * rather than the preview root.
@@ -167,6 +219,10 @@ export interface ReadAloudConfigMessage {
   highlightTheme: ReadAloudHighlightTheme;
   /** Theme settings — the preview font override, by id. */
   font: ReadAloudFont;
+  /** The low-strain page (05 §10.2): the Global theme and the two sliders. */
+  globalTheme: ReadAloudGlobalTheme;
+  lineHeight: number;
+  columnWidth: number;
   /** Help (§7): false in the web build, where no process can be spawned. */
   helpAvailable: boolean;
   /** The sheet's own label, e.g. `claude · sonnet · low` (§4 step 2). */
@@ -637,4 +693,56 @@ export function parseSetFontArgs(args: unknown): ReadAloudFont | undefined {
     (PLAYER_FONTS as readonly string[]).includes(font)
     ? (font as ReadAloudFont)
     : undefined;
+}
+
+/**
+ * `readAloudSetGlobalTheme` -> `[theme]` (05 §10.2): a segment of the
+ * Global theme control. `off` is accepted too, so a Settings value can be
+ * echoed back, though the sheet itself never sends it.
+ */
+export function parseSetGlobalThemeArgs(
+  args: unknown,
+): ReadAloudGlobalTheme | undefined {
+  if (!Array.isArray(args) || args.length !== 1) {
+    return undefined;
+  }
+  const theme = args[0] as unknown;
+  return typeof theme === 'string' &&
+    (GLOBAL_THEMES as readonly string[]).includes(theme)
+    ? (theme as ReadAloudGlobalTheme)
+    : undefined;
+}
+
+/**
+ * `readAloudSetLineHeight` -> `[value]`: one finite number, clamped to the
+ * slider's range and rounded to two decimals. Out of range is clamped rather
+ * than dropped — the host stores a number, never a string, so nothing the
+ * webview sends can become CSS here.
+ */
+export function parseSetLineHeightArgs(args: unknown): number | undefined {
+  if (!Array.isArray(args) || args.length !== 1) {
+    return undefined;
+  }
+  const value = args[0] as unknown;
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return undefined;
+  }
+  return clampLineHeight(value);
+}
+
+/** `readAloudSetColumnWidth` -> `[value]`: one finite number, rounded and clamped. */
+export function parseSetColumnWidthArgs(args: unknown): number | undefined {
+  if (!Array.isArray(args) || args.length !== 1) {
+    return undefined;
+  }
+  const value = args[0] as unknown;
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return undefined;
+  }
+  return clampColumnWidth(value);
+}
+
+/** `readAloudResetPage` -> `[]` (05 §9.4): the Reset page settings button. */
+export function parseResetPageArgs(args: unknown): boolean {
+  return Array.isArray(args) && args.length === 0;
 }

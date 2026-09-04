@@ -408,6 +408,98 @@ suite('read-aloud/messages', function () {
     });
   });
 
+  suite(
+    '05 the low-strain page: parseSetGlobalThemeArgs, the sliders and Reset',
+    function () {
+      test('parseSetGlobalThemeArgs accepts the four values and nothing else', function () {
+        assert.deepStrictEqual(messages.GLOBAL_THEMES, [
+          'auto',
+          'light',
+          'dark',
+          'off',
+        ]);
+        assert.strictEqual(messages.DEFAULT_GLOBAL_THEME, 'auto');
+        for (const theme of messages.GLOBAL_THEMES) {
+          assert.strictEqual(messages.parseSetGlobalThemeArgs([theme]), theme);
+        }
+        assert.strictEqual(
+          messages.parseSetGlobalThemeArgs(['sepia']),
+          undefined,
+        );
+        assert.strictEqual(
+          messages.parseSetGlobalThemeArgs(['Dark']),
+          undefined,
+        );
+        assert.strictEqual(messages.parseSetGlobalThemeArgs([1]), undefined);
+        assert.strictEqual(messages.parseSetGlobalThemeArgs([]), undefined);
+        assert.strictEqual(
+          messages.parseSetGlobalThemeArgs(['dark', 'light']),
+          undefined,
+        );
+        assert.strictEqual(messages.parseSetGlobalThemeArgs('dark'), undefined);
+        assert.strictEqual(messages.normaliseGlobalTheme('sepia'), 'auto');
+        assert.strictEqual(messages.normaliseGlobalTheme(undefined), 'auto');
+        assert.strictEqual(messages.normaliseGlobalTheme('off'), 'off');
+      });
+
+      test('parseSetLineHeightArgs clamps to 1.4–1.8 at two decimals', function () {
+        assert.strictEqual(messages.LINE_HEIGHT_MIN, 1.4);
+        assert.strictEqual(messages.LINE_HEIGHT_MAX, 1.8);
+        assert.strictEqual(messages.DEFAULT_LINE_HEIGHT, 1.6);
+        assert.strictEqual(messages.parseSetLineHeightArgs([1.6]), 1.6);
+        assert.strictEqual(messages.parseSetLineHeightArgs([1.555]), 1.56);
+        assert.strictEqual(messages.parseSetLineHeightArgs([0.2]), 1.4);
+        assert.strictEqual(messages.parseSetLineHeightArgs([9]), 1.8);
+        assert.strictEqual(messages.parseSetLineHeightArgs(['1.6']), undefined);
+        assert.strictEqual(
+          messages.parseSetLineHeightArgs([Number.NaN]),
+          undefined,
+        );
+        assert.strictEqual(
+          messages.parseSetLineHeightArgs([Number.POSITIVE_INFINITY]),
+          undefined,
+        );
+        assert.strictEqual(messages.parseSetLineHeightArgs([]), undefined);
+        assert.strictEqual(
+          messages.parseSetLineHeightArgs([1.6, 1.6]),
+          undefined,
+        );
+        assert.strictEqual(messages.parseSetLineHeightArgs(1.6), undefined);
+        assert.strictEqual(messages.clampLineHeight('tall'), 1.6);
+        assert.strictEqual(messages.clampLineHeight(1.55), 1.55);
+      });
+
+      test('parseSetColumnWidthArgs rounds and clamps to 50–75', function () {
+        assert.strictEqual(messages.COLUMN_WIDTH_MIN, 50);
+        assert.strictEqual(messages.COLUMN_WIDTH_MAX, 75);
+        assert.strictEqual(messages.DEFAULT_COLUMN_WIDTH, 66);
+        assert.strictEqual(messages.parseSetColumnWidthArgs([66]), 66);
+        assert.strictEqual(messages.parseSetColumnWidthArgs([63.4]), 63);
+        assert.strictEqual(messages.parseSetColumnWidthArgs([10]), 50);
+        assert.strictEqual(messages.parseSetColumnWidthArgs([500]), 75);
+        assert.strictEqual(messages.parseSetColumnWidthArgs(['66']), undefined);
+        assert.strictEqual(
+          messages.parseSetColumnWidthArgs([Number.NaN]),
+          undefined,
+        );
+        assert.strictEqual(messages.parseSetColumnWidthArgs([]), undefined);
+        assert.strictEqual(
+          messages.parseSetColumnWidthArgs([66, 66]),
+          undefined,
+        );
+        assert.strictEqual(messages.parseSetColumnWidthArgs(66), undefined);
+        assert.strictEqual(messages.clampColumnWidth(null), 66);
+      });
+
+      test('parseResetPageArgs accepts the empty argument list only', function () {
+        assert.strictEqual(messages.parseResetPageArgs([]), true);
+        assert.strictEqual(messages.parseResetPageArgs([1]), false);
+        assert.strictEqual(messages.parseResetPageArgs(undefined), false);
+        assert.strictEqual(messages.parseResetPageArgs({}), false);
+      });
+    },
+  );
+
   suite('T-12 parsePlayingArgs', function () {
     test('accepts [sourceUri, requestId, chunkIndex]', function () {
       assert.deepStrictEqual(messages.parsePlayingArgs([URI, REQUEST_ID, 0]), {

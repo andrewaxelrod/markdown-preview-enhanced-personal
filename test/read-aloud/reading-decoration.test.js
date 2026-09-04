@@ -303,6 +303,108 @@ suite('read-aloud reading decoration: the spoken word', () => {
   });
 });
 
+suite(
+  'read-aloud reading decoration: the pill padding follows the line height',
+  () => {
+    // 05 §6.4: the pill's vertical padding is derived from the canvas line
+    // height so that the line fragments of the block being read always
+    // overlap by the corner radius and fuse into one shape, on the low-strain
+    // page's 1.4–1.8 and on the 1.85 of `off` alike. jsdom does not evaluate
+    // calc(), so the declaration is read from the stylesheet and its
+    // arithmetic is done here.
+    const fs = require('node:fs');
+    const path = require('node:path');
+    const css = fs.readFileSync(
+      path.join(__dirname, '..', '..', 'media', 'read-aloud.css'),
+      'utf8',
+    );
+    const RE =
+      /--mpe-ra-pill-pad-y:\s*max\(\s*([\d.]+)em,\s*calc\(\s*\(var\(--mpe-ra-line-height, ([\d.]+)\) \* 1em - var\(--mpe-ra-content-area, ([\d.]+)em\)\) \/\s*2 \+ ([\d.]+)em\s*\)\s*\)/g;
+    const CONTENT_AREA = 1.3;
+    const RADIUS = 0.4;
+
+    function padAt(declaration, lineHeight) {
+      const [, min, , contentArea, extra] = declaration.map(Number);
+      const raw = (lineHeight - contentArea) / 2 + extra;
+      return Math.round(Math.max(min, raw) * 1000) / 1000;
+    }
+
+    test('the canvas, the pill and the word declare it, the first two alike', () => {
+      const found = Array.from(css.matchAll(RE));
+      assert.strictEqual(found.length, 3);
+      assert.deepStrictEqual(found[0].slice(1), found[1].slice(1));
+      // The content area is the face's ascent + descent (hhea 984 / -316).
+      assert.strictEqual(found[0][3], String(CONTENT_AREA));
+      assert.strictEqual(
+        found[0][2],
+        '1.85',
+        'the fallback is the canvas rhythm',
+      );
+      assert.ok(/--mpe-ra-pill-radius:\s*0\.4em/.test(css));
+    });
+
+    test('adjacent line fragments overlap by at least the corner radius at every rhythm', () => {
+      const pill = Array.from(css.matchAll(RE))[0];
+      assert.strictEqual(padAt(pill, 1.6), 0.35);
+      assert.strictEqual(padAt(pill, 1.85), 0.475);
+      assert.strictEqual(padAt(pill, 1.4), 0.25);
+      for (const lineHeight of [1.4, 1.5, 1.6, 1.7, 1.8, 1.85]) {
+        const overlap = CONTENT_AREA + 2 * padAt(pill, lineHeight) - lineHeight;
+        assert.ok(
+          overlap >= RADIUS - 1e-9,
+          `overlap ${overlap.toFixed(3)}em at ${lineHeight}`,
+        );
+      }
+    });
+
+    test('the spoken word stands proud of the pill by the same margin above and below', () => {
+      const [pill, , word] = Array.from(css.matchAll(RE));
+      for (const lineHeight of [1.4, 1.6, 1.85]) {
+        const proud = padAt(word, lineHeight) - padAt(pill, lineHeight);
+        assert.ok(proud > 0.1 && proud < 0.15, `proud by ${proud}em`);
+      }
+    });
+
+    test('each margin cancels its own padding, shift included, so a read still moves nothing', () => {
+      const pill = /\.mpe-ra-pill,\s*\.mpe-ra-word\s*\{([^}]*)\}/.exec(css);
+      assert.ok(pill);
+      const block = pill[1].replace(/\s+/g, ' ');
+      const top = 'var(--mpe-ra-pill-pad-y) - var(--mpe-ra-pill-shift, 0.08em)';
+      const bottom =
+        'var(--mpe-ra-pill-pad-y) + var(--mpe-ra-pill-shift, 0.08em)';
+      assert.ok(
+        block.includes(
+          `margin: calc(-1 * (${top})) calc(-1 * var(--mpe-ra-pill-pad-x)) calc(-1 * (${bottom}));`,
+        ),
+        block,
+      );
+      assert.ok(
+        block.includes(
+          `padding: calc(${top}) var(--mpe-ra-pill-pad-x) calc(${bottom});`,
+        ),
+        block,
+      );
+      // The shift is half of (ascent − cap height) − (descent − descender
+      // depth) for the face: (0.984 − 0.668) − (0.316 − 0.19), halved.
+      assert.ok(/--mpe-ra-pill-shift:\s*0\.08em/.test(css));
+    });
+
+    test('the spoken word is positioned, so it paints above the pill fragment of the line below', () => {
+      // Inline boxes paint line by line: without this the next line's pill,
+      // painted after the line the word is on, covered the part of the word
+      // box that stands below its line and the box came out cut flat at the
+      // bottom. Relative positioning with no offset changes the paint order
+      // and nothing else.
+      const word = Array.from(css.matchAll(/\.mpe-ra-word\s*\{([^}]*)\}/g))
+        .map((m) => m[1])
+        .find((body) => body.includes('background-color: var(--mpe-ra-word'));
+      assert.ok(word, 'the word rule');
+      assert.ok(/position:\s*relative;/.test(word), word);
+      assert.ok(!/\b(top|left|right|bottom|inset):/.test(word), word);
+    });
+  },
+);
+
 suite('read-aloud highlight theme helpers', () => {
   test('normaliseHighlightTheme accepts the five themes and falls back to blue', () => {
     assert.deepStrictEqual(core.HIGHLIGHT_THEMES, [

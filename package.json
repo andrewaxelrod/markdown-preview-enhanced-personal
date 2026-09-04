@@ -37,7 +37,7 @@
     "run-in-browser:watch": "node build.js --web-dev && concurrently \"vscode-test-web --browser none --extensionDevelopmentPath=. ${SERVE_DIR:-.}\" \"npx http-server ./crossnote -p 6789 --cors\" \"node build.js --watch\"",
     "run-in-vscode-dev": "npx serve --cors -l 5000 --ssl-cert $HOME/certs/localhost.pem --ssl-key $HOME/certs/localhost-key.pem",
     "test": "pnpm test:unit",
-    "test:unit": "mocha --ui tdd --reporter spec test/find-fragment-target-line.test.js test/block-id-helpers.test.js test/rank-by-closeness.test.js test/read-aloud/word-spans.test.js test/read-aloud/chunker.test.js test/read-aloud/speakable.test.js test/read-aloud/error-mapping.test.js test/read-aloud/messages.test.js test/read-aloud/cache.test.js test/read-aloud/block-eligibility.test.js test/read-aloud/text-extraction.test.js test/read-aloud/selection.test.js test/read-aloud/click-to-read.test.js test/read-aloud/continuous-read.test.js test/read-aloud/player.test.js test/read-aloud/control-panel.test.js test/read-aloud/theme-settings.test.js test/read-aloud/reading-decoration.test.js test/read-aloud/kokoro-client.test.js test/read-aloud/kokoro-alignment.test.js test/read-aloud/help-prompt.test.js test/read-aloud/help-engine.test.js test/read-aloud/help-sheet.test.js",
+    "test:unit": "mocha --ui tdd --reporter spec test/find-fragment-target-line.test.js test/block-id-helpers.test.js test/rank-by-closeness.test.js test/read-aloud/word-spans.test.js test/read-aloud/chunker.test.js test/read-aloud/speakable.test.js test/read-aloud/error-mapping.test.js test/read-aloud/messages.test.js test/read-aloud/cache.test.js test/read-aloud/block-eligibility.test.js test/read-aloud/text-extraction.test.js test/read-aloud/selection.test.js test/read-aloud/click-to-read.test.js test/read-aloud/continuous-read.test.js test/read-aloud/player.test.js test/read-aloud/control-panel.test.js test/read-aloud/theme-settings.test.js test/read-aloud/reading-decoration.test.js test/read-aloud/kokoro-client.test.js test/read-aloud/kokoro-alignment.test.js test/read-aloud/help-prompt.test.js test/read-aloud/help-engine.test.js test/read-aloud/help-sheet.test.js test/read-aloud/page-tokens.test.js test/read-aloud/page-theme.test.js",
     "vscode:prepublish": "pnpm install --frozen-lockfile && pnpm build",
     "watch": "gulp copy-files && gulp clean-out && node build.js --watch"
   },
@@ -956,6 +956,37 @@
             "%markdown-preview-enhanced.readAloudFont.enumDescriptions.8%",
             "%markdown-preview-enhanced.readAloudFont.enumDescriptions.9%"
           ]
+        },
+        "markdown-preview-enhanced.readAloudGlobalTheme": {
+          "description": "%markdown-preview-enhanced.readAloudGlobalTheme.description%",
+          "default": "auto",
+          "type": "string",
+          "enum": [
+            "auto",
+            "light",
+            "dark",
+            "off"
+          ],
+          "enumDescriptions": [
+            "%markdown-preview-enhanced.readAloudGlobalTheme.enumDescriptions.0%",
+            "%markdown-preview-enhanced.readAloudGlobalTheme.enumDescriptions.1%",
+            "%markdown-preview-enhanced.readAloudGlobalTheme.enumDescriptions.2%",
+            "%markdown-preview-enhanced.readAloudGlobalTheme.enumDescriptions.3%"
+          ]
+        },
+        "markdown-preview-enhanced.readAloudLineHeight": {
+          "description": "%markdown-preview-enhanced.readAloudLineHeight.description%",
+          "default": 1.6,
+          "type": "number",
+          "minimum": 1.4,
+          "maximum": 1.8
+        },
+        "markdown-preview-enhanced.readAloudColumnWidth": {
+          "description": "%markdown-preview-enhanced.readAloudColumnWidth.description%",
+          "default": 66,
+          "type": "integer",
+          "minimum": 50,
+          "maximum": 75
         },
         "markdown-preview-enhanced.readAloudCacheSizeMB": {
           "description": "%markdown-preview-enhanced.readAloudCacheSizeMB.description%",

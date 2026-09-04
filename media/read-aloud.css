@@ -34,8 +34,35 @@
 .markdown-preview.mpe-ra-canvas {
   --mpe-ra-line-height: 1.85;
   --mpe-ra-block-gap: 1.1em;
-  --mpe-ra-pill-pad-x: 0.25em;
-  --mpe-ra-pill-pad-y: 0.2em;
+  --mpe-ra-pill-pad-x: 0.4em;
+  --mpe-ra-pill-radius: 0.4em;
+  /* The pill's vertical padding is derived from the line height (05 §6.4),
+   * so the line fragments of the block being read always overlap: the
+   * block reads as one continuous shape, in the style of the reference
+   * reader, whatever the rhythm — the page's 1.4–1.8 or the 1.85 of `off`.
+   * `--mpe-ra-content-area` is the face's ascent + descent in em (Atkinson
+   * Hyperlegible Next: hhea 984 / −316 on 1000 upm, so 1.3 em). Half the
+   * leading closes the gap between two fragments exactly; half the corner
+   * radius on top of it makes them overlap by the radius, which is what
+   * hides the notch two rounded fragments would otherwise leave where they
+   * meet. At 1.6 that is 0.35 em, at 1.85 0.475 em, at 1.4 0.25 em.
+   *
+   * The padding is then shifted downwards by `--mpe-ra-pill-shift`: the
+   * face's ascent (0.984 em) stands well above its cap height (0.668 em),
+   * while its descent (0.316 em) is close to the descender bottom (0.19 em),
+   * so equal padding leaves a deep band above the capitals and a sliver
+   * below the descenders — the last line looked cut off. Moving 0.08 em from
+   * the top to the bottom — half of (0.984 − 0.668) − (0.316 − 0.19) — puts
+   * the same overhang above the capitals as below the descenders. */
+  --mpe-ra-content-area: 1.3em;
+  --mpe-ra-pill-shift: 0.08em;
+  --mpe-ra-pill-pad-y: max(
+    0.1em,
+    calc(
+      (var(--mpe-ra-line-height, 1.85) * 1em - var(--mpe-ra-content-area, 1.3em)) /
+        2 + 0.2em
+    )
+  );
   line-height: var(--mpe-ra-line-height);
 }
 
@@ -204,22 +231,60 @@
 
 .mpe-ra-pill,
 .mpe-ra-word {
-  --mpe-ra-pill-pad-x: 0.25em;
-  --mpe-ra-pill-pad-y: 0.2em;
+  --mpe-ra-pill-pad-x: 0.4em;
+  /* The same derivation as on the canvas (§1): the line height is inherited
+   * from the canvas, the em is the pill's own. */
+  --mpe-ra-pill-pad-y: max(
+    0.1em,
+    calc(
+      (var(--mpe-ra-line-height, 1.85) * 1em - var(--mpe-ra-content-area, 1.3em)) /
+        2 + 0.2em
+    )
+  );
   -webkit-box-decoration-break: clone;
   box-decoration-break: clone;
-  margin: calc(-1 * var(--mpe-ra-pill-pad-y)) calc(-1 * var(--mpe-ra-pill-pad-x));
-  padding: var(--mpe-ra-pill-pad-y) var(--mpe-ra-pill-pad-x);
+  /* Top and bottom differ by the shift (§1); each margin cancels its own
+   * padding, so the line boxes and the block's height are untouched. The
+   * fallbacks repeat the canvas values so the pill is right even in the
+   * moment between a crossnote render and the player restoring the canvas
+   * class on the root. */
+  margin: calc(-1 * (var(--mpe-ra-pill-pad-y) - var(--mpe-ra-pill-shift, 0.08em)))
+    calc(-1 * var(--mpe-ra-pill-pad-x))
+    calc(-1 * (var(--mpe-ra-pill-pad-y) + var(--mpe-ra-pill-shift, 0.08em)));
+  padding: calc(var(--mpe-ra-pill-pad-y) - var(--mpe-ra-pill-shift, 0.08em))
+    var(--mpe-ra-pill-pad-x)
+    calc(var(--mpe-ra-pill-pad-y) + var(--mpe-ra-pill-shift, 0.08em));
 }
 
 .mpe-ra-pill {
-  border-radius: 0.3em;
+  border-radius: var(--mpe-ra-pill-radius, 0.4em);
   background-color: var(--mpe-ra-pill, #ddf6ff);
   color: var(--mpe-ra-text, #000000);
 }
 
+/* The spoken word is a box a step larger than the pill it sits in, above
+ * and below as well as to the sides, so it stands proud of the fused lines
+ * (the reference reader's look). Its padding is cancelled by its margin like
+ * the pill's, so it moves nothing either.
+ *
+ * It is relatively positioned, with no offset, purely for the paint order:
+ * inline boxes are painted line by line, so the pill fragment of the line
+ * below — painted after the line the word is on — covered the part of the
+ * box that stands below its line, and the box came out cut flat at the
+ * bottom wherever the next line reached under it. A positioned box is
+ * painted after every in-flow line of the block, above all the pill
+ * fragments, and positioning moves nothing. */
 .mpe-ra-word {
-  border-radius: 0.25em;
+  position: relative;
+  --mpe-ra-pill-pad-x: 0.35em;
+  --mpe-ra-pill-pad-y: max(
+    0.2em,
+    calc(
+      (var(--mpe-ra-line-height, 1.85) * 1em - var(--mpe-ra-content-area, 1.3em)) /
+        2 + 0.32em
+    )
+  );
+  border-radius: var(--mpe-ra-pill-radius, 0.4em);
   background-color: var(--mpe-ra-word, #73dbf3);
 }
 
@@ -782,6 +847,118 @@
   width: 100%;
 }
 
+/* The two page sliders are disabled while the page is off (05 §9.3). */
+.mpe-ra-sheet-range[disabled] {
+  opacity: 0.38;
+  cursor: default;
+}
+
+/* The Global theme (05 §9.1, `featrues/control2.png`): a segmented control —
+ * Auto · Light · Dark — on a rounded track in the panel's hover tint, the
+ * checked segment raised on the panel background. With the setting at `off`
+ * no segment is checked and a hint under the control says so. */
+.mpe-ra-seg {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 3px;
+  padding: 3px;
+  border-radius: 12px;
+  background: var(--mpe-ra-panel-hover);
+}
+
+.mpe-ra-bar .mpe-ra-seg-btn {
+  display: block;
+  width: 100%;
+  padding: 9px 6px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.2;
+  text-align: center;
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+.mpe-ra-bar .mpe-ra-seg-btn:hover {
+  opacity: 0.9;
+}
+
+.mpe-ra-bar .mpe-ra-seg-btn[aria-checked='true'] {
+  border-color: var(--mpe-ra-panel-border);
+  background: var(--mpe-ra-panel-bg);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.16);
+  font-weight: 600;
+  opacity: 1;
+}
+
+.mpe-ra-bar .mpe-ra-seg-btn:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, #007fd4);
+  outline-offset: 1px;
+}
+
+/* The hint and the reader guidance below are <p> elements: `color: inherit`
+ * keeps a preview theme's `body p { color }` (night, gothic, medium) off the
+ * panel, whose own colour they are meant to carry. */
+.mpe-ra-sheet-hint {
+  margin: 8px 0 0;
+  color: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+  opacity: 0.75;
+}
+
+.mpe-ra-sheet-hint[hidden] {
+  display: none;
+}
+
+/* The foot of the sheet: Reset page settings, and the reader guidance of
+ * requirement §9 as one muted line (05 §9.4). */
+.mpe-ra-sheet-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--mpe-ra-panel-border);
+}
+
+.mpe-ra-bar .mpe-ra-sheet-reset {
+  flex: none;
+  padding: 6px 12px;
+  border: 1px solid var(--mpe-ra-panel-border);
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.mpe-ra-bar .mpe-ra-sheet-reset:hover {
+  background: var(--mpe-ra-panel-hover);
+}
+
+.mpe-ra-bar .mpe-ra-sheet-reset:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, #007fd4);
+  outline-offset: 1px;
+}
+
+.mpe-ra-sheet-note {
+  flex: 1 1 12em;
+  margin: 0;
+  color: inherit;
+  font-size: 11px;
+  line-height: 1.4;
+  opacity: 0.7;
+}
+
 /* Five palettes in two columns, the last one across both. */
 .mpe-ra-sheet-swatches {
   display: grid;
@@ -1167,7 +1344,8 @@
     forced-color-adjust: none;
   }
 
-  .mpe-ra-swatch[aria-checked='true'] {
+  .mpe-ra-swatch[aria-checked='true'],
+  .mpe-ra-seg-btn[aria-checked='true'] {
     border-color: Highlight;
   }
 }

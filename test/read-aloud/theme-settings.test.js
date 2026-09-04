@@ -3,7 +3,9 @@
 
 // The theme settings sheet of media/read-aloud.js under jsdom: the player
 // font, the player font size (which is the preview's own zoom, driven through
-// crossnote's ctrl+wheel handler) and the five highlight palettes.
+// crossnote's ctrl+wheel handler) and the five highlight palettes. The Global
+// theme row and the two page sliders of 05 have their own suite,
+// page-theme.test.js.
 
 const assert = require('node:assert');
 const fs = require('node:fs');
@@ -154,25 +156,36 @@ suite('read-aloud theme settings (F3/F4)', function () {
     }
   });
 
-  test('the sheet is titled, closable and has the three sections', function () {
+  test('the sheet is titled, closable and has the seven rows of 05 §9', function () {
     assert.strictEqual(sheet().hidden, false, 'logs: ' + logs.join('\n'));
     assert.strictEqual(
       sheet().querySelector('.mpe-ra-sheet-title').textContent,
       'Theme settings',
     );
-    // Each label's own text; two of the three wrap their control.
+    // Each label's own text; the sliders and the select wrap their control.
     const labels = Array.from(
       sheet().querySelectorAll('.mpe-ra-sheet-label'),
     ).map((el) => el.firstChild.textContent);
-    assert.strictEqual(labels.length, 3);
-    assert.strictEqual(labels[0], 'Player font');
+    assert.strictEqual(labels.length, 6);
+    assert.strictEqual(labels[0], 'Global theme');
+    assert.strictEqual(labels[1], 'Player font');
     assert.ok(
-      /^Player font size: \d+px$/.test(labels[1]),
-      'the size label names a pixel size, got ' + labels[1],
+      /^Player font size: \d+px$/.test(labels[2]),
+      'the size label names a pixel size, got ' + labels[2],
     );
-    assert.strictEqual(labels[2], 'Player highlight theme');
-    // Global theme is deliberately not built yet.
-    assert.strictEqual(sheet().textContent.indexOf('Global theme'), -1);
+    assert.strictEqual(labels[3], 'Line height: 1.6');
+    assert.strictEqual(labels[4], 'Column width: 66 ch');
+    assert.strictEqual(labels[5], 'Player highlight theme');
+    // The seventh row is the footer: Reset and the reader guidance.
+    assert.ok(
+      sheet().querySelector('.mpe-ra-sheet-footer .mpe-ra-sheet-reset'),
+    );
+    assert.ok(sheet().querySelector('.mpe-ra-sheet-footer .mpe-ra-sheet-note'));
+    // The page is on by default (`auto`), so the first font option says so.
+    assert.strictEqual(
+      sheet().querySelector('.mpe-ra-sheet-font option').textContent,
+      'Default — Atkinson Hyperlegible',
+    );
   });
 
   test('the five palettes are offered, the current one checked', function () {

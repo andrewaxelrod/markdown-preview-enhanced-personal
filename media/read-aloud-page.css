@@ -1,0 +1,944 @@
+/*
+ * Read aloud — the low-strain reading page (featrues/05-eye-strain.spec.md,
+ * from the requirement in featrues/05-eye-strain.md).
+ *
+ * One stylesheet that turns the live preview into the reading page the
+ * requirement describes — the Atkinson Hyperlegible Next face, 20 px body
+ * text, a 66 ch column centred on a darker canvas, contrast-checked tokens for
+ * every surface a preview theme paints, underlined links, a selection colour
+ * that passes the dual test — in a light and a dark variant.
+ *
+ * It is switched by the Global theme row of the theme settings sheet and
+ * persisted in `markdown-preview-enhanced.readAloudGlobalTheme`. Its whole
+ * state lives on the document element, which crossnote never touches:
+ *
+ *   <html data-mpe-ra-page="light|dark"
+ *         style="--mpe-ra-page-line-height: 1.6; --mpe-ra-page-measure: 66ch">
+ *
+ * Every rule starts with `html[data-mpe-ra-page]` (typography, layout) or
+ * `html[data-mpe-ra-page='light' | 'dark']` (tokens), and every rule that
+ * touches content is additionally scoped to `body:not([data-presentation-mode])`
+ * so a reveal.js presentation is never restyled. The theme files reach elements
+ * through `html body …`, prism themes through `.token.…`, admonitions and
+ * callouts through `.admonition.…` / `.callout[data-callout=…]`; the prefixed
+ * selectors beat all of them on specificity alone, so nothing here needs
+ * `!important` and nothing depends on where in <head> the stylesheet lands.
+ * Specificity is not the whole story, though: three themes — night, gothic,
+ * medium — colour running text directly (`body p { color: #dedede }`), and a
+ * rule that matches an element beats any inherited value, so §3 names `p`,
+ * `li` and the rest rather than leaving them to inherit from the column.
+ * With the attribute absent (`off`) nothing in this file matches.
+ *
+ * Tokens are declared once per scheme (§1) and referenced everywhere else; the
+ * only raw colours outside the token blocks are the print stylesheet's paper
+ * and ink. test/read-aloud/page-tokens.test.js computes WCAG 2.x and APCA
+ * contrast for every pair and is the authority over the values: adjust the
+ * hex, not the requirement.
+ */
+
+/* --------------------------------------------------------------------------
+ * 0. The face (requirement 1.1, §7)
+ *
+ * Atkinson Hyperlegible Next, Braille Institute's, SIL Open Font License 1.1
+ * (media/fonts/OFL.txt). Bundled with the extension, never fetched: the Latin
+ * subsets Google Fonts serves — one variable file for the 400 and 600 weights,
+ * one static italic — 48 KB in all. The URLs resolve against this
+ * stylesheet's own webview URI. Every size and weight below is set on the
+ * element, not on the face, so `system-ui` renders identically sized text if
+ * the files never load.
+ * ----------------------------------------------------------------------- */
+
+@font-face {
+  font-family: 'Atkinson Hyperlegible Next';
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url('fonts/AtkinsonHyperlegibleNext-Variable.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Atkinson Hyperlegible Next';
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url('fonts/AtkinsonHyperlegibleNext-Italic.woff2') format('woff2');
+}
+
+/* --------------------------------------------------------------------------
+ * 1. Tokens (requirement §2, spec §5)
+ *
+ * The requirement's values, with two dark tokens corrected where the
+ * arithmetic said so (the requirement's muted text was ≈ Lc 71 against the
+ * surface, its mark background ≈ 2.97:1; the test records both), plus the
+ * derived tokens a real page needs — rules, code, quotes, the four semantic
+ * pairs, the panel — and a syntax palette for code blocks (§5.4). Two more
+ * were nudged by the test: the light mark border to 3:1 on the surface, the
+ * dark error text to Lc 75. Light values are held to WCAG 2.x, dark values
+ * to APCA; see the test for the exact targets.
+ * ----------------------------------------------------------------------- */
+
+html[data-mpe-ra-page='light'] {
+  --canvas: #e9e7e2;
+  --surface: #f7f5f2;
+  --text: #2b2b2b;
+  --text-muted: #4f4f4f;
+  --link: #1f4e8c;
+  --selection-bg: #6590bd;
+  --selection-text: #141414;
+  --mark-bg: #ffe9a8;
+  --mark-text: #2b2b2b;
+  --mark-border: #b07f0a;
+  --focus: #1f4e8c;
+  --rule: #cfcbc3;
+  --code-surface: #eceae5;
+  --quote-surface: #eceae5;
+  --quote-border: #b8b2a7;
+  --panel-surface: #edebe6;
+  --info-surface: #e4ecf6;
+  --info-text: #1f3d66;
+  --success-surface: #e4f1e6;
+  --success-text: #1e5a2e;
+  --warning-surface: #f8ebd2;
+  --warning-text: #6b4a00;
+  --error-surface: #f6e3e1;
+  --error-text: #7a1f1f;
+  --syntax-comment: #5d5d5d;
+  --syntax-keyword: #6b2a8c;
+  --syntax-string: #2a5d2a;
+  --syntax-number: #7a3e00;
+  --syntax-function: #1f4e8c;
+  --syntax-tag: #8a2b2b;
+  --syntax-attr: #4b4b9b;
+  --syntax-punctuation: var(--text-muted);
+}
+
+html[data-mpe-ra-page='dark'] {
+  /* On dark the canvas is the surface: the darker band around the column
+   * read as a border and was taken out at the user's request. */
+  --canvas: #181818;
+  --surface: #181818;
+  --text: #e6e6e6;
+  --text-muted: #d0d0d0;
+  --link: #e6e6e6;
+  --selection-bg: #3e6a99;
+  --selection-text: #f2f2f2;
+  --mark-bg: #85691a;
+  --mark-text: #f2f2f2;
+  --mark-border: #85691a;
+  --focus: #8ab4f8;
+  --rule: #333333;
+  --code-surface: #222222;
+  --quote-surface: #202020;
+  --quote-border: #4a4a4a;
+  --panel-surface: #242424;
+  --info-surface: #1c2a3d;
+  --info-text: #c8dcf5;
+  --success-surface: #1b2e22;
+  --success-text: #bfe3c6;
+  --warning-surface: #3a2e12;
+  --warning-text: #f0d9a0;
+  --error-surface: #3a1e1e;
+  --error-text: #f8d0d0;
+  --syntax-comment: #d4d4d4;
+  --syntax-keyword: #e6c9f6;
+  --syntax-string: #c5e6c0;
+  --syntax-number: #f3d6a6;
+  --syntax-function: #bfd6f7;
+  --syntax-tag: #f7c8c8;
+  --syntax-attr: #d6d0f5;
+  --syntax-punctuation: #d4d4d4;
+}
+
+/* --------------------------------------------------------------------------
+ * 2. The canvas and the column (requirement §5, §1.3–1.7; spec §6, §7)
+ * ----------------------------------------------------------------------- */
+
+html[data-mpe-ra-page] body:not([data-presentation-mode]) {
+  margin: 0;
+  min-height: 100vh;
+  background-color: var(--canvas);
+  color: var(--text);
+  color-scheme: light;
+  font-family:
+    'Atkinson Hyperlegible Next',
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
+  font-size: 1.125rem;
+  font-weight: 400;
+  line-height: var(--mpe-ra-page-line-height, 1.6);
+  letter-spacing: normal;
+  word-spacing: normal;
+  text-align: start;
+}
+
+html[data-mpe-ra-page='dark'] body:not([data-presentation-mode]) {
+  color-scheme: dark;
+}
+
+@media (min-width: 48rem) {
+  html[data-mpe-ra-page] body:not([data-presentation-mode]) {
+    font-size: 1.25rem;
+  }
+}
+
+/* The column: the preview root itself (D5). `ch` on the root is computed
+ * from the root's own font, so the measure follows the body size and the
+ * player font. The play buttons sit at `left: -1.9em` of their block and land
+ * inside the column's left padding. */
+html[data-mpe-ra-page]
+  body:not([data-presentation-mode])
+  .markdown-preview[data-for='preview'] {
+  box-sizing: border-box;
+  max-width: var(--mpe-ra-page-measure, 66ch);
+  margin-inline: auto;
+  padding-inline: clamp(1.25rem, 4vw, 3rem);
+  padding-inline-start: max(clamp(1.25rem, 4vw, 3rem), 2.4em);
+  padding-block: 2rem 4rem;
+  background-color: var(--surface);
+  color: var(--text);
+  font-family: inherit;
+  overflow-wrap: anywhere;
+}
+
+/* Room for the control panel (media/read-aloud.css §1), restated at the
+ * column's own specificity so the padding-block above does not win. */
+html[data-mpe-ra-page]
+  body:not([data-presentation-mode])
+  .markdown-preview[data-for='preview'].mpe-ra-panel {
+  padding-bottom: 6rem;
+}
+
+/* Programmatic scrolls and anchor jumps never land a line under the panel. */
+html[data-mpe-ra-page]:has(.markdown-preview.mpe-ra-panel) {
+  scroll-padding-bottom: 6rem;
+}
+
+/* The reading canvas takes its rhythm from the page: the line height from
+ * the slider, the block gap from requirement 1.9. The pill padding is derived
+ * from the line height in media/read-aloud.css. */
+html[data-mpe-ra-page]
+  body:not([data-presentation-mode])
+  .markdown-preview[data-for='preview'],
+html[data-mpe-ra-page]
+  body:not([data-presentation-mode])
+  .markdown-preview.mpe-ra-canvas {
+  --mpe-ra-line-height: var(--mpe-ra-page-line-height, 1.6);
+  --mpe-ra-block-gap: 1.25em;
+}
+
+html[data-mpe-ra-page]
+  body:not([data-presentation-mode])
+  .markdown-preview
+  > :first-child {
+  margin-top: 0;
+}
+
+/* The sidebar TOC, when open, sits on the canvas. */
+html[data-mpe-ra-page] body:not([data-presentation-mode]) .md-sidebar-toc {
+  background-color: var(--canvas);
+  color: var(--text);
+  font-family: inherit;
+}
+
+/* --------------------------------------------------------------------------
+ * 3. Typography (requirement §1)
+ *
+ * Colour rules apply to the preview root and to the help sheet's body, which
+ * renders the same preview markup on the panel's surface; size and layout
+ * rules apply to the preview root only — the sheet keeps its own size.
+ * ----------------------------------------------------------------------- */
+
+/* Running text is named, not left to inherit: three preview themes — night,
+ * gothic and medium — colour `p`, `li`, `table`, `dt` and `.math` directly
+ * (`body p { color: #dedede }`), and a rule that matches an element beats any
+ * inherited value whatever its specificity. test/read-aloud/page-tokens.test.js
+ * scans the bundled themes for such rules and holds this list to them. */
+html[data-mpe-ra-page]
+  body:not([data-presentation-mode])
+  :is(.markdown-preview, .mpe-ra-help-body)
+  :is(p, li, dt, dd, td, table, .math, .mathjax-exps) {
+  color: var(--text);
+}
+
+html[data-mpe-ra-page]
+  body:not([data-presentation-mode])
+  .markdown-preview
+  :is(h1, h2, h3, h4, h5, h6) {
+  color: var(--text);
+  font-weight: 600;
+  line-height: 1.3;
+  padding: 0;
+  border: 0;
+}
+
+html[data-mpe-ra-page] body:not([data-presentation-mode]) .markdown-preview h1 {
+  font-size: 2rem;
+}
+
+html[data-mpe-ra-page] body:not([data-presentation-mode]) .markdown-preview h2 {
+  font-size: 1.5rem;
+}
+
+html[data-mpe-ra-page] body:not([data-presentation-mode]) .markdown-preview h3 {
+  font-size: 1.3rem;
+}
+
+html[data-mpe-ra-page] body:not([data-presentation-mode]) .markdown-preview h4 {
+  font-size: 1.15rem;
+}
+
+html[data-mpe-ra-page] body:not([data-presentation-mode]) .markdown-preview h5 {
+  font-size: 1.05rem;
+}
+
+html[data-mpe-ra-page] body:not([data-presentation-mode]) .markdown-preview h6 {
+  font-size: 1rem;
+  color: var(--text-muted);
+}
+
+/* Weights 400 and 600 only (1.8): the theme's 700 on th, dt and titles and
+ * prism's bold tokens are brought down; nothing else declares a weight. */
+html[data-mpe-ra-page]
+  body:not([data-presentation-mode])
+  :is(.markdown-preview, .mpe-ra-help-body)
+  :is(
+    strong,
+    b,
+    th,
+    dt,
+    .admonition-title,
+    .callout-title,
+    .token.bold,
+    .token.title,
+    .token.important
+  ) {
+  font-weight: 600;
+}
+
+/* Emphasis carries no colour of its own (vue colours `em`). */
+html[data-mpe-ra-page]
+  body:not([data-presentation-mode])
+  :is(.markdown-preview, .mpe-ra-help-body)
+  :is(strong, b, em, i) {
+  color: inherit;
+}
+
+html[data-mpe-ra-page]
+  body:not([data-presentation-mode])
+  :is(.markdown-preview, .mpe-ra-help-body)
+  :is(del, s, .text-muted, figcaption, caption) {
+  color: var(--text-muted);
+}
+
+/* Links (1.11): the underline is the affordance, not the colour. Hover
+ * thickens the underline and changes nothing else. */
+html[data-mpe-ra-page]
+  body:not([data-presentation-mode])
+  :is(.markdown-preview, .mpe-ra-help-body)
+  a {
+  color: var(--link);
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+  text-decoration-thickness: 0.06em;
+}
+
+html[data-mpe-ra-page]
+  body:not([data-presentation-mode])
+  :is(.markdown-preview, .mpe-ra-help-body)
+  a:hover {
+  color: var(--link);
+  text-decoration: underline;
+  text-decoration-thickness: 0.12em;
+}
+
+html[data-mpe-ra-page]
+  body:not([data-presentation-mode])
+  :is(.markdown-preview, .mpe-ra-help-body)
+  a:not([href]) {
+  color: inherit;
+  text-decoration: none;
+}
+
+html[data-mpe-ra-page]
+  body:not([data-presentation-mode])
+  :is(.markdown-preview, .mpe-ra-help-body)
+  a:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+html[data-mpe-ra-page] body:not([data-presentation-mode]) .markdown-preview hr {
+  height: 1px;
+  margin: 2em 0;
+  border: 0;
+  background-color: var(--rule);
+}
+
+/* Code (1.2): Atkinson Hyperlegible Mono is named first so a machine that has
+ * it uses it, but it is not bundled (D9). */
+html[data-mpe-ra-page]
+  body:not([data-presentation-mode])
+  :is(.markdown-preview, .mpe-ra-help-body)
+  :is(code, kbd, samp, pre) {
+  font-family:
+    'Atkinson Hyperlegible Mono',
+    ui-monospace,
+    'SF Mono',
+    Menlo,
+    Consolas,
+    monospace;
+}
+
+html[data-mpe-ra-page]
+  body:not([data-presentation-mode])
+  :is(.markdown-preview, .mpe-ra-help-body)
+  code {
+  color: var(--text);
+  background-color: var(--code-surface);
+}
+
+html[data-mpe-ra-page]
+  body:not([data-presentation-mode])
+  :is(.markdown-preview, .mpe-ra-help-body)
+  pre {
+  color: var(--text);
+  background-color: var(--code-surface);
+  border: 1px solid var(--rule);
+  border-radius: 0.3em;
+  overflow: auto;
+}
+
+html[data-mpe-ra-page]
+  body:not([data-presentation-mode])
+  :is(.markdown-preview, .mpe-ra-help-body)
+  pre > code {
+  background-color: transparent;
+  color: inherit;
+}
+
+html[data-mpe-ra-page]
+  body:not([data-presentation-mode])
+  :is(.markdown-preview, .mpe-ra-help-body)
+  kbd {
+  color: var(--text);
+  background-color: var(--code-surface);
+  border: 1px solid var(--rule);
+  border-bottom-width: 2px;
+}
+
+html[data-mpe-ra-page]
+  body:not([data-presentation-mode])
+  :is(.markdown-preview, .mpe-ra-help-body)
+  blockquote {
+  color: var(--text);
+  background-color: var(--quote-surface);
+  border-left: 0.25em solid var(--quote-border);
+}
+
+html[data-mpe-ra-page]
+  body:not([data-presentation-mode])
+  :is(.markdown-preview, .mpe-ra-help-body)
+  :is(td, th) {
+  border-color: var(--rule);
+}
+
+html[data-mpe-ra-page]
+  body:not([data-presentation-mode])
+  :is(.markdown-preview, .mpe-ra-help-body)
+  th {
+  color: var(--text);
+  background-color: var(--code-surface);
+}
+
+/* Striped rows (newsprint, vue) would show through the surface. */
+html[data-mpe-ra-page]
+  body:not([data-presentation-mode])
+  :is(.markdown-preview, .mpe-ra-help-body)
+  tr {
+  background-color: transparent;
+}
+
+html[data-mpe-ra-page] body:not([data-presentation-mode]) .markdown-preview img {
+  max-width: 100%;
+}
+
+/* Dark images (2.2): raster images are dimmed; raw-HTML <img data-no-dim>
+ * opts out. SVG diagrams are not filtered. */
+html[data-mpe-ra-page='dark']
+  body:not([data-presentation-mode])
+  .markdown-preview
+  img:not([data-no-dim]) {
+  filter: brightness(0.85) contrast(1.05);
+}
+
+/* --------------------------------------------------------------------------
+ * 4. Selection and marks (requirement §4)
+ *
+ * `::selection` after a descendant combinator is `*::selection`, so every
+ * element's selection is covered, and both properties are always declared.
+ * A selection over the pills of the block being read paints on the pill, not
+ * the surface — a known limit, noted in the README.
+ * ----------------------------------------------------------------------- */
+
+html[data-mpe-ra-page] ::selection {
+  background-color: var(--selection-bg);
+  color: var(--selection-text);
+}
+
+html[data-mpe-ra-page]
+  body:not([data-presentation-mode])
+  :is(.markdown-preview, .mpe-ra-help-body)
+  mark {
+  background-color: var(--mark-bg);
+  color: var(--mark-text);
+  padding: 0 0.15em;
+  border-radius: 0.15em;
+}
+
+/* No light amber reaches 3:1 on an off-white page, so the light <mark> does
+ * not rely on colour alone (4.4). */
+html[data-mpe-ra-page='light']
+  body:not([data-presentation-mode])
+  :is(.markdown-preview, .mpe-ra-help-body)
+  mark {
+  border-bottom: 2px solid var(--mark-border);
+  border-radius: 0.15em 0.15em 0 0;
+}
+
+/* --------------------------------------------------------------------------
+ * 5. Admonitions and callouts (requirement 4.5, spec §5.3)
+ *
+ * Each container picks a pair — surface and text — into two local custom
+ * properties by type; the generic rules below reference only those. An
+ * admonition's title takes the pair's text on the pair's surface, its body is
+ * `--text` on `--surface`, and its left border is the pair's text colour. A
+ * callout is one tinted box: `--text` on the pair's surface, the title in the
+ * pair's text colour. Nothing of the two crossnote stylesheets survives but
+ * icons and layout.
+ * ----------------------------------------------------------------------- */
+
+html[data-mpe-ra-page]
+  body:not([data-presentation-mode])
+  .markdown-preview
+  :is(.admonition, .callout) {
+  --mpe-ra-adm-surface: var(--info-surface);
+  --mpe-ra-adm-text: var(--info-text);
+}
+
+html[data-mpe-ra-page]
+  body:not([data-presentation-mode])
+  .markdown-preview
+  :is(
+    .admonition.tip,
+    .admonition.hint,
+    .admonition.important,
+    .admonition.success,
+    .admonition.check,
+    .admonition.done,
+    .admonition.example,
+    .admonition.snippet,
+    .callout[data-callout='tip'],
+    .callout[data-callout='hint'],
+    .callout[data-callout='important'],
+    .callout[data-callout='success'],
+    .callout[data-callout='check'],
+    .callout[data-callout='done'],
+    .callout[data-callout='example']
+  ) {
+  --mpe-ra-adm-surface: var(--success-surface);
+  --mpe-ra-adm-text: var(--success-text);
+}
+
+html[data-mpe-ra-page]
+  body:not([data-presentation-mode])
+  .markdown-preview
+  :is(
+    .admonition.warning,
+    .admonition.caution,
+    .admonition.attention,
+    .callout[data-callout='warning'],
+    .callout[data-callout='caution'],
+    .callout[data-callout='attention']
+  ) {
+  --mpe-ra-adm-surface: var(--warning-surface);
+  --mpe-ra-adm-text: var(--warning-text);
+}
+
+html[data-mpe-ra-page]
+  body:not([data-presentation-mode])
+  .markdown-preview
+  :is(
+    .admonition.danger,
+    .admonition.error,
+    .admonition.bug,
+    .admonition.fail,
+    .admonition.failure,
+    .admonition.missing,
+    .callout[data-callout='danger'],
+    .callout[data-callout='error'],
+    .callout[data-callout='bug'],
+    .callout[data-callout='fail'],
+    .callout[data-callout='failure'],
+    .callout[data-callout='missing']
+  ) {
+  --mpe-ra-adm-surface: var(--error-surface);
+  --mpe-ra-adm-text: var(--error-text);
+}
+
+html[data-mpe-ra-page]
+  body:not([data-presentation-mode])
+  .markdown-preview
+  :is(
+    .admonition.cite,
+    .admonition.quote,
+    .callout[data-callout='cite'],
+    .callout[data-callout='quote']
+  ) {
+  --mpe-ra-adm-surface: var(--quote-surface);
+  --mpe-ra-adm-text: var(--text);
+}
+
+html[data-mpe-ra-page]
+  body:not([data-presentation-mode])
+  .markdown-preview
+  .admonition {
+  color: var(--text);
+  background-color: var(--surface);
+  border: 1px solid var(--rule);
+  border-left: 0.25em solid var(--mpe-ra-adm-text);
+  box-shadow: none;
+}
+
+html[data-mpe-ra-page]
+  body:not([data-presentation-mode])
+  .markdown-preview
+  .admonition
+  > .admonition-title {
+  color: var(--mpe-ra-adm-text);
+  background-color: var(--mpe-ra-adm-surface);
+  border-bottom: 1px solid var(--rule);
+}
+
+html[data-mpe-ra-page]
+  body:not([data-presentation-mode])
+  .markdown-preview
+  .admonition
+  > .admonition-title::before {
+  color: var(--mpe-ra-adm-text);
+}
+
+html[data-mpe-ra-page]
+  body:not([data-presentation-mode])
+  .markdown-preview
+  .callout {
+  color: var(--text);
+  background-color: var(--mpe-ra-adm-surface);
+}
+
+html[data-mpe-ra-page]
+  body:not([data-presentation-mode])
+  .markdown-preview
+  .callout
+  > .callout-title {
+  color: var(--mpe-ra-adm-text);
+}
+
+html[data-mpe-ra-page]
+  body:not([data-presentation-mode])
+  .markdown-preview
+  .callout
+  .callout-title::before {
+  color: var(--mpe-ra-adm-text);
+}
+
+html[data-mpe-ra-page]
+  body:not([data-presentation-mode])
+  .markdown-preview
+  details.callout
+  > summary.callout-title::after {
+  border-color: var(--mpe-ra-adm-text);
+}
+
+/* --------------------------------------------------------------------------
+ * 6. The syntax palette (spec §5.4)
+ *
+ * `codeBlockTheme: auto.css` picks a prism theme from the *preview* theme, so
+ * a forced Dark over github-light would otherwise put a light palette on a
+ * dark surface. Every `.token` class the bundled prism themes use is restyled
+ * in eight groups; no token is coloured by background.
+ * ----------------------------------------------------------------------- */
+
+html[data-mpe-ra-page]
+  body:not([data-presentation-mode])
+  :is(.markdown-preview, .mpe-ra-help-body)
+  .token {
+  color: var(--syntax-punctuation);
+  background-color: transparent;
+  text-shadow: none;
+}
+
+html[data-mpe-ra-page]
+  body:not([data-presentation-mode])
+  :is(.markdown-preview, .mpe-ra-help-body)
+  :is(
+    .token.comment,
+    .token.prolog,
+    .token.doctype,
+    .token.cdata,
+    .token.block-comment
+  ) {
+  color: var(--syntax-comment);
+}
+
+html[data-mpe-ra-page]
+  body:not([data-presentation-mode])
+  :is(.markdown-preview, .mpe-ra-help-body)
+  :is(
+    .token.keyword,
+    .token.atrule,
+    .token.rule,
+    .token.important,
+    .token.boolean,
+    .token.control,
+    .token.directive,
+    .token.statement,
+    .token.null
+  ) {
+  color: var(--syntax-keyword);
+}
+
+html[data-mpe-ra-page]
+  body:not([data-presentation-mode])
+  :is(.markdown-preview, .mpe-ra-help-body)
+  :is(
+    .token.string,
+    .token.char,
+    .token.attr-value,
+    .token.inserted,
+    .token.url
+  ) {
+  color: var(--syntax-string);
+}
+
+html[data-mpe-ra-page]
+  body:not([data-presentation-mode])
+  :is(.markdown-preview, .mpe-ra-help-body)
+  :is(
+    .token.number,
+    .token.constant,
+    .token.symbol,
+    .token.regex,
+    .token.unit
+  ) {
+  color: var(--syntax-number);
+}
+
+html[data-mpe-ra-page]
+  body:not([data-presentation-mode])
+  :is(.markdown-preview, .mpe-ra-help-body)
+  :is(
+    .token.function,
+    .token.function-name,
+    .token.builtin,
+    .token.class-name,
+    .token.class,
+    .token.title
+  ) {
+  color: var(--syntax-function);
+}
+
+html[data-mpe-ra-page]
+  body:not([data-presentation-mode])
+  :is(.markdown-preview, .mpe-ra-help-body)
+  :is(
+    .token.tag,
+    .token.selector,
+    .token.deleted,
+    .token.id,
+    .token.pseudo-class,
+    .token.pseudo-element
+  ) {
+  color: var(--syntax-tag);
+}
+
+html[data-mpe-ra-page]
+  body:not([data-presentation-mode])
+  :is(.markdown-preview, .mpe-ra-help-body)
+  :is(
+    .token.attr-name,
+    .token.property,
+    .token.variable,
+    .token.entity,
+    .token.namespace,
+    .token.macro,
+    .token.command,
+    .token.attribute,
+    .token.placeholder
+  ) {
+  color: var(--syntax-attr);
+}
+
+html[data-mpe-ra-page]
+  body:not([data-presentation-mode])
+  :is(.markdown-preview, .mpe-ra-help-body)
+  :is(.token.inserted, .token.deleted) {
+  background-color: transparent;
+}
+
+html[data-mpe-ra-page]
+  body:not([data-presentation-mode])
+  :is(.markdown-preview, .mpe-ra-help-body)
+  .token.italic {
+  font-style: italic;
+}
+
+/* --------------------------------------------------------------------------
+ * 7. The player on the page (spec §4.5, D11)
+ *
+ * The prose colour inside a pill is the page's, never #000 / #fff (P1); the
+ * pill and word colours of the five palettes stay. The panel, its popovers
+ * and both sheets take a tokenised surface and the page's text colour; the
+ * accent and the play button are unchanged. Focus rings use `--focus`.
+ * ----------------------------------------------------------------------- */
+
+html[data-mpe-ra-page] body [data-mpe-ra-theme] {
+  --mpe-ra-text: var(--text);
+}
+
+html[data-mpe-ra-page] body .mpe-ra-bar {
+  --mpe-ra-panel-bg: var(--panel-surface);
+  --mpe-ra-panel-fg: var(--text);
+}
+
+html[data-mpe-ra-page] .mpe-ra-help-body {
+  font-family:
+    'Atkinson Hyperlegible Next',
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
+}
+
+html[data-mpe-ra-page]
+  :is(
+    .mpe-ra-bar,
+    .mpe-ra-bar-btn,
+    .mpe-ra-btn,
+    .mpe-ra-sheet-select,
+    .mpe-ra-swatch,
+    .mpe-ra-seg-btn,
+    .mpe-ra-sheet-reset,
+    .mpe-ra-help,
+    .mpe-ra-help-btn,
+    .mpe-ra-help-model,
+    .mpe-ra-help-input,
+    .mpe-ra-float
+  ):focus-visible {
+  outline-color: var(--focus);
+}
+
+html[data-mpe-ra-page]
+  .mpe-ra-pop-range:focus-visible::-webkit-slider-thumb {
+  box-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.35),
+    0 0 0 3px var(--focus);
+}
+
+/* --------------------------------------------------------------------------
+ * 8. Transitions (requirement 3.5)
+ *
+ * Colour and background only, 150 ms, on the surfaces that repaint when the
+ * scheme switches; nothing else, and nothing at all under reduced motion.
+ * The pills and the spoken-word box never transition — they are created per
+ * line and would flicker.
+ * ----------------------------------------------------------------------- */
+
+html[data-mpe-ra-page] body:not([data-presentation-mode]),
+html[data-mpe-ra-page]
+  body:not([data-presentation-mode])
+  .markdown-preview[data-for='preview'],
+html[data-mpe-ra-page]
+  body:not([data-presentation-mode])
+  .markdown-preview
+  :is(pre, code, blockquote, td, th, .admonition, .callout),
+html[data-mpe-ra-page] body .mpe-ra-bar,
+html[data-mpe-ra-page] body :is(.mpe-ra-pop, .mpe-ra-sheet, .mpe-ra-help) {
+  transition:
+    color 150ms ease,
+    background-color 150ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-mpe-ra-page] body:not([data-presentation-mode]),
+  html[data-mpe-ra-page]
+    body:not([data-presentation-mode])
+    .markdown-preview[data-for='preview'],
+  html[data-mpe-ra-page]
+    body:not([data-presentation-mode])
+    .markdown-preview
+    :is(pre, code, blockquote, td, th, .admonition, .callout),
+  html[data-mpe-ra-page] body .mpe-ra-bar,
+  html[data-mpe-ra-page] body :is(.mpe-ra-pop, .mpe-ra-sheet, .mpe-ra-help) {
+    transition: none;
+  }
+}
+
+/* --------------------------------------------------------------------------
+ * 9. Print (requirement 3.6) and forced colours
+ *
+ * Paper is not a screen: ink on paper, the column released, images
+ * unfiltered. The controls and the decoration are already hidden by
+ * media/read-aloud.css. Exports never load this stylesheet, so the webview's
+ * own print is the only path. Under forced colours the page stands down and
+ * lets the system palette through.
+ * ----------------------------------------------------------------------- */
+
+@media print {
+  html[data-mpe-ra-page] body:not([data-presentation-mode]) {
+    background-color: #fff;
+    color: #000;
+  }
+
+  html[data-mpe-ra-page]
+    body:not([data-presentation-mode])
+    .markdown-preview[data-for='preview'] {
+    max-width: none;
+    padding: 0;
+    background-color: #fff;
+    color: #000;
+  }
+
+  html[data-mpe-ra-page]
+    body:not([data-presentation-mode])
+    .markdown-preview
+    :is(h1, h2, h3, h4, h5, h6, a, code, pre, th, blockquote) {
+    color: #000;
+  }
+
+  html[data-mpe-ra-page='dark']
+    body:not([data-presentation-mode])
+    .markdown-preview
+    img:not([data-no-dim]) {
+    filter: none;
+  }
+}
+
+@media (forced-colors: active) {
+  html[data-mpe-ra-page] body:not([data-presentation-mode]),
+  html[data-mpe-ra-page]
+    body:not([data-presentation-mode])
+    .markdown-preview[data-for='preview'] {
+    forced-color-adjust: auto;
+  }
+
+  html[data-mpe-ra-page='dark']
+    body:not([data-presentation-mode])
+    .markdown-preview
+    img:not([data-no-dim]) {
+    filter: none;
+  }
+}

@@ -78,8 +78,10 @@ const WORKSPACE_PREVIEW_PROVIDER_MAP: Map<string, PreviewProvider> = new Map();
  * match the panel's current target before the command is dispatched. This is
  * the `updateMarkdown` identity check generalised to the read-aloud commands
  * that also carry a `sourceUri` (spec F13; `readAloudSetSpeed`,
- * `readAloudSetVolume`, `readAloudSetHighlightTheme`, `readAloudSetFont` and
- * `readAloudOpenSetup` carry none and are validated by type only).
+ * `readAloudSetVolume`, `readAloudSetHighlightTheme`, `readAloudSetFont`,
+ * `readAloudSetGlobalTheme`, `readAloudSetLineHeight`,
+ * `readAloudSetColumnWidth`, `readAloudResetPage` and `readAloudOpenSetup`
+ * carry none and are validated by type only).
  */
 const SOURCE_URI_GUARDED_COMMANDS: Set<string> = new Set([
   'updateMarkdown',
@@ -125,8 +127,12 @@ const WEBVIEW_MESSAGE_COMMANDS: Set<string> = new Set([
   'readAloudHelpChooseModel',
   'readAloudOpenSetup',
   'readAloudPlaying',
+  'readAloudResetPage',
+  'readAloudSetColumnWidth',
   'readAloudSetFont',
+  'readAloudSetGlobalTheme',
   'readAloudSetHighlightTheme',
+  'readAloudSetLineHeight',
   'readAloudSetSpeed',
   'readAloudSetVolume',
   'readAloudSynthesize',
@@ -783,10 +789,30 @@ export class PreviewProvider {
             'read-aloud.js',
           ),
         );
+        // The low-strain page (`featrues/05-eye-strain.spec.md` §6.1, §11):
+        // the Atkinson Hyperlegible Next face bundled under media/fonts/ — the
+        // 400 weight preloaded (requirement 1.1) — and the page stylesheet,
+        // whose @font-face URLs resolve against its own webview URI. Both ride
+        // in the same desktop-and-enabled gate, so exports never see them.
+        const readAloudFontUri = previewPanel.webview.asWebviewUri(
+          vscode.Uri.joinPath(
+            this.context.extensionUri,
+            'media',
+            'fonts',
+            'AtkinsonHyperlegibleNext-Variable.woff2',
+          ),
+        );
+        const readAloudPageCssUri = previewPanel.webview.asWebviewUri(
+          vscode.Uri.joinPath(
+            this.context.extensionUri,
+            'media',
+            'read-aloud-page.css',
+          ),
+        );
         const readAloudConfig = escapeHtmlAttribute(
           JSON.stringify(readAloud.buildInitialConfig()),
         );
-        head += `<link rel="stylesheet" href="${readAloudCssUri}"><script src="${readAloudCoreUri}"></script><script src="${readAloudJsUri}" data-config="${readAloudConfig}"></script>`;
+        head += `<link rel="stylesheet" href="${readAloudCssUri}"><link rel="preload" as="font" type="font/woff2" crossorigin href="${readAloudFontUri}"><link rel="stylesheet" href="${readAloudPageCssUri}"><script src="${readAloudCoreUri}"></script><script src="${readAloudJsUri}" data-config="${readAloudConfig}"></script>`;
       }
 
       const html = await engine.generateHTMLTemplateForPreview({

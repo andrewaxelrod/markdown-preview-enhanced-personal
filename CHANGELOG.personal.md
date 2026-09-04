@@ -152,8 +152,7 @@ blockId?, blocks? }]`, `readAloudCancel`, `readAloudPlaying`, `readAloudSetSpeed
   - **Theme settings** (`featrues/03-control-panel-addons.md`), behind the second button of
     the panel — a palette, in place of the voice-model placeholder — as a sheet in the panel's
     own palette anchored above it: the player font, the player font size and the highlight
-    theme. _Global theme_ from the reference (`featrues/control2.png`) is deliberately not
-    built yet.
+    theme. _Global theme_ from the reference (`featrues/control2.png`) followed in 05, below.
     - **Player font**: an override for the preview theme's own family, applied to the preview
       root so code, diagrams and maths keep their own. Ten choices, each a stack that degrades
       to a generic family where the first name is missing, and every one a family a machine
@@ -230,6 +229,48 @@ blockId?, blocks? }]`, `readAloudCancel`, `readAloudPlaying`, `readAloudSetSpeed
       `media/read-aloud.js` and `helpContext` in `media/read-aloud-core.js`, `§3d` of
       `media/read-aloud.css`, and the mocha suites `help-prompt.test.js`,
       `help-engine.test.js` and `help-sheet.test.js`.
+  - **Low-strain reading page** (`featrues/05-eye-strain.spec.md`, from the requirement in
+    `featrues/05-eye-strain.md`): a **Global theme** row at the top of the theme settings sheet —
+    _Auto · Light · Dark_, the row the reference (`featrues/control2.png`) had and 03 left out —
+    that replaces the preview theme with a reading page built to the requirement: the Atkinson
+    Hyperlegible Next face bundled with the extension (`media/fonts/`, SIL OFL 1.1; the Latin
+    subsets Google Fonts serves, one variable file for the 400 and 600 weights and one static
+    italic, 48 KB in all), 20 px body text (18 px under 48 rem), a 66-character column centred
+    on a darker canvas, weights 400 and 600 only, underlined links, and colour tokens for every
+    surface a preview theme paints — text, canvas, rules, code, quotes, tables, admonitions,
+    callouts, focus, the panel, a syntax palette for code blocks — in a light set checked at
+    WCAG AAA and a dark set checked with APCA (`test/read-aloud/page-tokens.test.js` computes
+    both formulas, pinned to APCA's reference pairs; two of the requirement's dark estimates
+    failed its own targets and were corrected, `--text-muted` `#d0d0d0` and `--mark-bg`
+    `#85691a`, and the test nudged two more, the light mark border `#b07f0a` and the dark error
+    text `#f8d0d0`). `::selection` passes the dual test in both schemes; `<mark>` is amber with
+    a bottom border on light. _Auto_ follows VS Code's colour theme kind live (the body classes,
+    with `prefers-color-scheme` before the body exists), _Light_ and _Dark_ force one, and
+    `off` — Settings only — is the pre-05 preview exactly. The page lives on
+    `<html data-mpe-ra-page>`, written at script evaluation so a cold load never flashes the
+    wrong theme, and everything that already keyed on `data-mpe-ra-scheme` (pills, panel,
+    sheets, swatches) follows it. Two more sheet rows, **Line height** (1.4–1.8, default 1.6;
+    the pill padding now derives from it so the lines of the block being read always fuse) and
+    **Column width** (50–75 ch),
+    a **Reset page settings** button that clears the page settings and the zoom, and a one-line
+    reader guidance caption. Settings `markdown-preview-enhanced.readAloudGlobalTheme` (`auto`),
+    `readAloudLineHeight` (`1.6`), `readAloudColumnWidth` (`66`), all live without a reload;
+    messages `readAloudSetGlobalTheme`, `readAloudSetLineHeight`, `readAloudSetColumnWidth`,
+    `readAloudResetPage`; `readAloudConfig` carries the three values. While the page is on,
+    `previewTheme`, `previewColorScheme` and `codeBlockTheme` only affect exports; diagram
+    themes are not overridden. Desktop only, live preview only, never in an export. Files:
+    `media/read-aloud-page.css`, `media/fonts/*`, the page section of `media/read-aloud.js`,
+    the resolver and normalisers in `media/read-aloud-core.js`, and the suites
+    `page-tokens.test.js` and `page-theme.test.js`. Of the spec's manual acceptance checks
+    (§13) only the stylesheet's rendering was checked in a browser against crossnote's own
+    theme files; the Extension Development Host checks are still to be done. The first of them
+    found the page's colour never reaching running text under the `night` preview theme (nor
+    would it under `gothic` or `medium`): those themes colour `p`, `li`, `table`, `dt` and
+    `.math` directly, which beats inheritance from `body` whatever the specificity, so on
+    _Light_ paragraphs and list numbers stayed the theme's `#dedede` on the off-white column,
+    and the sheet's caption — a `<p>` — with them. The page now names those elements (and `dd`,
+    `td`, `.mathjax-exps`), the sheet's two paragraphs inherit the panel colour, and the token
+    test scans the bundled themes for element-level colour rules and holds the page to them.
   - **One reading rhythm for the whole canvas** (`.mpe-ra-canvas`): the 2.0 line height that used
     to be applied to the block being read moved to the whole preview at 1.85, together with even
     spacing for paragraphs, lists, blockquotes, tables and headings. Starting a read no longer
@@ -248,6 +289,16 @@ blockId?, blocks? }]`, `readAloudCancel`, `readAloudPlaying`, `readAloudSetSpeed
 - Changes to the read-aloud settings (all but `readAloudEnabled`) no longer reload every preview
   panel, so a speed or voice change does not interrupt playback. Every other
   `markdown-preview-enhanced.*` change still refreshes the previews as before.
+- The reading canvas takes its line height from the low-strain page (1.6 by default, sliders
+  1.4–1.8) while the page is on; the 1.85 rhythm of 02 remains for `readAloudGlobalTheme: off`.
+- The reading decoration is one continuous shape again, as in the reference reader: the pill
+  padding is derived from the line height so that adjacent line fragments overlap by the corner
+  radius (0.4 em) at every rhythm, the horizontal padding grew to 0.4 em, and the spoken-word
+  box stands a step proud of the pill on all four sides. The padding is shifted 0.08 em
+  downwards, because the face's ascent stands far above its capitals while its descent sits
+  close to its descenders, and equal padding left the last line looking cut off. Both paddings
+  are still cancelled by negative margins, so starting a read moves nothing. On the dark page the canvas is the same
+  colour as the column, so there is no darker band around it.
 - Single-cell table selection is decided by the cells the range covers with text, not by the
   containers it starts and ends in (Chromium switches to cell-based ranges as soon as a drag
   brushes a cell border).
@@ -269,6 +320,23 @@ blockId?, blocks? }]`, `readAloudCancel`, `readAloudPlaying`, `readAloudSetSpeed
 
 ### Fixed
 
+- **The player's root classes survive a crossnote render.** crossnote's React root rewrites
+  the preview root's `class` attribute on every render, including renders that change no child
+  node — the second render of an `updateHtml`, a zoom, a scroll-sync message — and the player
+  only re-added its classes after a child-node mutation. So after the first edit of a document
+  the reading canvas lost its rhythm and the pills their padding variables (which is why the
+  block being read looked cut off at the bottom: the pill fell back to symmetric padding with
+  no shift), click-to-read lost its pointer and the panel its clearance. A second observer on
+  the root's `class` attribute now puts the classes back, and the pill's constants carry their
+  canvas values as fallbacks so the decoration is right even between the render and the
+  restore.
+- **The spoken-word box is no longer cut flat at the bottom by the line below.** Inline boxes
+  are painted line by line, so the pill fragment of the next line — painted after the line the
+  word is on — covered the part of the word box that stands below its line; the box kept its
+  full height only where the next line was too short to reach it, which is what made its
+  bottom edge uneven. `.mpe-ra-word` is now relatively positioned (no offset, so nothing
+  moves), which paints it after every line of the block and above all the pill fragments, so
+  it stands proud on all four sides as intended.
 - **The floating _Read aloud_ affordance no longer disappears when a slow drag ends.** The
   mouseup that finishes a drag-selection also fires a `click`, and the click handler dismissed
   the affordance on any click outside its own UI. For a quick drag the 150 ms selection debounce

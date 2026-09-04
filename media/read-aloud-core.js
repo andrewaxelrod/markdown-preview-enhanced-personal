@@ -160,6 +160,22 @@
   ];
   var DEFAULT_PLAYER_FONT = 'default';
 
+  // The low-strain reading page (featrues/05-eye-strain.spec.md §4, §9.3):
+  // the Global theme and the two typographic sliders of the theme settings
+  // sheet. Same values as src/read-aloud/messages.ts. `off` is a Settings
+  // value only — the sheet shows Auto · Light · Dark — and restores the
+  // preview theme exactly as it was before the page existed.
+  var GLOBAL_THEMES = ['auto', 'light', 'dark', 'off'];
+  var DEFAULT_GLOBAL_THEME = 'auto';
+  var LINE_HEIGHT_MIN = 1.4;
+  var LINE_HEIGHT_MAX = 1.8;
+  var LINE_HEIGHT_STEP = 0.1;
+  var DEFAULT_LINE_HEIGHT = 1.6;
+  var COLUMN_WIDTH_MIN = 50;
+  var COLUMN_WIDTH_MAX = 75;
+  var COLUMN_WIDTH_STEP = 5;
+  var DEFAULT_COLUMN_WIDTH = 66;
+
   // Elements that establish a block of their own: their inline runs are
   // wrapped separately from the parent's. Anything else is treated as inline.
   var BLOCK_TAGS = {
@@ -1645,6 +1661,74 @@
     return '';
   }
 
+  // ---------------------------------------------------------------------------
+  // The low-strain page (05 §4.2): the Global theme and its resolution
+  // ---------------------------------------------------------------------------
+
+  /** One of GLOBAL_THEMES; anything else falls back to `auto`. */
+  function normaliseGlobalTheme(value) {
+    return typeof value === 'string' && GLOBAL_THEMES.indexOf(value) >= 0
+      ? value
+      : DEFAULT_GLOBAL_THEME;
+  }
+
+  /**
+   * Clamp to the slider's range and round to the step's precision (two
+   * decimals), not to the step: a hand-edited 1.55 is honoured.
+   */
+  function clampLineHeight(value) {
+    if (typeof value !== 'number' || !isFinite(value)) {
+      return DEFAULT_LINE_HEIGHT;
+    }
+    var clamped = Math.min(LINE_HEIGHT_MAX, Math.max(LINE_HEIGHT_MIN, value));
+    return Math.round(clamped * 100) / 100;
+  }
+
+  /** Whole characters, clamped to the range: a hand-edited 63 is honoured. */
+  function clampColumnWidth(value) {
+    if (typeof value !== 'number' || !isFinite(value)) {
+      return DEFAULT_COLUMN_WIDTH;
+    }
+    return Math.round(
+      Math.min(COLUMN_WIDTH_MAX, Math.max(COLUMN_WIDTH_MIN, value)),
+    );
+  }
+
+  /**
+   * Which page to show for a Global theme: 'light', 'dark', or null for off.
+   *
+   * `auto` follows VS Code's colour theme kind, read from the body classes
+   * VS Code documents for webviews (`vscode-light`, `vscode-dark`,
+   * `vscode-high-contrast`, `vscode-high-contrast-light`), in the same order
+   * detectScheme's fallback has always tested them; before <body> exists, or
+   * with no class on it, `prefers-color-scheme` — which in desktop VS Code
+   * already follows the colour theme kind — decides instead.
+   *
+   * @param {string} mode  one of GLOBAL_THEMES
+   * @param {{ bodyClasses?: string, prefersDark?: boolean }} env
+   */
+  function resolvePageScheme(mode, env) {
+    var theme = normaliseGlobalTheme(mode);
+    if (theme === 'off') {
+      return null;
+    }
+    if (theme === 'light' || theme === 'dark') {
+      return theme;
+    }
+    var classes =
+      env && typeof env.bodyClasses === 'string' ? env.bodyClasses : '';
+    if (/\bvscode-high-contrast-light\b/.test(classes)) {
+      return 'light';
+    }
+    if (/\bvscode-(dark|high-contrast)\b/.test(classes)) {
+      return 'dark';
+    }
+    if (/\bvscode-light\b/.test(classes)) {
+      return 'light';
+    }
+    return env && env.prefersDark ? 'dark' : 'light';
+  }
+
   var RGB_RE =
     /^rgba?\(\s*([\d.]+)\s*[, ]\s*([\d.]+)\s*[, ]\s*([\d.]+)\s*(?:[,/]\s*([\d.]+%?)\s*)?\)$/i;
   var HEX_RE = /^#([0-9a-f]{3,8})$/i;
@@ -1740,6 +1824,16 @@
     DEFAULT_HIGHLIGHT_THEME: DEFAULT_HIGHLIGHT_THEME,
     PLAYER_FONTS: PLAYER_FONTS,
     DEFAULT_PLAYER_FONT: DEFAULT_PLAYER_FONT,
+    GLOBAL_THEMES: GLOBAL_THEMES,
+    DEFAULT_GLOBAL_THEME: DEFAULT_GLOBAL_THEME,
+    LINE_HEIGHT_MIN: LINE_HEIGHT_MIN,
+    LINE_HEIGHT_MAX: LINE_HEIGHT_MAX,
+    LINE_HEIGHT_STEP: LINE_HEIGHT_STEP,
+    DEFAULT_LINE_HEIGHT: DEFAULT_LINE_HEIGHT,
+    COLUMN_WIDTH_MIN: COLUMN_WIDTH_MIN,
+    COLUMN_WIDTH_MAX: COLUMN_WIDTH_MAX,
+    COLUMN_WIDTH_STEP: COLUMN_WIDTH_STEP,
+    DEFAULT_COLUMN_WIDTH: DEFAULT_COLUMN_WIDTH,
     decorateReadingBlock: decorateReadingBlock,
     undecorateReadingBlock: undecorateReadingBlock,
     wrapRange: wrapRange,
@@ -1747,6 +1841,10 @@
     normaliseHighlightTheme: normaliseHighlightTheme,
     normalisePlayerFont: normalisePlayerFont,
     playerFontStack: playerFontStack,
+    normaliseGlobalTheme: normaliseGlobalTheme,
+    clampLineHeight: clampLineHeight,
+    clampColumnWidth: clampColumnWidth,
+    resolvePageScheme: resolvePageScheme,
     backgroundLuminance: backgroundLuminance,
   };
 

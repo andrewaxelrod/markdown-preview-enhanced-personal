@@ -76,16 +76,21 @@ import {
   type ReadAloudConfigMessage,
   type ReadAloudControlAction,
   type ReadAloudFont,
+  type ReadAloudGlobalTheme,
   type ReadAloudHighlightTheme,
   type ReadAloudKind,
   type SynthesizeRequest,
 } from './messages';
 import {
+  clearPageSettings,
   readHelpSettings,
   readReadAloudSettings,
+  writeColumnWidthSetting,
   writeFontSetting,
+  writeGlobalThemeSetting,
   writeHelpModelSettings,
   writeHighlightThemeSetting,
+  writeLineHeightSetting,
   writeSpeedSetting,
   writeVolumeSetting,
   type ReadAloudHelpSettings,
@@ -486,6 +491,63 @@ export class ReadAloudController implements vscode.Disposable {
       await writeFontSetting(font);
     } catch (error) {
       readAloudLog(`font persist failed: ${String(error)}`);
+    }
+  }
+
+  // ---------------------------------------------- the low-strain page (05)
+
+  /**
+   * `readAloudSetGlobalTheme`: a segment of the Global theme control. The
+   * webview has already switched the page; the setting change broadcasts it
+   * to every other preview (05 §4.4).
+   */
+  public async setGlobalTheme(theme: ReadAloudGlobalTheme): Promise<void> {
+    if (this.guardWebBuild()) {
+      return;
+    }
+    try {
+      await writeGlobalThemeSetting(theme);
+    } catch (error) {
+      readAloudLog(`global theme persist failed: ${String(error)}`);
+    }
+  }
+
+  /** `readAloudSetLineHeight`: the sheet's line height slider (05 §9.3). */
+  public async setLineHeight(value: number): Promise<void> {
+    if (this.guardWebBuild()) {
+      return;
+    }
+    try {
+      await writeLineHeightSetting(value);
+    } catch (error) {
+      readAloudLog(`line height persist failed: ${String(error)}`);
+    }
+  }
+
+  /** `readAloudSetColumnWidth`: the sheet's column width slider (05 §9.3). */
+  public async setColumnWidth(value: number): Promise<void> {
+    if (this.guardWebBuild()) {
+      return;
+    }
+    try {
+      await writeColumnWidthSetting(value);
+    } catch (error) {
+      readAloudLog(`column width persist failed: ${String(error)}`);
+    }
+  }
+
+  /**
+   * `readAloudResetPage`: clears the four page settings (05 §9.4, D16). The
+   * settings-change broadcast then carries the defaults to every preview.
+   */
+  public async resetPage(): Promise<void> {
+    if (this.guardWebBuild()) {
+      return;
+    }
+    try {
+      await clearPageSettings();
+    } catch (error) {
+      readAloudLog(`page settings reset failed: ${String(error)}`);
     }
   }
 
@@ -914,6 +976,11 @@ export class ReadAloudController implements vscode.Disposable {
       modelId: KOKORO_MODEL_ID,
       highlightTheme: settings.highlightTheme,
       font: settings.font,
+      // The low-strain page (05 §4.3): these three ride in `data-config`, so
+      // the page is applied at script evaluation, before <body> is parsed.
+      globalTheme: settings.globalTheme,
+      lineHeight: settings.lineHeight,
+      columnWidth: settings.columnWidth,
       // Spawning a process is Node-only, so the button is hidden in the web
       // build the way every other Node-only path is (§1).
       helpAvailable: !this.deps.isWebBuild,

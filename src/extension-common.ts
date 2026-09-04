@@ -10,8 +10,12 @@ import {
   parseHelpArgs,
   parseHelpCancelArgs,
   parsePlayingArgs,
+  parseResetPageArgs,
+  parseSetColumnWidthArgs,
   parseSetFontArgs,
+  parseSetGlobalThemeArgs,
   parseSetHighlightThemeArgs,
+  parseSetLineHeightArgs,
   parseSetSpeedArgs,
   parseSetVolumeArgs,
   parseSynthesizeArgs,
@@ -2005,6 +2009,64 @@ export async function initExtensionCommon(context: vscode.ExtensionContext) {
           return;
         }
         await readAloud.setFont(font);
+      },
+    ),
+  );
+
+  // The low-strain page (`featrues/05-eye-strain.spec.md` §10.2): the Global
+  // theme, the two typographic sliders and Reset, from the theme settings
+  // sheet. None carries a sourceUri; each is validated by type only.
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      '_crossnote.readAloudSetGlobalTheme',
+      async (...args: unknown[]) => {
+        const theme = parseSetGlobalThemeArgs(args);
+        if (theme === undefined) {
+          readAloudLog('dropped invalid readAloudSetGlobalTheme message');
+          return;
+        }
+        await readAloud.setGlobalTheme(theme);
+      },
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      '_crossnote.readAloudSetLineHeight',
+      async (...args: unknown[]) => {
+        const value = parseSetLineHeightArgs(args);
+        if (value === undefined) {
+          readAloudLog('dropped invalid readAloudSetLineHeight message');
+          return;
+        }
+        await readAloud.setLineHeight(value);
+      },
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      '_crossnote.readAloudSetColumnWidth',
+      async (...args: unknown[]) => {
+        const value = parseSetColumnWidthArgs(args);
+        if (value === undefined) {
+          readAloudLog('dropped invalid readAloudSetColumnWidth message');
+          return;
+        }
+        await readAloud.setColumnWidth(value);
+      },
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      '_crossnote.readAloudResetPage',
+      async (...args: unknown[]) => {
+        if (!parseResetPageArgs(args)) {
+          readAloudLog('dropped invalid readAloudResetPage message');
+          return;
+        }
+        await readAloud.resetPage();
       },
     ),
   );

@@ -218,10 +218,18 @@ suite('read-aloud control panel (F3)', function () {
     assert.ok(bar(), 'the panel exists; logs: ' + logs.join('\n'));
     assert.strictEqual(bar().hidden, false, 'and is visible while idle');
     // The panel's own row; the popovers, the theme settings sheet and the
-    // help sheet carry buttons of their own.
-    const order = Array.from(bar().querySelectorAll(':scope > button')).map(
-      (el) => el.getAttribute('data-mpe-ra-action'),
-    );
+    // help sheet carry buttons of their own, and the _Back to the reading_
+    // chip of 07 §7.5 sits in the status slot above the row, not in it.
+    const order = Array.from(
+      bar().querySelectorAll(':scope > button:not(.mpe-ra-bar-chip)'),
+    ).map((el) => el.getAttribute('data-mpe-ra-action'));
+    const chip = bar().querySelector('.mpe-ra-bar-chip');
+    assert.ok(chip, 'the chip is built with the panel');
+    assert.strictEqual(chip.hidden, true, 'and hidden while nothing plays');
+    // The idle progress strip (07 §10) lives beside the panel, hidden too.
+    const strip = doc.querySelector('.mpe-ra-strip');
+    assert.ok(strip && strip.parentElement === doc.body);
+    assert.strictEqual(strip.hidden, true);
     // 04-help-module §2: help sits between the speed and the ×, so the × is
     // still the last control.
     assert.deepStrictEqual(order, [

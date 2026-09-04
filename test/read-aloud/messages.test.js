@@ -442,53 +442,70 @@ suite('read-aloud/messages', function () {
         assert.strictEqual(messages.normaliseGlobalTheme('off'), 'off');
       });
 
-      test('parseSetLineHeightArgs clamps to 1.4–1.8 at two decimals', function () {
-        assert.strictEqual(messages.LINE_HEIGHT_MIN, 1.4);
-        assert.strictEqual(messages.LINE_HEIGHT_MAX, 1.8);
-        assert.strictEqual(messages.DEFAULT_LINE_HEIGHT, 1.6);
-        assert.strictEqual(messages.parseSetLineHeightArgs([1.6]), 1.6);
-        assert.strictEqual(messages.parseSetLineHeightArgs([1.555]), 1.56);
-        assert.strictEqual(messages.parseSetLineHeightArgs([0.2]), 1.4);
-        assert.strictEqual(messages.parseSetLineHeightArgs([9]), 1.8);
-        assert.strictEqual(messages.parseSetLineHeightArgs(['1.6']), undefined);
+      test('parseSetTextSizeArgs rounds and clamps to 16–28 (07 §15.2)', function () {
+        assert.strictEqual(messages.TEXT_SIZE_MIN, 16);
+        assert.strictEqual(messages.TEXT_SIZE_MAX, 28);
+        assert.strictEqual(messages.TEXT_SIZE_STEP, 1);
+        assert.strictEqual(messages.DEFAULT_TEXT_SIZE, 20);
+        assert.strictEqual(messages.parseSetTextSizeArgs([20]), 20);
+        assert.strictEqual(messages.parseSetTextSizeArgs([21.5]), 22);
+        assert.strictEqual(messages.parseSetTextSizeArgs([15.4]), 16);
+        assert.strictEqual(messages.parseSetTextSizeArgs([28.6]), 28);
+        // Out of range is clamped, not dropped: an integer can never be CSS.
+        assert.strictEqual(messages.parseSetTextSizeArgs([5]), 16);
+        assert.strictEqual(messages.parseSetTextSizeArgs([500]), 28);
+        // Wrong type, wrong arity.
+        assert.strictEqual(messages.parseSetTextSizeArgs(['20']), undefined);
         assert.strictEqual(
-          messages.parseSetLineHeightArgs([Number.NaN]),
+          messages.parseSetTextSizeArgs([Number.NaN]),
           undefined,
         );
         assert.strictEqual(
-          messages.parseSetLineHeightArgs([Number.POSITIVE_INFINITY]),
+          messages.parseSetTextSizeArgs([Number.POSITIVE_INFINITY]),
           undefined,
         );
-        assert.strictEqual(messages.parseSetLineHeightArgs([]), undefined);
-        assert.strictEqual(
-          messages.parseSetLineHeightArgs([1.6, 1.6]),
-          undefined,
-        );
-        assert.strictEqual(messages.parseSetLineHeightArgs(1.6), undefined);
-        assert.strictEqual(messages.clampLineHeight('tall'), 1.6);
-        assert.strictEqual(messages.clampLineHeight(1.55), 1.55);
+        assert.strictEqual(messages.parseSetTextSizeArgs([]), undefined);
+        assert.strictEqual(messages.parseSetTextSizeArgs([20, 20]), undefined);
+        assert.strictEqual(messages.parseSetTextSizeArgs(20), undefined);
+        assert.strictEqual(messages.clampTextSize('big'), 20);
+        assert.strictEqual(messages.clampTextSize(null), 20);
+        assert.strictEqual(messages.clampTextSize(24.4), 24);
+        // The two sliders of 05 are gone with their parsers.
+        assert.strictEqual(messages.parseSetLineHeightArgs, undefined);
+        assert.strictEqual(messages.parseSetColumnWidthArgs, undefined);
+        assert.strictEqual(messages.clampLineHeight, undefined);
+        assert.strictEqual(messages.clampColumnWidth, undefined);
       });
 
-      test('parseSetColumnWidthArgs rounds and clamps to 50–75', function () {
-        assert.strictEqual(messages.COLUMN_WIDTH_MIN, 50);
-        assert.strictEqual(messages.COLUMN_WIDTH_MAX, 75);
-        assert.strictEqual(messages.DEFAULT_COLUMN_WIDTH, 66);
-        assert.strictEqual(messages.parseSetColumnWidthArgs([66]), 66);
-        assert.strictEqual(messages.parseSetColumnWidthArgs([63.4]), 63);
-        assert.strictEqual(messages.parseSetColumnWidthArgs([10]), 50);
-        assert.strictEqual(messages.parseSetColumnWidthArgs([500]), 75);
-        assert.strictEqual(messages.parseSetColumnWidthArgs(['66']), undefined);
+      test('parseSetWordMarkerArgs accepts the three styles only (07 §15.2)', function () {
+        assert.deepStrictEqual(Array.from(messages.WORD_MARKERS), [
+          'underline',
+          'box',
+          'off',
+        ]);
+        assert.strictEqual(messages.DEFAULT_WORD_MARKER, 'underline');
         assert.strictEqual(
-          messages.parseSetColumnWidthArgs([Number.NaN]),
+          messages.parseSetWordMarkerArgs(['underline']),
+          'underline',
+        );
+        assert.strictEqual(messages.parseSetWordMarkerArgs(['box']), 'box');
+        assert.strictEqual(messages.parseSetWordMarkerArgs(['off']), 'off');
+        // Unknown, wrong case, wrong type, wrong arity.
+        assert.strictEqual(messages.parseSetWordMarkerArgs(['dot']), undefined);
+        assert.strictEqual(messages.parseSetWordMarkerArgs(['Box']), undefined);
+        assert.strictEqual(messages.parseSetWordMarkerArgs([1]), undefined);
+        assert.strictEqual(messages.parseSetWordMarkerArgs([]), undefined);
+        assert.strictEqual(
+          messages.parseSetWordMarkerArgs(['box', 'off']),
           undefined,
         );
-        assert.strictEqual(messages.parseSetColumnWidthArgs([]), undefined);
+        assert.strictEqual(messages.parseSetWordMarkerArgs('box'), undefined);
+        assert.strictEqual(messages.normaliseWordMarker('dot'), 'underline');
         assert.strictEqual(
-          messages.parseSetColumnWidthArgs([66, 66]),
-          undefined,
+          messages.normaliseWordMarker(undefined),
+          'underline',
         );
-        assert.strictEqual(messages.parseSetColumnWidthArgs(66), undefined);
-        assert.strictEqual(messages.clampColumnWidth(null), 66);
+        assert.strictEqual(messages.normaliseWordMarker('off'), 'off');
       });
 
       test('parseResetPageArgs accepts the empty argument list only', function () {

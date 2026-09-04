@@ -11,13 +11,13 @@ import {
   parseHelpCancelArgs,
   parsePlayingArgs,
   parseResetPageArgs,
-  parseSetColumnWidthArgs,
   parseSetFontArgs,
   parseSetGlobalThemeArgs,
   parseSetHighlightThemeArgs,
-  parseSetLineHeightArgs,
   parseSetSpeedArgs,
+  parseSetTextSizeArgs,
   parseSetVolumeArgs,
+  parseSetWordMarkerArgs,
   parseSynthesizeArgs,
 } from './read-aloud/messages';
 import {
@@ -2030,30 +2030,33 @@ export async function initExtensionCommon(context: vscode.ExtensionContext) {
     ),
   );
 
+  // Eye strain 2 (`featrues/07-eye-strain-2/spec.md` §15.2): the text size
+  // slider and the word marker row of the sheet. Validated by type only: an
+  // integer and an enum, never CSS.
   context.subscriptions.push(
     vscode.commands.registerCommand(
-      '_crossnote.readAloudSetLineHeight',
+      '_crossnote.readAloudSetTextSize',
       async (...args: unknown[]) => {
-        const value = parseSetLineHeightArgs(args);
+        const value = parseSetTextSizeArgs(args);
         if (value === undefined) {
-          readAloudLog('dropped invalid readAloudSetLineHeight message');
+          readAloudLog('dropped invalid readAloudSetTextSize message');
           return;
         }
-        await readAloud.setLineHeight(value);
+        await readAloud.setTextSize(value);
       },
     ),
   );
 
   context.subscriptions.push(
     vscode.commands.registerCommand(
-      '_crossnote.readAloudSetColumnWidth',
+      '_crossnote.readAloudSetWordMarker',
       async (...args: unknown[]) => {
-        const value = parseSetColumnWidthArgs(args);
-        if (value === undefined) {
-          readAloudLog('dropped invalid readAloudSetColumnWidth message');
+        const style = parseSetWordMarkerArgs(args);
+        if (style === undefined) {
+          readAloudLog('dropped invalid readAloudSetWordMarker message');
           return;
         }
-        await readAloud.setColumnWidth(value);
+        await readAloud.setWordMarker(style);
       },
     ),
   );

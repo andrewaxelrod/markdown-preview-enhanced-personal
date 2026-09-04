@@ -1,19 +1,26 @@
 /*
  * Read aloud — the low-strain reading page (featrues/05-eye-strain.spec.md,
- * from the requirement in featrues/05-eye-strain.md).
+ * from the requirement in featrues/05-eye-strain.md; revised by
+ * featrues/07-eye-strain-2/spec.md).
  *
  * One stylesheet that turns the live preview into the reading page the
  * requirement describes — the Atkinson Hyperlegible Next face, 20 px body
- * text, a 66 ch column centred on a darker canvas, contrast-checked tokens for
- * every surface a preview theme paints, underlined links, a selection colour
- * that passes the dual test — in a light and a dark variant.
+ * text by default, a 66-character column centred on a darker canvas,
+ * contrast-checked tokens for every surface a preview theme paints,
+ * underlined links, a selection colour that passes the dual test — in a
+ * light and a dark variant.
  *
  * It is switched by the Global theme row of the theme settings sheet and
  * persisted in `markdown-preview-enhanced.readAloudGlobalTheme`. Its whole
  * state lives on the document element, which crossnote never touches:
  *
  *   <html data-mpe-ra-page="light|dark"
- *         style="--mpe-ra-page-line-height: 1.6; --mpe-ra-page-measure: 66ch">
+ *         style="--mpe-ra-page-text-size: 20; --mpe-ra-page-line-height: 1.6;
+ *                --mpe-ra-page-measure: 31.4em">
+ *
+ * The three properties come from one slider (07 §5): the text size in px,
+ * the line height derived from it, and the measure — 66 characters of prose
+ * in the face in use, measured by the player and written in em (07 §6).
  *
  * Every rule starts with `html[data-mpe-ra-page]` (typography, layout) or
  * `html[data-mpe-ra-page='light' | 'dark']` (tokens), and every rule that
@@ -82,7 +89,14 @@ html[data-mpe-ra-page='light'] {
   --surface: #f7f5f2;
   --text: #2b2b2b;
   --text-muted: #4f4f4f;
-  --link: #1f4e8c;
+  /* The dim tiers of a read (07 §8.3): the ink mixed toward the surface,
+   * 73 % and 56 %; the far tier is held at 3:1 on the surface, the near at
+   * 4.5:1. */
+  --text-near: #626261;
+  --text-far: #858483;
+  /* Low-chroma ink blue (07 §12): 8.7:1 on the surface, so the link no
+   * longer outshines the word marker; the underline stays the affordance. */
+  --link: #33475f;
   --selection-bg: #6590bd;
   --selection-text: #141414;
   --mark-bg: #ffe9a8;
@@ -119,6 +133,9 @@ html[data-mpe-ra-page='dark'] {
   --surface: #181818;
   --text: #e6e6e6;
   --text-muted: #d0d0d0;
+  /* 07 §8.3: 82 % and 67 % ink; Lc 60 and Lc 45 floors on the surface. */
+  --text-near: #c1c1c1;
+  --text-far: #a2a2a2;
   --link: #e6e6e6;
   --selection-bg: #3e6a99;
   --selection-text: #f2f2f2;
@@ -150,7 +167,8 @@ html[data-mpe-ra-page='dark'] {
 }
 
 /* --------------------------------------------------------------------------
- * 2. The canvas and the column (requirement §5, §1.3–1.7; spec §6, §7)
+ * 2. The canvas and the column (requirement §5, §1.3–1.7; spec §6, §7;
+ *    07 §5–§6)
  * ----------------------------------------------------------------------- */
 
 html[data-mpe-ra-page] body:not([data-presentation-mode]) {
@@ -166,7 +184,10 @@ html[data-mpe-ra-page] body:not([data-presentation-mode]) {
     'Segoe UI',
     Roboto,
     sans-serif;
-  font-size: 1.125rem;
+  /* The text size slider (07 §5.1): stored in px, applied in rem — the
+   * webview's root is 16 px, so 20 is 1.25 rem — at every pane width, and
+   * crossnote's zoom still multiplies it. */
+  font-size: calc(var(--mpe-ra-page-text-size, 20) * 1rem / 16);
   font-weight: 400;
   line-height: var(--mpe-ra-page-line-height, 1.6);
   letter-spacing: normal;
@@ -178,21 +199,20 @@ html[data-mpe-ra-page='dark'] body:not([data-presentation-mode]) {
   color-scheme: dark;
 }
 
-@media (min-width: 48rem) {
-  html[data-mpe-ra-page] body:not([data-presentation-mode]) {
-    font-size: 1.25rem;
-  }
-}
-
-/* The column: the preview root itself (D5). `ch` on the root is computed
- * from the root's own font, so the measure follows the body size and the
- * player font. The play buttons sit at `left: -1.9em` of their block and land
- * inside the column's left padding. */
+/* The column: the preview root itself (D5). The measure is 66 characters of
+ * prose (07 §6): the player lays out a sample passage in the face in use and
+ * writes `--mpe-ra-page-measure` in em of the root from its average advance,
+ * so the count holds in Atkinson, Georgia or Verdana and follows the text
+ * size. `content-box`, so the paddings — the play-button gutter among them —
+ * add outside the 66 characters instead of eating four or five of them. On a
+ * pane narrower than the measure plus paddings the content box shrinks to
+ * what is available and the character count falls with it. The play buttons
+ * sit at `left: -1.9em` of their block and land inside the left padding. */
 html[data-mpe-ra-page]
   body:not([data-presentation-mode])
   .markdown-preview[data-for='preview'] {
-  box-sizing: border-box;
-  max-width: var(--mpe-ra-page-measure, 66ch);
+  box-sizing: content-box;
+  max-width: var(--mpe-ra-page-measure, 33em);
   margin-inline: auto;
   padding-inline: clamp(1.25rem, 4vw, 3rem);
   padding-inline-start: max(clamp(1.25rem, 4vw, 3rem), 2.4em);
@@ -271,6 +291,18 @@ html[data-mpe-ra-page]
   color: var(--text);
 }
 
+/* Prose wraps for the eye (07 §12): fewer orphans and ragged rivers where
+ * the engine supports it (Chromium 117+), a no-op before that. */
+html[data-mpe-ra-page]
+  body:not([data-presentation-mode])
+  .markdown-preview
+  :is(p, li, dd, dt, blockquote, figcaption) {
+  text-wrap: pretty;
+}
+
+/* Headings in em of the body (07 §5.5), so they follow the text size slider:
+ * 1.6 / 1.3 / 1.2 / 1.1 / 1 / 1 — at 20 px within a pixel of 05's h1–h3, and
+ * no heading smaller than the body any more. */
 html[data-mpe-ra-page]
   body:not([data-presentation-mode])
   .markdown-preview
@@ -283,27 +315,27 @@ html[data-mpe-ra-page]
 }
 
 html[data-mpe-ra-page] body:not([data-presentation-mode]) .markdown-preview h1 {
-  font-size: 2rem;
+  font-size: 1.6em;
 }
 
 html[data-mpe-ra-page] body:not([data-presentation-mode]) .markdown-preview h2 {
-  font-size: 1.5rem;
+  font-size: 1.3em;
 }
 
 html[data-mpe-ra-page] body:not([data-presentation-mode]) .markdown-preview h3 {
-  font-size: 1.3rem;
+  font-size: 1.2em;
 }
 
 html[data-mpe-ra-page] body:not([data-presentation-mode]) .markdown-preview h4 {
-  font-size: 1.15rem;
+  font-size: 1.1em;
 }
 
 html[data-mpe-ra-page] body:not([data-presentation-mode]) .markdown-preview h5 {
-  font-size: 1.05rem;
+  font-size: 1em;
 }
 
 html[data-mpe-ra-page] body:not([data-presentation-mode]) .markdown-preview h6 {
-  font-size: 1rem;
+  font-size: 1em;
   color: var(--text-muted);
 }
 
@@ -840,6 +872,42 @@ html[data-mpe-ra-page] body .mpe-ra-bar {
   --mpe-ra-panel-fg: var(--text);
 }
 
+/* The idle progress strip (07 §10) takes the page's rule colour. */
+html[data-mpe-ra-page] body .mpe-ra-strip {
+  background-color: var(--rule);
+}
+
+/* --------------------------------------------------------------------------
+ * 7b. Dim the rest while reading (07 §8)
+ *
+ * Every readable block of the read's scope but the one being read carries a
+ * tier class: `near` for the next block, pre-warmed so the eye never travels
+ * into a dark zone, `far` for every other. The tiers change text colour only,
+ * through the page's own tokens, so links, code spans, marks and emphasis
+ * inside a dimmed block dim with the prose and nothing composites a layer;
+ * backgrounds are untouched. Skipped content — code, diagrams, maths,
+ * images, tables in a continuous read — is never a readable block and so
+ * never carries a class. The pill's prose colour is the active block's.
+ * ----------------------------------------------------------------------- */
+
+html[data-mpe-ra-page]
+  body:not([data-presentation-mode])
+  :is(.markdown-preview, .mpe-ra-help-body)
+  .mpe-ra-tier-near {
+  --text: var(--text-near);
+  --text-muted: var(--text-near);
+  --link: var(--text-near);
+}
+
+html[data-mpe-ra-page]
+  body:not([data-presentation-mode])
+  :is(.markdown-preview, .mpe-ra-help-body)
+  .mpe-ra-tier-far {
+  --text: var(--text-far);
+  --text-muted: var(--text-far);
+  --link: var(--text-far);
+}
+
 html[data-mpe-ra-page] .mpe-ra-help-body {
   font-family:
     'Atkinson Hyperlegible Next',
@@ -892,11 +960,57 @@ html[data-mpe-ra-page]
   body:not([data-presentation-mode])
   .markdown-preview
   :is(pre, code, blockquote, td, th, .admonition, .callout),
-html[data-mpe-ra-page] body .mpe-ra-bar,
 html[data-mpe-ra-page] body :is(.mpe-ra-pop, .mpe-ra-sheet, .mpe-ra-help) {
   transition:
     color 150ms ease,
     background-color 150ms ease;
+}
+
+/* The panel also fades when it goes idle (07 §10); its own stylesheet has
+ * the durations, restated here at the page's specificity. */
+html[data-mpe-ra-page] body .mpe-ra-bar {
+  transition:
+    color 150ms ease,
+    background-color 150ms ease,
+    opacity 150ms ease;
+}
+
+html[data-mpe-ra-page] body .mpe-ra-bar.mpe-ra-bar-idle {
+  transition:
+    color 150ms ease,
+    background-color 150ms ease,
+    opacity 400ms ease;
+}
+
+/* The tier ramp (07 §8.2): 220 ms on the running text, inside the counsel's
+ * 180–250 ms — an instant swap reads as flicker, 400 ms lags the voice. The
+ * elements are the ones §3 colours; the surfaces above keep their 150 ms. */
+html[data-mpe-ra-page]
+  body:not([data-presentation-mode])
+  :is(.markdown-preview, .mpe-ra-help-body)
+  :is(
+    p,
+    li,
+    dt,
+    dd,
+    table,
+    .math,
+    .mathjax-exps,
+    h1,
+    h2,
+    h3,
+    h4,
+    h5,
+    h6,
+    a,
+    del,
+    s,
+    figcaption,
+    caption,
+    kbd,
+    mark
+  ) {
+  transition: color 220ms ease;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -908,7 +1022,33 @@ html[data-mpe-ra-page] body :is(.mpe-ra-pop, .mpe-ra-sheet, .mpe-ra-help) {
     body:not([data-presentation-mode])
     .markdown-preview
     :is(pre, code, blockquote, td, th, .admonition, .callout),
+  html[data-mpe-ra-page]
+    body:not([data-presentation-mode])
+    :is(.markdown-preview, .mpe-ra-help-body)
+    :is(
+      p,
+      li,
+      dt,
+      dd,
+      table,
+      .math,
+      .mathjax-exps,
+      h1,
+      h2,
+      h3,
+      h4,
+      h5,
+      h6,
+      a,
+      del,
+      s,
+      figcaption,
+      caption,
+      kbd,
+      mark
+    ),
   html[data-mpe-ra-page] body .mpe-ra-bar,
+  html[data-mpe-ra-page] body .mpe-ra-bar.mpe-ra-bar-idle,
   html[data-mpe-ra-page] body :is(.mpe-ra-pop, .mpe-ra-sheet, .mpe-ra-help) {
     transition: none;
   }

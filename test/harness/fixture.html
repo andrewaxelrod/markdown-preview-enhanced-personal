@@ -1,0 +1,110 @@
+<h1 id="reading-on-a-screen" data-source-line="1">Reading on a screen, without the strain</h1>
+<p data-source-line="3">Most people read on screens for hours a day and never think about the shape of the text in front of them. The width of a line, the space between lines, the size of the type and the colour of the ink all decide how far the eye must travel and how often it must refocus, and each of those decisions is made for the reader by somebody else. A page built for reading takes them back. It sets a measure the eye can sweep, a rhythm the eye can keep, and a contrast the eye can hold for an afternoon.</p>
+<p data-source-line="5">This document is the harness fixture for the eye strain revision: sixty blocks in the markup crossnote produces, long enough to scroll for several screens, with every kind of content the player has to deal with. Paragraphs of ordinary length sit next to long ones, lists nest, a blockquote carries a citation, two code fences bring prism tokens, a table has cells, and a few <code>inline code</code> spans, a <mark>marked phrase</mark> and a <a href="https://example.com/reading">link to nowhere in particular</a> are scattered through the prose.</p>
+<h2 id="the-measure" data-source-line="7">The measure</h2>
+<p data-source-line="9">The measure is the number of characters on a line. Between forty-five and seventy-five characters is the range most typographers recommend for a single column of running text, and sixty-six is the figure that appears most often. Below forty-five the eye is forever returning to the left margin; above seventy-five the return sweep loses its place and the reader rereads a line or skips one. The count is in characters of prose, spaces included, and it depends on the face: a wide face fits fewer characters into the same width than a narrow one, so a column set in pixels or in ems holds a different count in every font.</p>
+<p data-source-line="11">The reading page measures the face it is using. It lays out a sample passage, divides its width by its length and sets the column from that, so sixty-six means sixty-six whether the face is Atkinson Hyperlegible, Georgia or Verdana. The old column was set in the ch unit, which is the width of the digit zero, and a zero is wider than the average letter in every proportional face; sixty-six of them held eighty-three characters of prose.</p>
+<ul data-source-line="13">
+<li data-source-line="13">Forty-five to seventy-five characters is the comfortable band.</li>
+<li data-source-line="14">Sixty-six is the classic figure, and the one this page uses.</li>
+<li data-source-line="15">The count is measured in the face that is on, not assumed.
+<ul data-source-line="16">
+<li data-source-line="16">A narrow pane caps the column and the count falls with it.</li>
+<li data-source-line="17">A wider face gives a wider column in ems and the same count.</li>
+</ul>
+</li>
+</ul>
+<h2 id="the-rhythm" data-source-line="19">The rhythm</h2>
+<p data-source-line="21">Line height is the second decision. Too little leading and the lines crowd, the descenders of one touching the ascenders of the next; too much and the paragraph falls apart into stripes with rivers of white between them. The right amount depends on the size of the type. Small type needs proportionally more leading, because the return sweep needs a clear gap to land in; large type needs less, because the gap is already large in absolute terms and more of it reads as a hole. The page derives the line height from the text size for that reason, from a generous one point seven at sixteen pixels to a tighter one point four five at twenty-six and above, with one point six at twenty as the anchor.</p>
+<p data-source-line="23">The block gap follows the same logic in the other direction. Paragraphs need a visible pause between them, but a pause that is too long reads as a section break. One and a quarter ems of the body size keeps the paragraphs of a section together while telling them apart, and because it is in ems it scales with the slider along with everything else.</p>
+<blockquote data-source-line="25">
+<p data-source-line="25">The eye does not read letters; it reads shapes, and the shapes it reads best are the ones it has seen a thousand times before at a comfortable distance and size. Anything that changes those shapes mid-sentence costs a moment of recognition, and the moments add up over an afternoon.</p>
+</blockquote>
+<h2 id="the-ink" data-source-line="27">The ink</h2>
+<p data-source-line="29">Pure black on pure white is the highest contrast a screen can show, and it is tiring. The ink of this page is a dark grey on a warm off-white, still far above the seven to one ratio the strictest guidelines ask for, but without the glare of a white field. On the dark page the same rule holds in reverse: a light grey on a dark grey, never white on black, and the ratio is measured with a formula built for light text on dark rather than the one written for print.</p>
+<p data-source-line="31">While a read plays, every paragraph but the one being read is dimmed by colour rather than by opacity. Opacity composites the whole subtree and muddies links and borders; a change of the ink colour through the page's own tokens dims the prose and every inline element with it, and leaves the backgrounds alone. The next paragraph is dimmed less than the rest, so the eye never travels from the bright block into a dark one, and the code fences are never dimmed at all: code is scanned, not read in a line.</p>
+<pre data-role="codeBlock" data-info="ts" class="language-typescript ts"><code class="language-typescript ts"><span class="token keyword">export</span> <span class="token keyword">function</span> <span class="token function">deriveLineHeight</span><span class="token punctuation">(</span>size<span class="token operator">:</span> <span class="token builtin">number</span><span class="token punctuation">)</span><span class="token operator">:</span> <span class="token builtin">number</span> <span class="token punctuation">{</span>
+  <span class="token keyword">const</span> hundredths <span class="token operator">=</span> Math<span class="token punctuation">.</span><span class="token function">round</span><span class="token punctuation">(</span><span class="token number">160</span> <span class="token operator">-</span> <span class="token punctuation">(</span>size <span class="token operator">-</span> <span class="token number">20</span><span class="token punctuation">)</span> <span class="token operator">*</span> <span class="token number">2.5</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+  <span class="token keyword">return</span> Math<span class="token punctuation">.</span><span class="token function">min</span><span class="token punctuation">(</span><span class="token number">1.7</span><span class="token punctuation">,</span> Math<span class="token punctuation">.</span><span class="token function">max</span><span class="token punctuation">(</span><span class="token number">1.45</span><span class="token punctuation">,</span> hundredths <span class="token operator">/</span> <span class="token number">100</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+<span class="token punctuation">}</span>
+</code></pre>
+<p data-source-line="39">The function above is the whole of the line-height rule. It takes the text size in pixels, and returns a number the stylesheet multiplies into the line height. There is nothing to configure, because there is nothing a reader would want to configure once the size is right.</p>
+<h2 id="the-marker" data-source-line="41">The marker</h2>
+<p data-source-line="43">The spoken word used to sit in a filled box, a step darker than the pill behind the line. A box that jumps from word to word three to five times a second is a small flash of luminance in the fovea each time, and the fovea is where the reader is looking. An underline sweep in the palette's colour gives the eye the same moving anchor without changing the brightness of the glyphs above it. The box is still there for anyone who prefers it, and so is nothing at all: the pills and the dimming already say where the reading is.</p>
+<p data-source-line="45">The stroke of the underline is a colour of its own per palette, chosen to reach three to one against the pill it sits on in both schemes, which is the ratio a non-text indicator needs against its neighbour. On the light page the strokes are darker than the box colours and lighter than the text, so the marker is found without outshining the words; on the dark page they are the box colours lifted toward white.</p>
+<ol data-source-line="47">
+<li data-source-line="47">Underline: the default, a bar below the descenders in the palette's stroke.</li>
+<li data-source-line="48">Box: the reader-app look, with the corrected colours so text on it reaches four and a half to one.</li>
+<li data-source-line="49">Off: no marker at all; the pill and the tiers carry the position.</li>
+</ol>
+<h2 id="following-the-reading" data-source-line="51">Following the reading</h2>
+<p data-source-line="53">A page that jumps half a screen whenever the spoken word leaves the viewport makes the reader find their place again every screenful. The page now keeps the spoken line near the upper third of the viewport and moves continuously, a few pixels a frame, so the text creeps upward under a line that stays roughly where it is. The band is two or three lines tall at the default size, so the page moves a little every couple of lines rather than a lot every twenty. Under a reduced-motion preference the page jumps to the anchor instead of easing, and never animates.</p>
+<p data-source-line="55">Any scroll the reader makes suspends the following at once and for as long as they like: a wheel, a touch, a drag of the scrollbar, a page-down key, or a scroll that came from the editor's cursor. A chip above the panel offers the way back, and so does a play, a skip, a click on a word, or simply scrolling until the spoken word is back inside the band, at which point the following resumes on its own because the page is already where it would be kept.</p>
+<p data-source-line="57">The panel fades out after three seconds of playback without any activity, so it never sits over live text for long, and a three-pixel strip at the bottom edge carries the progress meanwhile. A movement of the mouse, a key, a wheel, a pause or a message brings it back faster than it left.</p>
+<h2 id="pauses" data-source-line="59">Pauses</h2>
+<p data-source-line="61">Between two blocks the read takes a short breath, four hundred milliseconds at normal speed, and a longer one after a heading, nine hundred. Kokoro already leaves a little silence at the end of a sentence, so the paragraph break is felt as something over half a second and the heading as about a second: enough for the eyes to relocate to the first line of the next block, which the following is easing into place during the same gap. Chunks of the same block hand over as they always did, with no gap at all. A faster rate shortens both breaths in proportion.</p>
+<table data-source-line="63">
+<thead>
+<tr>
+<th>After</th>
+<th>Gap at one times</th>
+<th>Gap at two times</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>a paragraph, a list, a quote</td>
+<td>400 ms</td>
+<td>200 ms</td>
+</tr>
+<tr>
+<td>a heading</td>
+<td>900 ms</td>
+<td>450 ms</td>
+</tr>
+<tr>
+<td>a chunk of the same block</td>
+<td>none</td>
+<td>none</td>
+</tr>
+</tbody>
+</table>
+<p data-source-line="69">The table is skipped by a continuous read and never dimmed; a click in one of its cells reads that cell and stops at its end, as it always has.</p>
+<h2 id="the-settings" data-source-line="71">The settings</h2>
+<p data-source-line="73">Three sliders became one. The old sheet had a zoom slider that nothing persisted, a line-height slider and a column-width slider, and a reader who wanted larger type had to move all three to keep the page in proportion. The text size slider moves the type between sixteen and twenty-eight pixels and derives everything else from it, and the value survives a reload because it is a real setting rather than the preview's zoom. The zoom is still there, in the context menu, for the rare occasion it is wanted.</p>
+<p data-source-line="75">The word marker has a row of its own on the sheet, because it is a visual choice a reader will want to compare. Dimming and the panel's auto-hide are settings without a row: on by default, and switched off in the settings editor by the few who want a still page.</p>
+<ul class="contains-task-list" data-source-line="77">
+<li class="task-list-item" data-source-line="77"><input class="task-list-item-checkbox" type="checkbox" checked="" disabled=""> The text size slider, sixteen to twenty-eight pixels, persisted.</li>
+<li class="task-list-item" data-source-line="78"><input class="task-list-item-checkbox" type="checkbox" checked="" disabled=""> The measure in characters, measured in the face in use.</li>
+<li class="task-list-item" data-source-line="79"><input class="task-list-item-checkbox" type="checkbox" disabled=""> An eyes-off mode, deferred to a later revision.</li>
+</ul>
+<h2 id="a-second-code-fence" data-source-line="81">A second code fence</h2>
+<p data-source-line="83">The second fence is JSON, so a different set of prism tokens is on the page. Like the first it keeps its full colour while the paragraphs around it are dimmed, and it keeps the code theme's own line height rather than the page's.</p>
+<pre data-role="codeBlock" data-info="json" class="language-json json"><code class="language-json json"><span class="token punctuation">{</span>
+  <span class="token property">"markdown-preview-enhanced.readAloudTextSize"</span><span class="token operator">:</span> <span class="token number">20</span><span class="token punctuation">,</span>
+  <span class="token property">"markdown-preview-enhanced.readAloudWordMarker"</span><span class="token operator">:</span> <span class="token string">"underline"</span><span class="token punctuation">,</span>
+  <span class="token property">"markdown-preview-enhanced.readAloudDimWhileReading"</span><span class="token operator">:</span> <span class="token boolean">true</span><span class="token punctuation">,</span>
+  <span class="token property">"markdown-preview-enhanced.readAloudPanelAutoHide"</span><span class="token operator">:</span> <span class="token boolean">true</span>
+<span class="token punctuation">}</span>
+</code></pre>
+<p data-source-line="91">Those four keys are the whole of the new settings surface. Two old keys are gone with their sliders, and a stale value for either in a settings file is ignored with the editor's usual hint.</p>
+<h2 id="an-image" data-source-line="93">An image</h2>
+<p data-source-line="95">An image with a fixed size is skipped by the read and never dimmed, and starting a read moves nothing around it because the page never reflows for a read: the pills cancel their own padding with a negative margin, and the marker, in every style, takes no space of its own.</p>
+<p data-source-line="97"><img src="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='320' height='120'%3E%3Crect width='320' height='120' fill='%23cfcbc3'/%3E%3Ccircle cx='160' cy='60' r='40' fill='%2333475f'/%3E%3C/svg%3E" width="320" height="120" alt="A grey rectangle with a dark circle"></p>
+<h2 id="a-long-paragraph" data-source-line="99">A long paragraph</h2>
+<p data-source-line="101">This paragraph is deliberately longer than the chunk target, so the player splits it into more than one chunk and the hand-off inside a block can be watched next to the hand-off between blocks. The chunker packs whole sentences up to about seven hundred characters, never crossing a block boundary, and a chunk that belongs to the same block as the one before it starts the moment the earlier one ends, with no breath between them. The reader hears one paragraph. Between blocks there is a breath, and after a heading a longer one, and the difference is what tells the ear where the structure is without a voice announcing it. The word marker moves through all of it at the server's own timings, aligned to the words the page extracted, and every word that the server did not time is given a time between its neighbours so the marker never freezes. That is the whole of the machinery a reader sees: a line kept near the upper third, a marker moving along it, the rest of the page a little dimmer, and a breath at every paragraph. It is enough to follow a long document by ear and eye together for an hour without the small fatigue that a page which lurches, flashes and covers itself with controls would produce in a fraction of the time, and it costs nothing when the read is over, because every one of these behaviours ends with the read and leaves the page exactly as it was.</p>
+<h2 id="short-blocks" data-source-line="103">Short blocks</h2>
+<p data-source-line="105">A short one.</p>
+<p data-source-line="107">Another short one, so the hand-off between short blocks has its breath too.</p>
+<p data-source-line="109">And a third, before a list that closes the section.</p>
+<ul data-source-line="111">
+<li data-source-line="111">One item with a <code>code span</code> in it.</li>
+<li data-source-line="112">One with a <a href="https://example.com/two">link</a> and an <em>emphasis</em>.</li>
+<li data-source-line="113">One with a <strong>strong</strong> phrase and a <mark>mark</mark>.</li>
+</ul>
+<h3 id="a-third-level-heading" data-source-line="115">A third-level heading</h3>
+<p data-source-line="117">Headings are set in ems of the body now, so they follow the slider: one point six for the title, one point three and one point two for the sections, and nothing smaller than the body for the lower levels. At twenty pixels that is within a pixel of what the page had before.</p>
+<h2 id="the-end" data-source-line="119">The end of the document</h2>
+<p data-source-line="121">The last blocks exist so the follow loop has somewhere to run out of room. Near the end of a document the anchor cannot be kept, because the page cannot scroll any further, and the loop must notice that the container took less than it asked for rather than fight the limit frame after frame or mistake the clamped position for a manual scroll.</p>
+<p data-source-line="123">The read ends here, with the finished state on the panel for a few seconds and then a quiet panel, the pills gone, the tiers gone, the marker gone, and the page where the reader left it.</p>
+<p data-source-line="125">One more paragraph, so that the last one is not the last thing on screen when the panel fades.</p>

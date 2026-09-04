@@ -83,11 +83,10 @@ export function normalisePlayerFont(value: unknown): ReadAloudFont {
 }
 
 /**
- * The low-strain reading page (`featrues/05-eye-strain.spec.md` §4, §9.3):
- * the Global theme of the theme settings sheet, and the two typographic
- * sliders. `off` is a Settings-only value that restores the preview theme
- * exactly as it was before the page existed (D2). The webview mirrors the
- * three normalisers in media/read-aloud-core.js.
+ * The low-strain reading page (`featrues/05-eye-strain.spec.md` §4): the
+ * Global theme of the theme settings sheet. `off` is a Settings-only value
+ * that restores the preview theme exactly as it was before the page existed
+ * (D2). The webview mirrors the normalisers in media/read-aloud-core.js.
  */
 export const GLOBAL_THEMES = ['auto', 'light', 'dark', 'off'] as const;
 export type ReadAloudGlobalTheme = (typeof GLOBAL_THEMES)[number];
@@ -100,38 +99,39 @@ export function normaliseGlobalTheme(value: unknown): ReadAloudGlobalTheme {
     : DEFAULT_GLOBAL_THEME;
 }
 
-/** Requirement 6.2: line height 1.4–1.8 in 0.1 steps, default 1.6. */
-export const LINE_HEIGHT_MIN = 1.4;
-export const LINE_HEIGHT_MAX = 1.8;
-export const LINE_HEIGHT_STEP = 0.1;
-export const DEFAULT_LINE_HEIGHT = 1.6;
-
-/** Requirement 6.3: the measure, 50–75 ch in 5 ch steps, default 66 ch. */
-export const COLUMN_WIDTH_MIN = 50;
-export const COLUMN_WIDTH_MAX = 75;
-export const COLUMN_WIDTH_STEP = 5;
-export const DEFAULT_COLUMN_WIDTH = 66;
-
 /**
- * Clamp to the slider's range and round to the step's precision (two
- * decimals), never to the step itself: a hand-edited 1.55 is honoured.
+ * Eye strain 2 (`featrues/07-eye-strain-2/spec.md` §5.1): the one text-size
+ * slider of the theme settings sheet, in px, 16–28, default 20. The line
+ * height, the heading sizes and the reading column derive from it in the
+ * webview; the host only stores the integer.
  */
-export function clampLineHeight(value: unknown): number {
+export const TEXT_SIZE_MIN = 16;
+export const TEXT_SIZE_MAX = 28;
+export const TEXT_SIZE_STEP = 1;
+export const DEFAULT_TEXT_SIZE = 20;
+
+/** Whole pixels, clamped; anything that is not a finite number is the default. */
+export function clampTextSize(value: unknown): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
-    return DEFAULT_LINE_HEIGHT;
+    return DEFAULT_TEXT_SIZE;
   }
-  const clamped = Math.min(LINE_HEIGHT_MAX, Math.max(LINE_HEIGHT_MIN, value));
-  return Math.round(clamped * 100) / 100;
+  return Math.min(TEXT_SIZE_MAX, Math.max(TEXT_SIZE_MIN, Math.round(value)));
 }
 
-/** Whole characters, clamped to the range: a hand-edited 63 is honoured. */
-export function clampColumnWidth(value: unknown): number {
-  if (typeof value !== 'number' || !Number.isFinite(value)) {
-    return DEFAULT_COLUMN_WIDTH;
-  }
-  return Math.round(
-    Math.min(COLUMN_WIDTH_MAX, Math.max(COLUMN_WIDTH_MIN, value)),
-  );
+/**
+ * 07 §9.1: how the spoken word is marked — an underline sweep in the
+ * palette's stroke colour, the filled box, or nothing. Same list as
+ * `WORD_MARKERS` in media/read-aloud-core.js.
+ */
+export const WORD_MARKERS = ['underline', 'box', 'off'] as const;
+export type ReadAloudWordMarker = (typeof WORD_MARKERS)[number];
+export const DEFAULT_WORD_MARKER: ReadAloudWordMarker = 'underline';
+
+export function normaliseWordMarker(value: unknown): ReadAloudWordMarker {
+  return typeof value === 'string' &&
+    (WORD_MARKERS as readonly string[]).includes(value)
+    ? (value as ReadAloudWordMarker)
+    : DEFAULT_WORD_MARKER;
 }
 
 /**
@@ -219,10 +219,16 @@ export interface ReadAloudConfigMessage {
   highlightTheme: ReadAloudHighlightTheme;
   /** Theme settings — the preview font override, by id. */
   font: ReadAloudFont;
-  /** The low-strain page (05 §10.2): the Global theme and the two sliders. */
+  /** The low-strain page (05 §10.2): the Global theme. */
   globalTheme: ReadAloudGlobalTheme;
-  lineHeight: number;
-  columnWidth: number;
+  /** Eye strain 2 (07 §15.2): the text size in px, 16–28. */
+  textSize: number;
+  /** 07 §9: `underline` · `box` · `off`. */
+  wordMarker: ReadAloudWordMarker;
+  /** 07 §8.5: dim every readable block but the one being read. */
+  dimWhileReading: boolean;
+  /** 07 §10: fade the panel after a few idle seconds of playback. */
+  panelAutoHide: boolean;
   /** Help (§7): false in the web build, where no process can be spawned. */
   helpAvailable: boolean;
   /** The sheet's own label, e.g. `claude · sonnet · low` (§4 step 2). */
@@ -714,12 +720,12 @@ export function parseSetGlobalThemeArgs(
 }
 
 /**
- * `readAloudSetLineHeight` -> `[value]`: one finite number, clamped to the
- * slider's range and rounded to two decimals. Out of range is clamped rather
- * than dropped — the host stores a number, never a string, so nothing the
- * webview sends can become CSS here.
+ * `readAloudSetTextSize` -> `[value]` (07 §15.2): one finite number, rounded
+ * and clamped to 16–28. Out of range is clamped rather than dropped — the
+ * host stores an integer, never a string, so nothing the webview sends can
+ * become CSS here.
  */
-export function parseSetLineHeightArgs(args: unknown): number | undefined {
+export function parseSetTextSizeArgs(args: unknown): number | undefined {
   if (!Array.isArray(args) || args.length !== 1) {
     return undefined;
   }
@@ -727,19 +733,25 @@ export function parseSetLineHeightArgs(args: unknown): number | undefined {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
     return undefined;
   }
-  return clampLineHeight(value);
+  return clampTextSize(value);
 }
 
-/** `readAloudSetColumnWidth` -> `[value]`: one finite number, rounded and clamped. */
-export function parseSetColumnWidthArgs(args: unknown): number | undefined {
+/**
+ * `readAloudSetWordMarker` -> `[style]` (07 §15.2): one string of the enum.
+ * An unknown style is rejected, not defaulted: the sheet only ever offers
+ * the three, so anything else is a rogue message.
+ */
+export function parseSetWordMarkerArgs(
+  args: unknown,
+): ReadAloudWordMarker | undefined {
   if (!Array.isArray(args) || args.length !== 1) {
     return undefined;
   }
-  const value = args[0] as unknown;
-  if (typeof value !== 'number' || !Number.isFinite(value)) {
-    return undefined;
-  }
-  return clampColumnWidth(value);
+  const style = args[0] as unknown;
+  return typeof style === 'string' &&
+    (WORD_MARKERS as readonly string[]).includes(style)
+    ? (style as ReadAloudWordMarker)
+    : undefined;
 }
 
 /** `readAloudResetPage` -> `[]` (05 §9.4): the Reset page settings button. */

@@ -348,7 +348,9 @@ suite(
       assert.strictEqual(padAt(pill, 1.6), 0.35);
       assert.strictEqual(padAt(pill, 1.85), 0.475);
       assert.strictEqual(padAt(pill, 1.4), 0.25);
-      for (const lineHeight of [1.4, 1.5, 1.6, 1.7, 1.8, 1.85]) {
+      // 1.45 and 1.70 are the ends of the range 07 §5.2 derives from the
+      // text size; 1.85 is the rhythm of `off`.
+      for (const lineHeight of [1.4, 1.45, 1.5, 1.6, 1.7, 1.8, 1.85]) {
         const overlap = CONTENT_AREA + 2 * padAt(pill, lineHeight) - lineHeight;
         assert.ok(
           overlap >= RADIUS - 1e-9,
@@ -359,7 +361,7 @@ suite(
 
     test('the spoken word stands proud of the pill by the same margin above and below', () => {
       const [pill, , word] = Array.from(css.matchAll(RE));
-      for (const lineHeight of [1.4, 1.6, 1.85]) {
+      for (const lineHeight of [1.4, 1.45, 1.6, 1.7, 1.85]) {
         const proud = padAt(word, lineHeight) - padAt(pill, lineHeight);
         assert.ok(proud > 0.1 && proud < 0.15, `proud by ${proud}em`);
       }

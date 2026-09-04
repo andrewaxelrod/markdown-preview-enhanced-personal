@@ -140,74 +140,93 @@
  * the line background, `word` the spoken word, `text` the prose colour
  * inside a pill.
  *
- * Five palettes — blue, pink, red, green, orange. The dark variants are the
- * colours sampled from the reference reader (enhancement/Screenshot
- * 2026-09-02 at 4.18.41/4.18.54/4.19.25/4.52.56/4.53.18 PM.png); the light
- * variants keep each palette's hue at a high lightness so the prose stays
- * readable in black.
+ * Five palettes — blue, pink, red, green, orange. Both variants are the
+ * colours sampled from the reference reader: the dark ones from
+ * enhancement/Screenshot 2026-09-02 at 4.18.41/4.18.54/4.19.25/4.52.56/
+ * 4.53.18 PM.png, the light ones from its light mode in
+ * featrues/08-highlight/ (pill and word box per palette, 2026-09-04).
  *
- * The same three custom properties drive the swatches of the theme settings
+ * The same custom properties drive the swatches of the theme settings
  * panel (§3c), which is why the palettes are declared on a plain attribute
  * selector rather than on the preview root alone.
+ *
+ * `word-line` (07 §9.2, §13.2) is the stroke of the underline marker: the
+ * box colour darkened along its hue (and a little more saturated) on light,
+ * lifted toward white on dark, at ≥ 3:1 against the palette's pill in both
+ * schemes (WCAG 1.4.11). The four dark boxes of blue, pink, green and orange
+ * are a step darker than the reader's so the page's text (#e6e6e6) reaches
+ * 4.5:1 on them (07 §13.3); the light boxes are the reader's own and pass
+ * at 5.4:1 and above. test/read-aloud/page-tokens.test.js parses these
+ * blocks and asserts both.
  * ----------------------------------------------------------------------- */
 
 [data-mpe-ra-theme='blue'] {
-  --mpe-ra-pill: #e3e7fa;
-  --mpe-ra-word: #758af0;
+  --mpe-ra-pill: #e0e4fd;
+  --mpe-ra-word: #aab5f9;
+  --mpe-ra-word-line: #6f7cd0;
   --mpe-ra-text: #000000;
 }
 
 [data-mpe-ra-theme='pink'] {
-  --mpe-ra-pill: #f3e7f6;
-  --mpe-ra-word: #cd88dd;
+  --mpe-ra-pill: #f6dcfc;
+  --mpe-ra-word: #e69bf7;
+  --mpe-ra-word-line: #b35fc7;
   --mpe-ra-text: #000000;
 }
 
 [data-mpe-ra-theme='red'] {
-  --mpe-ra-pill: #f7e7e6;
-  --mpe-ra-word: #e18b84;
+  --mpe-ra-pill: #fce1dd;
+  --mpe-ra-word: #f47e74;
+  --mpe-ra-word-line: #de5448;
   --mpe-ra-text: #000000;
 }
 
 [data-mpe-ra-theme='green'] {
-  --mpe-ra-pill: #e9f4ee;
-  --mpe-ra-word: #94d1b2;
+  --mpe-ra-pill: #cffbe9;
+  --mpe-ra-word: #7be5aa;
+  --mpe-ra-word-line: #3c9b66;
   --mpe-ra-text: #000000;
 }
 
 [data-mpe-ra-theme='orange'] {
-  --mpe-ra-pill: #f7efe6;
-  --mpe-ra-word: #e1b484;
+  --mpe-ra-pill: #fcead1;
+  --mpe-ra-word: #f5b768;
+  --mpe-ra-word-line: #b57b32;
   --mpe-ra-text: #000000;
 }
 
 [data-mpe-ra-scheme='dark'][data-mpe-ra-theme='blue'] {
   --mpe-ra-pill: #444864;
-  --mpe-ra-word: #536ce8;
+  --mpe-ra-word: #465bc5;
+  --mpe-ra-word-line: #8092ee;
   --mpe-ra-text: #ffffff;
 }
 
 [data-mpe-ra-scheme='dark'][data-mpe-ra-theme='pink'] {
   --mpe-ra-pill: #5c4362;
-  --mpe-ra-word: #a139b8;
+  --mpe-ra-word: #9c37b2;
+  --mpe-ra-word-line: #c482d2;
   --mpe-ra-text: #ffffff;
 }
 
 [data-mpe-ra-scheme='dark'][data-mpe-ra-theme='red'] {
   --mpe-ra-pill: #623532;
   --mpe-ra-word: #af382f;
+  --mpe-ra-word-line: #c97872;
   --mpe-ra-text: #ffffff;
 }
 
 [data-mpe-ra-scheme='dark'][data-mpe-ra-theme='green'] {
   --mpe-ra-pill: #2c4a40;
-  --mpe-ra-word: #3a805c;
+  --mpe-ra-word: #337050;
+  --mpe-ra-word-line: #659c80;
   --mpe-ra-text: #ffffff;
 }
 
 [data-mpe-ra-scheme='dark'][data-mpe-ra-theme='orange'] {
   --mpe-ra-pill: #4b3a24;
-  --mpe-ra-word: #9e662a;
+  --mpe-ra-word: #8c5a25;
+  --mpe-ra-word-line: #ae7e4c;
   --mpe-ra-text: #ffffff;
 }
 
@@ -321,11 +340,48 @@
   z-index: 1;
 }
 
+/* The word marker (07 §9.1), published as `data-mpe-ra-marker` on the
+ * preview root, the help sheet and the swatch container. `box` is the rule
+ * above exactly. `underline` and `off` cancel the box's padding, margin,
+ * radius and fill — nothing overhangs, so the edge spans have nothing to
+ * lift and are inert — and the underline adds a sweep in the palette's
+ * stroke colour as an inset shadow at the bottom of the inline box: below
+ * the descenders, a bar rather than a strike, and never merged with a link's
+ * own underline. The glyph area's luminance never changes, so nothing
+ * strobes in the fovea at three to five words a second. All three styles
+ * move nothing (02's invariant). */
+[data-mpe-ra-marker='underline'] .mpe-ra-word,
+[data-mpe-ra-marker='off'] .mpe-ra-word {
+  --mpe-ra-pill-pad-x: 0;
+  --mpe-ra-pill-pad-y: 0;
+  --mpe-ra-pill-shift: 0;
+  margin: 0;
+  padding: 0;
+  border-radius: 0;
+  background-color: transparent;
+}
+
+[data-mpe-ra-marker='underline'] .mpe-ra-word {
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  box-shadow: inset 0 -0.14em 0 0 var(--mpe-ra-word-line, currentColor);
+}
+
 @media (forced-colors: active) {
   .mpe-ra-word {
     forced-color-adjust: none;
     background-color: Highlight;
     color: HighlightText;
+  }
+
+  [data-mpe-ra-marker='underline'] .mpe-ra-word,
+  [data-mpe-ra-marker='off'] .mpe-ra-word {
+    background-color: transparent;
+    color: inherit;
+  }
+
+  [data-mpe-ra-marker='underline'] .mpe-ra-word {
+    box-shadow: inset 0 -0.14em 0 0 Highlight;
   }
 }
 
@@ -536,6 +592,94 @@
 .mpe-ra-bar:focus-visible {
   outline: 2px solid var(--vscode-focusBorder, #007fd4);
   outline-offset: 2px;
+}
+
+/* Auto-hide (07 §10): after a few seconds of playback with no activity the
+ * panel — status line and chip included, they are its children — fades out
+ * and stops taking pointer events, so an invisible panel never blocks a
+ * click on the text under it; any movement, key, wheel or touch brings it
+ * back faster than it went. A 3 px progress strip at the bottom edge of the
+ * viewport stands in for it meanwhile, in the accent on the panel's border
+ * colour. Both carry `fixed`, so crossnote's zoom leaves them their size. */
+.mpe-ra-bar {
+  transition: opacity 150ms ease;
+}
+
+.mpe-ra-bar.mpe-ra-bar-idle {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 400ms ease;
+}
+
+.mpe-ra-strip {
+  --mpe-ra-accent: #3b5bfd;
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 99997;
+  height: 3px;
+  background-color: rgba(0, 0, 0, 0.09);
+  pointer-events: none;
+}
+
+.mpe-ra-strip[data-mpe-ra-scheme='dark'] {
+  background-color: rgba(255, 255, 255, 0.12);
+}
+
+.mpe-ra-strip[hidden] {
+  display: none;
+}
+
+.mpe-ra-strip > i {
+  display: block;
+  width: 0;
+  height: 100%;
+  background: var(--mpe-ra-accent);
+  transition: width 0.2s linear;
+}
+
+/* _Back to the reading_ (07 §7.5): shown in the status slot while a read is
+ * on and the following has been suspended by a manual scroll; the accent
+ * as its text colour, in the panel's palette. */
+.mpe-ra-bar .mpe-ra-bar-chip {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  transform: translateX(-50%);
+  padding: 4px 12px;
+  border: 1px solid var(--mpe-ra-panel-border);
+  border-radius: 999px;
+  background: var(--mpe-ra-panel-bg);
+  color: var(--mpe-ra-accent);
+  box-shadow: var(--mpe-ra-panel-shadow);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.mpe-ra-bar .mpe-ra-bar-chip:hover {
+  background: var(--mpe-ra-panel-hover);
+}
+
+.mpe-ra-bar .mpe-ra-bar-chip:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, #007fd4);
+  outline-offset: 1px;
+}
+
+.mpe-ra-bar .mpe-ra-bar-chip[hidden] {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mpe-ra-bar,
+  .mpe-ra-bar.mpe-ra-bar-idle,
+  .mpe-ra-strip > i {
+    transition: none;
+  }
 }
 
 /* The progress of the read, traced along the top edge of the pill. */
@@ -760,9 +904,9 @@
 
 /* --------------------------------------------------------------------------
  * 3c. The theme settings sheet (`featrues/control2.png`), opened from the
- * second button of the panel: the player font, the player font size (which
- * is the preview's own zoom) and the five highlight palettes, each shown as
- * three lines of sample text with one word spoken.
+ * second button of the panel: the global theme, the player font, the text
+ * size (07 §5), the word marker (07 §9) and the five highlight palettes,
+ * each shown as three lines of sample text with one word spoken.
  *
  * It is a taller popover in the same palette as the panel, anchored above it
  * and centred on it, and it scrolls inside itself on a short viewport.
@@ -864,7 +1008,7 @@
   width: 100%;
 }
 
-/* The two page sliders are disabled while the page is off (05 §9.3). */
+/* The text size slider is disabled while the page is off (05 §9.3, 07 §5.6). */
 .mpe-ra-sheet-range[disabled] {
   opacity: 0.38;
   cursor: default;
@@ -1038,6 +1182,17 @@
 .mpe-ra-swatch-word {
   border-radius: 3px;
   background: var(--mpe-ra-word);
+}
+
+/* The cards paint the chosen marker (07 §9.3): the swatch container carries
+ * `data-mpe-ra-marker`, each card its own palette and scheme. */
+[data-mpe-ra-marker='underline'] .mpe-ra-swatch-word,
+[data-mpe-ra-marker='off'] .mpe-ra-swatch-word {
+  background: transparent;
+}
+
+[data-mpe-ra-marker='underline'] .mpe-ra-swatch-word {
+  box-shadow: inset 0 -0.14em 0 0 var(--mpe-ra-word-line, currentColor);
 }
 
 .mpe-ra-swatch-name {

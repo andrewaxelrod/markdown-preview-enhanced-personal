@@ -23,20 +23,19 @@ import {
 import { DEFAULT_HELP_AUDIENCE } from './help-prompt';
 import { readAloudLog } from './log';
 import {
-  clampColumnWidth,
-  clampLineHeight,
   clampSpeed,
+  clampTextSize,
   clampVolume,
-  DEFAULT_COLUMN_WIDTH,
-  DEFAULT_LINE_HEIGHT,
   HELP_CONTEXT_MODES,
   normaliseGlobalTheme,
   normaliseHighlightTheme,
   normalisePlayerFont,
+  normaliseWordMarker,
   type HelpContextMode,
   type ReadAloudFont,
   type ReadAloudGlobalTheme,
   type ReadAloudHighlightTheme,
+  type ReadAloudWordMarker,
 } from './messages';
 
 /**
@@ -59,8 +58,12 @@ export const READ_ALOUD_SETTING_KEYS = [
   // The low-strain page (`featrues/05-eye-strain.spec.md` §10.1). Live, like
   // the rest: a change never reloads the preview.
   'readAloudGlobalTheme',
-  'readAloudLineHeight',
-  'readAloudColumnWidth',
+  // Eye strain 2 (`featrues/07-eye-strain-2/spec.md` §15.1): the text size,
+  // the word marker, dimming and the panel's auto-hide. Live as well.
+  'readAloudTextSize',
+  'readAloudWordMarker',
+  'readAloudDimWhileReading',
+  'readAloudPanelAutoHide',
   'readAloudCacheSizeMB',
   'kokoroBaseUrl',
   // Help (`featrues/04-help-module.md` §7.1). Read per request, so a change
@@ -114,8 +117,10 @@ export interface ReadAloudSettings {
   highlightTheme: ReadAloudHighlightTheme;
   font: ReadAloudFont;
   globalTheme: ReadAloudGlobalTheme;
-  lineHeight: number;
-  columnWidth: number;
+  textSize: number;
+  wordMarker: ReadAloudWordMarker;
+  dimWhileReading: boolean;
+  panelAutoHide: boolean;
   cacheSizeMB: number;
   kokoroBaseUrl: string;
   help: ReadAloudHelpSettings;
@@ -253,8 +258,10 @@ export function readReadAloudSettings(): ReadAloudSettings {
   const themeRaw = getMPEConfig<string>('readAloudHighlightTheme');
   const fontRaw = getMPEConfig<string>('readAloudFont');
   const globalThemeRaw = getMPEConfig<string>('readAloudGlobalTheme');
-  const lineHeightRaw = getMPEConfig<number>('readAloudLineHeight');
-  const columnWidthRaw = getMPEConfig<number>('readAloudColumnWidth');
+  const textSizeRaw = getMPEConfig<number>('readAloudTextSize');
+  const wordMarkerRaw = getMPEConfig<string>('readAloudWordMarker');
+  const dimRaw = getMPEConfig<boolean>('readAloudDimWhileReading');
+  const autoHideRaw = getMPEConfig<boolean>('readAloudPanelAutoHide');
   const kokoroBaseUrlRaw = getMPEConfig<string>('kokoroBaseUrl');
 
   let kokoroBaseUrl = DEFAULT_KOKORO_BASE_URL;
@@ -286,16 +293,12 @@ export function readReadAloudSettings(): ReadAloudSettings {
     highlightTheme: normaliseHighlightTheme(themeRaw),
     font: normalisePlayerFont(fontRaw),
     globalTheme: normaliseGlobalTheme(globalThemeRaw),
-    // A hand-edited value outside the slider's grid is clamped to the range
-    // and rounded to the step's precision, not to the step (05 §9.3).
-    lineHeight: clampLineHeight(
-      typeof lineHeightRaw === 'number' ? lineHeightRaw : DEFAULT_LINE_HEIGHT,
-    ),
-    columnWidth: clampColumnWidth(
-      typeof columnWidthRaw === 'number'
-        ? columnWidthRaw
-        : DEFAULT_COLUMN_WIDTH,
-    ),
+    // A hand-edited value outside the slider's range is clamped and rounded
+    // to whole pixels (07 §5.1).
+    textSize: clampTextSize(textSizeRaw),
+    wordMarker: normaliseWordMarker(wordMarkerRaw),
+    dimWhileReading: typeof dimRaw === 'boolean' ? dimRaw : true,
+    panelAutoHide: typeof autoHideRaw === 'boolean' ? autoHideRaw : true,
     cacheSizeMB: readInteger('readAloudCacheSizeMB', 100, 1),
     kokoroBaseUrl,
     help: readHelpSettings(),
@@ -360,25 +363,27 @@ export async function writeGlobalThemeSetting(
   await updateMPEConfig('readAloudGlobalTheme', theme, true);
 }
 
-export async function writeLineHeightSetting(value: number): Promise<void> {
-  await updateMPEConfig('readAloudLineHeight', value, true);
+export async function writeTextSizeSetting(value: number): Promise<void> {
+  await updateMPEConfig('readAloudTextSize', value, true);
 }
 
-export async function writeColumnWidthSetting(value: number): Promise<void> {
-  await updateMPEConfig('readAloudColumnWidth', value, true);
+export async function writeWordMarkerSetting(
+  style: ReadAloudWordMarker,
+): Promise<void> {
+  await updateMPEConfig('readAloudWordMarker', style, true);
 }
 
 /**
  * 05 §9.4 — Reset page settings. The user values are *cleared*, not set to
  * the defaults, so a later change of a default in package.json is honoured
- * (D16). The highlight palette, speed and volume are player preferences and
- * are left alone.
+ * (D16). The highlight palette, speed, volume, dimming and auto-hide are
+ * player preferences and are left alone (07 §14).
  */
 export async function clearPageSettings(): Promise<void> {
   await updateMPEConfig('readAloudGlobalTheme', undefined, true);
-  await updateMPEConfig('readAloudLineHeight', undefined, true);
-  await updateMPEConfig('readAloudColumnWidth', undefined, true);
+  await updateMPEConfig('readAloudTextSize', undefined, true);
   await updateMPEConfig('readAloudFont', undefined, true);
+  await updateMPEConfig('readAloudWordMarker', undefined, true);
 }
 
 /** §7.1 — what the _Choose Help Model_ quick pick writes, per engine. */

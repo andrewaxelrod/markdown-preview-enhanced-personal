@@ -79,8 +79,8 @@ const WORKSPACE_PREVIEW_PROVIDER_MAP: Map<string, PreviewProvider> = new Map();
  * the `updateMarkdown` identity check generalised to the read-aloud commands
  * that also carry a `sourceUri` (spec F13; `readAloudSetSpeed`,
  * `readAloudSetVolume`, `readAloudSetHighlightTheme`, `readAloudSetFont`,
- * `readAloudSetGlobalTheme`, `readAloudSetLineHeight`,
- * `readAloudSetColumnWidth`, `readAloudResetPage` and `readAloudOpenSetup`
+ * `readAloudSetGlobalTheme`, `readAloudSetTextSize`,
+ * `readAloudSetWordMarker`, `readAloudResetPage` and `readAloudOpenSetup`
  * carry none and are validated by type only).
  */
 const SOURCE_URI_GUARDED_COMMANDS: Set<string> = new Set([
@@ -128,13 +128,13 @@ const WEBVIEW_MESSAGE_COMMANDS: Set<string> = new Set([
   'readAloudOpenSetup',
   'readAloudPlaying',
   'readAloudResetPage',
-  'readAloudSetColumnWidth',
   'readAloudSetFont',
   'readAloudSetGlobalTheme',
   'readAloudSetHighlightTheme',
-  'readAloudSetLineHeight',
   'readAloudSetSpeed',
+  'readAloudSetTextSize',
   'readAloudSetVolume',
+  'readAloudSetWordMarker',
   'readAloudSynthesize',
   'refreshPreview',
   'revealLine',

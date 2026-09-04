@@ -2,10 +2,11 @@
 'use strict';
 
 // The low-strain page of media/read-aloud.js under jsdom
-// (featrues/05-eye-strain.spec.md §12): the Global theme and its resolution,
-// the attribute on <html>, the segmented control, the two typographic
-// sliders, Reset, and the `off` regression guard. jsdom lacks `matchMedia`,
-// so the harness stubs it, with a switch that fires its `change` listeners.
+// (featrues/05-eye-strain.spec.md §12, revised by 07 §5–§6): the Global theme
+// and its resolution, the attribute and the three derived properties on
+// <html>, the segmented control, the measured column, Reset, and the `off`
+// regression guard. jsdom lacks `matchMedia`, so the harness stubs it, with
+// a switch that fires its `change` listeners.
 
 const assert = require('node:assert');
 const fs = require('node:fs');
@@ -59,21 +60,27 @@ suite('read-aloud low-strain page (05)', function () {
   let doc;
   let posted;
   let logs;
-  let wheels;
   let mediaListeners;
   let prefersDark;
+  /**
+   * The average advance the fake layout reports for the measuring probe
+   * (07 §6.2), in px per character at a 10 px em: null means no layout at
+   * all, as jsdom has.
+   */
+  let advancePx;
 
   /**
    * @param {{ config?: object, bodyClass?: string, bodyStyle?: string,
-   *           prefersDark?: boolean, crossnoteZoom?: boolean }} options
+   *           prefersDark?: boolean, advancePx?: number }} options
    */
   function boot(options) {
     options = options || {};
     posted = [];
     logs = [];
-    wheels = [];
     mediaListeners = [];
     prefersDark = !!options.prefersDark;
+    advancePx =
+      typeof options.advancePx === 'number' ? options.advancePx : null;
     const virtualConsole = new VirtualConsole();
     virtualConsole.on('jsdomError', (error) => {
       logs.push('jsdomError: ' + (error.stack || error.message));
@@ -99,6 +106,25 @@ suite('read-aloud low-strain page (05)', function () {
     win.URL.createObjectURL = () => 'blob:fake';
     win.URL.revokeObjectURL = () => {};
     win.Element.prototype.scrollIntoView = function () {};
+    win.scrollTo = function () {};
+    // The measuring probe (07 §6.2): the sample span and the 100 em
+    // reference get a width from the fake layout, everything else none.
+    const rect = win.Element.prototype.getBoundingClientRect;
+    win.Element.prototype.getBoundingClientRect = function () {
+      const parent = this.parentElement;
+      if (
+        advancePx !== null &&
+        parent &&
+        parent.classList &&
+        parent.classList.contains('mpe-ra-probe')
+      ) {
+        const width = /100em/.test(this.style.cssText)
+          ? 1000
+          : advancePx * core.MEASURE_SAMPLE.length;
+        return { top: 0, left: 0, right: width, bottom: 10, width, height: 10 };
+      }
+      return rect.call(this);
+    };
     win.Audio = class extends win.EventTarget {
       constructor() {
         super();
@@ -123,24 +149,6 @@ suite('read-aloud low-strain page (05)', function () {
       addListener: (fn) => mediaListeners.push(fn),
       removeListener: () => {},
     });
-    if (options.crossnoteZoom) {
-      let level = 1;
-      doc.body.dataset.zoom = '1';
-      doc.addEventListener(
-        'wheel',
-        (event) => {
-          if (!event.ctrlKey && !event.metaKey) {
-            return;
-          }
-          wheels.push(event.deltaY);
-          level =
-            Math.round((level + (event.deltaY < 0 ? 0.1 : -0.1)) * 100) / 100;
-          doc.body.dataset.zoom = String(level);
-          doc.body.style.zoom = String(level);
-        },
-        true,
-      );
-    }
     // What the host puts in the script's `data-config` attribute (§4.3): the
     // page is applied from it at script evaluation.
     if (options.config) {
@@ -241,28 +249,70 @@ suite('read-aloud low-strain page (05)', function () {
     // An unknown value is `auto`, the default.
     assert.strictEqual(r('sepia', { bodyClasses: 'vscode-dark' }), 'dark');
     assert.strictEqual(core.normaliseGlobalTheme('sepia'), 'auto');
-    assert.strictEqual(core.clampLineHeight(1.55), 1.55);
-    assert.strictEqual(core.clampLineHeight(0.3), 1.4);
-    assert.strictEqual(core.clampLineHeight('1.6'), 1.6);
-    assert.strictEqual(core.clampColumnWidth(63.4), 63);
-    assert.strictEqual(core.clampColumnWidth(100), 75);
-    assert.strictEqual(core.clampColumnWidth(NaN), 66);
+    // The two clamps of 05 gave way to the text size and its derivation.
+    assert.strictEqual(core.clampLineHeight, undefined);
+    assert.strictEqual(core.clampColumnWidth, undefined);
+    assert.strictEqual(core.clampTextSize(24.4), 24);
+    assert.strictEqual(core.deriveLineHeight(24), 1.5);
   });
 
-  test('booting with `dark` puts the page on <html> and the scheme follows it', async function () {
-    boot({ config: { globalTheme: 'dark', lineHeight: 1.6, columnWidth: 66 } });
+  test('booting with `dark` and a text size puts the page and its three properties on <html>', async function () {
+    boot({ config: { globalTheme: 'dark', textSize: 24 } });
     await sleep(60);
     assert.strictEqual(html().getAttribute('data-mpe-ra-page'), 'dark');
     assert.strictEqual(
-      html().style.getPropertyValue('--mpe-ra-page-line-height'),
-      '1.6',
+      html().style.getPropertyValue('--mpe-ra-page-text-size'),
+      '24',
     );
     assert.strictEqual(
+      html().style.getPropertyValue('--mpe-ra-page-line-height'),
+      '1.5',
+      'derived (07 §5.2)',
+    );
+    // jsdom lays nothing out, so the measure is 66 characters at the
+    // fallback advance of 0.5 em (07 §6.2).
+    assert.strictEqual(
       html().style.getPropertyValue('--mpe-ra-page-measure'),
-      '66ch',
+      '33em',
     );
     assert.strictEqual(root().getAttribute('data-mpe-ra-scheme'), 'dark');
     assert.strictEqual(bar().getAttribute('data-mpe-ra-scheme'), 'dark');
+  });
+
+  test('the measure is taken from the face in use and again after a font change (07 §6.2)', async function () {
+    // 4.7 px per character at a 10 px em: 0.47 em, so 66 characters are
+    // 31.02 em.
+    boot({ config: { globalTheme: 'light' }, advancePx: 4.7 });
+    await sleep(60);
+    assert.strictEqual(
+      html().style.getPropertyValue('--mpe-ra-page-measure'),
+      '31.02em',
+    );
+    assert.strictEqual(
+      root().querySelector('.mpe-ra-probe'),
+      null,
+      'the probe is removed at once',
+    );
+    // A wider face (Georgia's advance is larger) gives a wider column in em
+    // and the same 66 characters.
+    advancePx = 5.2;
+    host({ command: 'readAloudConfig', font: 'georgia' });
+    assert.strictEqual(
+      html().style.getPropertyValue('--mpe-ra-page-measure'),
+      '34.32em',
+    );
+    // A text size change does not re-measure: the ratio is size-independent
+    // and the property is in em.
+    advancePx = 9;
+    host({ command: 'readAloudConfig', textSize: 26 });
+    assert.strictEqual(
+      html().style.getPropertyValue('--mpe-ra-page-measure'),
+      '34.32em',
+    );
+    assert.strictEqual(
+      html().style.getPropertyValue('--mpe-ra-page-line-height'),
+      '1.45',
+    );
   });
 
   test('booting with `light` under a dark VS Code is light', async function () {
@@ -279,11 +329,15 @@ suite('read-aloud low-strain page (05)', function () {
 
   test('`off` sets nothing and the scheme is read from the background as before', async function () {
     boot({
-      config: { globalTheme: 'off', lineHeight: 1.4, columnWidth: 50 },
+      config: { globalTheme: 'off', textSize: 16 },
       bodyStyle: 'background: #000',
     });
     await sleep(60);
     assert.strictEqual(html().hasAttribute('data-mpe-ra-page'), false);
+    assert.strictEqual(
+      html().style.getPropertyValue('--mpe-ra-page-text-size'),
+      '',
+    );
     assert.strictEqual(
       html().style.getPropertyValue('--mpe-ra-page-line-height'),
       '',
@@ -328,7 +382,9 @@ suite('read-aloud low-strain page (05)', function () {
     await sleep(60);
     openSheet();
     const radios = Array.from(
-      sheet().querySelectorAll('.mpe-ra-seg [role="radio"]'),
+      sheet().querySelectorAll(
+        '.mpe-ra-seg:not(.mpe-ra-seg-marker) [role="radio"]',
+      ),
     );
     assert.deepStrictEqual(
       radios.map((el) => el.getAttribute('data-mpe-ra-page-choice')),
@@ -339,7 +395,9 @@ suite('read-aloud low-strain page (05)', function () {
       ['Auto', 'Light', 'Dark'],
     );
     assert.strictEqual(
-      sheet().querySelector('.mpe-ra-seg').getAttribute('role'),
+      sheet()
+        .querySelector('.mpe-ra-seg:not(.mpe-ra-seg-marker)')
+        .getAttribute('role'),
       'radiogroup',
     );
     assert.strictEqual(segment('auto').getAttribute('aria-checked'), 'true');
@@ -367,23 +425,29 @@ suite('read-aloud low-strain page (05)', function () {
     }
   });
 
-  test('with `off` from the host no segment is checked and the sliders are disabled; a segment turns the page on', async function () {
+  test('with `off` from the host no segment is checked and the text size slider is disabled; a segment turns the page on', async function () {
     boot({ config: { globalTheme: 'dark' } });
     await sleep(60);
     openSheet();
-    const lineHeight = sheet().querySelector('.mpe-ra-sheet-line-height');
-    const width = sheet().querySelector('.mpe-ra-sheet-column-width');
+    const size = sheet().querySelector('.mpe-ra-sheet-size');
     const hint = sheet().querySelector('.mpe-ra-sheet-hint');
     assert.strictEqual(hint.hidden, true);
-    assert.strictEqual(lineHeight.disabled, false);
+    assert.strictEqual(size.disabled, false);
 
     host({ command: 'readAloudConfig', globalTheme: 'off' });
     assert.strictEqual(html().hasAttribute('data-mpe-ra-page'), false);
     for (const name of ['auto', 'light', 'dark']) {
       assert.strictEqual(segment(name).getAttribute('aria-checked'), 'false');
     }
-    assert.strictEqual(lineHeight.disabled, true);
-    assert.strictEqual(width.disabled, true);
+    assert.strictEqual(size.disabled, true);
+    // The label still shows the value (07 §5.6).
+    assert.strictEqual(labelOf(size), 'Text size: 20 px');
+    // The word marker needs no page and stays enabled (07 §9.3).
+    for (const button of sheet().querySelectorAll(
+      '.mpe-ra-seg-marker button',
+    )) {
+      assert.strictEqual(button.disabled, false);
+    }
     assert.strictEqual(hint.hidden, false);
     assert.ok(/^Off in Settings/.test(hint.textContent));
     assert.strictEqual(
@@ -394,8 +458,7 @@ suite('read-aloud low-strain page (05)', function () {
     click(segment('dark'));
     assert.strictEqual(html().getAttribute('data-mpe-ra-page'), 'dark');
     assert.strictEqual(segment('dark').getAttribute('aria-checked'), 'true');
-    assert.strictEqual(lineHeight.disabled, false);
-    assert.strictEqual(width.disabled, false);
+    assert.strictEqual(size.disabled, false);
     assert.strictEqual(hint.hidden, true);
     assert.strictEqual(
       sheet().querySelector('.mpe-ra-sheet-font option').textContent,
@@ -407,72 +470,44 @@ suite('read-aloud low-strain page (05)', function () {
     );
   });
 
-  test('the line height slider writes <html>, labels itself and persists once per drag', async function () {
-    boot({ config: { globalTheme: 'light', lineHeight: 1.6 } });
+  test('the text size slider writes the three properties, and a hand-edited 23 is shown as 23 px', async function () {
+    boot({ config: { globalTheme: 'light', textSize: 20 } });
     await sleep(60);
     openSheet();
-    const range = sheet().querySelector('.mpe-ra-sheet-line-height');
-    assert.strictEqual(range.min, '1.4');
-    assert.strictEqual(range.max, '1.8');
-    assert.strictEqual(range.step, '0.1');
-    assert.strictEqual(labelOf(range), 'Line height: 1.6');
-    slide(range, 1.7);
-    slide(range, 1.8);
-    slide(range, 1.4);
+    const range = sheet().querySelector('.mpe-ra-sheet-size');
+    assert.strictEqual(labelOf(range), 'Text size: 20 px');
+    slide(range, 18);
+    slide(range, 17);
+    assert.strictEqual(
+      html().style.getPropertyValue('--mpe-ra-page-text-size'),
+      '17',
+    );
     assert.strictEqual(
       html().style.getPropertyValue('--mpe-ra-page-line-height'),
-      '1.4',
+      '1.68',
     );
-    assert.strictEqual(labelOf(range), 'Line height: 1.4');
-    assert.strictEqual(range.getAttribute('aria-valuetext'), 'line height 1.4');
-    // Not written back while it is being dragged (03's rule).
-    assert.strictEqual(range.value, '1.4');
+    assert.strictEqual(labelOf(range), 'Text size: 17 px');
+    assert.strictEqual(range.getAttribute('aria-valuetext'), '17 pixels');
+    assert.strictEqual(range.value, '17');
     await sleep(400);
     assert.deepStrictEqual(
-      posts('readAloudSetLineHeight').map((m) => Array.from(m.args)),
-      [[1.4]],
+      posts('readAloudSetTextSize').map((m) => Array.from(m.args)),
+      [[17]],
+    );
+    host({ command: 'readAloudConfig', textSize: 23 });
+    assert.strictEqual(labelOf(range), 'Text size: 23 px');
+    assert.strictEqual(
+      html().style.getPropertyValue('--mpe-ra-page-line-height'),
+      '1.53',
     );
   });
 
-  test('the column width slider does the same in ch, and a hand-edited 63 is shown as 63 ch', async function () {
-    boot({ config: { globalTheme: 'light', columnWidth: 66 } });
+  test('Reset posts readAloudResetPage, leaves the zoom alone and the host config restores the sheet', async function () {
+    boot({ config: { globalTheme: 'dark', textSize: 28, wordMarker: 'box' } });
     await sleep(60);
     openSheet();
-    const range = sheet().querySelector('.mpe-ra-sheet-column-width');
-    assert.strictEqual(range.min, '50');
-    assert.strictEqual(range.max, '75');
-    assert.strictEqual(range.step, '5');
-    assert.strictEqual(labelOf(range), 'Column width: 66 ch');
-    slide(range, 70);
-    slide(range, 75);
-    assert.strictEqual(
-      html().style.getPropertyValue('--mpe-ra-page-measure'),
-      '75ch',
-    );
-    assert.strictEqual(labelOf(range), 'Column width: 75 ch');
-    assert.strictEqual(range.getAttribute('aria-valuetext'), '75 characters');
-    await sleep(400);
-    assert.deepStrictEqual(
-      posts('readAloudSetColumnWidth').map((m) => Array.from(m.args)),
-      [[75]],
-    );
-    host({ command: 'readAloudConfig', columnWidth: 63 });
-    assert.strictEqual(labelOf(range), 'Column width: 63 ch');
-    assert.strictEqual(
-      html().style.getPropertyValue('--mpe-ra-page-measure'),
-      '63ch',
-    );
-  });
-
-  test('Reset posts readAloudResetPage, puts the zoom back and the host config restores the sheet', async function () {
-    boot({
-      config: { globalTheme: 'dark', lineHeight: 1.8, columnWidth: 50 },
-      crossnoteZoom: true,
-    });
-    await sleep(60);
-    openSheet();
-    slide(sheet().querySelector('.mpe-ra-sheet-size'), 1.3);
-    assert.strictEqual(doc.body.dataset.zoom, '1.3');
+    // crossnote's own zoom is not the sheet's any more (07 §5.7).
+    doc.body.style.zoom = '1.3';
     const reset = sheet().querySelector('.mpe-ra-sheet-reset');
     assert.strictEqual(reset.textContent, 'Reset page settings');
     click(reset);
@@ -480,28 +515,25 @@ suite('read-aloud low-strain page (05)', function () {
       posts('readAloudResetPage').map((m) => Array.from(m.args)),
       [[]],
     );
-    assert.strictEqual(doc.body.dataset.zoom, '1');
+    assert.strictEqual(doc.body.style.zoom, '1.3', 'the zoom stays');
     assert.strictEqual(sheet().hidden, false);
     host({
       command: 'readAloudConfig',
       globalTheme: 'auto',
-      lineHeight: 1.6,
-      columnWidth: 66,
+      textSize: 20,
+      wordMarker: 'underline',
       font: 'default',
     });
     assert.strictEqual(segment('auto').getAttribute('aria-checked'), 'true');
     assert.strictEqual(
-      labelOf(sheet().querySelector('.mpe-ra-sheet-line-height')),
-      'Line height: 1.6',
-    );
-    assert.strictEqual(
-      labelOf(sheet().querySelector('.mpe-ra-sheet-column-width')),
-      'Column width: 66 ch',
+      labelOf(sheet().querySelector('.mpe-ra-sheet-size')),
+      'Text size: 20 px',
     );
     assert.strictEqual(
       html().style.getPropertyValue('--mpe-ra-page-line-height'),
       '1.6',
     );
+    assert.strictEqual(root().getAttribute('data-mpe-ra-marker'), 'underline');
     // The guidance caption is there and is not a control.
     const note = sheet().querySelector('.mpe-ra-sheet-note');
     assert.ok(/20 minutes/.test(note.textContent));
@@ -594,14 +626,16 @@ suite('read-aloud low-strain page (05)', function () {
       sheet().querySelector('.mpe-ra-sheet-font').value,
       'georgia',
     );
-    // The rows 03 built are still there, in order, with the two new ones
-    // between the size slider and the palettes.
+    // The rows are there, in order (07 §14).
     const labels = Array.from(
       sheet().querySelectorAll('.mpe-ra-sheet-label'),
     ).map((el) => el.firstChild.textContent);
     assert.strictEqual(labels[1], 'Player font');
-    assert.ok(/^Player font size: \d+px$/.test(labels[2]));
-    assert.strictEqual(labels[5], 'Player highlight theme');
+    assert.strictEqual(labels[2], 'Text size: 20 px');
+    assert.strictEqual(labels[3], 'Word marker');
+    assert.strictEqual(labels[4], 'Player highlight theme');
+    // The marker applies with the page off, like the palettes (07 §9.1).
+    assert.strictEqual(root().getAttribute('data-mpe-ra-marker'), 'underline');
     // Choosing a palette and a font still repaints and persists.
     click(sheet().querySelector('[data-mpe-ra-theme-choice="red"]'));
     assert.strictEqual(root().getAttribute('data-mpe-ra-theme'), 'red');

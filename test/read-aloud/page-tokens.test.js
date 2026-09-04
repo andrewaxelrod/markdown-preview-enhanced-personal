@@ -19,6 +19,10 @@ const CSS = fs.readFileSync(
   path.join(__dirname, '..', '..', 'media', 'read-aloud-page.css'),
   'utf8',
 );
+const PLAYER_CSS = fs.readFileSync(
+  path.join(__dirname, '..', '..', 'media', 'read-aloud.css'),
+  'utf8',
+);
 
 // ------------------------------------------------------------ the formulas
 
@@ -188,9 +192,30 @@ suite('read-aloud low-strain page: the light tokens (WCAG 2.x)', () => {
     }
   });
 
+  test('the dim tiers of a read (07 §8.3): far at 3:1, near at 4.5:1', () => {
+    atLeast(wcag(LIGHT['text-far'], LIGHT.surface), 3, 'far text on surface');
+    atLeast(
+      wcag(LIGHT['text-near'], LIGHT.surface),
+      4.5,
+      'near text on surface',
+    );
+    // Three visible steps: text, near, far.
+    assert.ok(
+      wcag(LIGHT.text, LIGHT.surface) > wcag(LIGHT['text-near'], LIGHT.surface),
+    );
+    assert.ok(
+      wcag(LIGHT['text-near'], LIGHT.surface) >
+        wcag(LIGHT['text-far'], LIGHT.surface),
+    );
+  });
+
   test('muted text, links and focus', () => {
     atLeast(wcag(LIGHT['text-muted'], LIGHT.surface), 4.5, 'muted on surface');
     atLeast(wcag(LIGHT.link, LIGHT.surface), 7, 'link on surface (1.11)');
+    // 07 §12: the light link is a low-chroma ink blue, not 05's #1f4e8c,
+    // so it no longer outshines the word marker; the focus ring keeps it.
+    assert.notStrictEqual(LIGHT.link, '#1f4e8c');
+    assert.strictEqual(LIGHT.focus, '#1f4e8c');
     // A #tag is a link on the code surface (§8; crossnote's badge shape).
     atLeast(
       wcag(LIGHT.link, LIGHT['code-surface']),
@@ -257,6 +282,17 @@ suite('read-aloud low-strain page: the dark tokens (APCA)', () => {
         `text on ${pair} surface (callout body)`,
       );
     }
+  });
+
+  test('the dim tiers of a read (07 §8.3): far at Lc 45, near at Lc 60', () => {
+    atLeast(lc(DARK['text-far'], DARK.surface), 45, 'far text on surface');
+    atLeast(lc(DARK['text-near'], DARK.surface), 60, 'near text on surface');
+    assert.ok(
+      lc(DARK.text, DARK.surface) > lc(DARK['text-near'], DARK.surface),
+    );
+    assert.ok(
+      lc(DARK['text-near'], DARK.surface) > lc(DARK['text-far'], DARK.surface),
+    );
   });
 
   test('muted text is Lc 75, the link is the body colour, focus is 3:1', () => {
@@ -400,6 +436,96 @@ suite('read-aloud low-strain page: P1 and the non-goals', () => {
       (sel) => !/^html\[data-mpe-ra-page/.test(sel),
     );
     assert.deepStrictEqual(foreign, []);
+  });
+});
+
+suite('read-aloud highlight palettes (07 §13.2–13.3)', () => {
+  // The ten palette blocks of media/read-aloud.css, parsed for the first
+  // time: the underline marker's stroke against its pill (a non-text
+  // indicator against its adjacent colour, WCAG 1.4.11), and the page's
+  // text on the box, in both schemes. The test is the authority over the
+  // hex values.
+  const PALETTES = ['blue', 'pink', 'red', 'green', 'orange'];
+
+  function paletteBlock(theme, dark) {
+    const selector = dark
+      ? `[data-mpe-ra-scheme='dark'][data-mpe-ra-theme='${theme}']`
+      : `[data-mpe-ra-theme='${theme}']`;
+    const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const m = new RegExp('(?:^|\\n)' + escaped + '\\s*\\{([^}]*)\\}').exec(
+      PLAYER_CSS,
+    );
+    assert.ok(m, `the stylesheet has a ${selector} block`);
+    const tokens = {};
+    const re = /--([a-z0-9-]+)\s*:\s*([^;]+);/g;
+    let d = re.exec(m[1]);
+    while (d) {
+      tokens[d[1]] = d[2].trim();
+      d = re.exec(m[1]);
+    }
+    return tokens;
+  }
+
+  test('every palette declares a pill, a box, a stroke and a text colour in both schemes', () => {
+    for (const theme of PALETTES) {
+      for (const dark of [false, true]) {
+        const block = paletteBlock(theme, dark);
+        for (const name of [
+          'mpe-ra-pill',
+          'mpe-ra-word',
+          'mpe-ra-word-line',
+          'mpe-ra-text',
+        ]) {
+          assert.ok(
+            block[name],
+            `${theme} ${dark ? 'dark' : 'light'} --${name}`,
+          );
+        }
+      }
+    }
+  });
+
+  test('the underline stroke is at least 3:1 against its pill', () => {
+    for (const theme of PALETTES) {
+      for (const dark of [false, true]) {
+        const block = paletteBlock(theme, dark);
+        atLeast(
+          wcag(block['mpe-ra-word-line'], block['mpe-ra-pill']),
+          3,
+          `${theme} ${dark ? 'dark' : 'light'} stroke on pill`,
+        );
+      }
+    }
+  });
+
+  test('the page text reaches 4.5:1 on every box, and so does the off-page #000 / #fff', () => {
+    for (const theme of PALETTES) {
+      for (const dark of [false, true]) {
+        const block = paletteBlock(theme, dark);
+        const pageText = dark ? DARK.text : LIGHT.text;
+        atLeast(
+          wcag(pageText, block['mpe-ra-word']),
+          4.5,
+          `${theme} ${dark ? 'dark' : 'light'}: page text on the box`,
+        );
+        atLeast(
+          wcag(block['mpe-ra-text'], block['mpe-ra-word']),
+          4.5,
+          `${theme} ${dark ? 'dark' : 'light'}: off-page text on the box`,
+        );
+      }
+    }
+  });
+
+  test('the light strokes are lighter than the text, so the marker is found without outshining the words', () => {
+    for (const theme of PALETTES) {
+      const block = paletteBlock(theme, false);
+      assert.ok(
+        wcag(block['mpe-ra-word-line'], LIGHT.surface) <
+          wcag(LIGHT.text, LIGHT.surface),
+        `${theme} light stroke`,
+      );
+    }
   });
 });
 

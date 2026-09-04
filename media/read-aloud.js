@@ -51,33 +51,38 @@
   // read — a rewind past its first word restarts the block, a forward past
   // its last word does nothing.
   var SEEK_SECONDS = 10;
-  // The theme settings sheet's font-size slider is crossnote's own zoom: it
-  // moves in the same 0.1 steps the preview's Zoom In / Zoom Out use, over a
-  // reading range narrower than crossnote's own 0.2–5.
-  var ZOOM_STEP = 0.1;
-  var ZOOM_MIN = 0.6;
-  var ZOOM_MAX = 2;
-  var FALLBACK_BASE_FONT_PX = 16;
-  // How long crossnote's React state and its zoom effect are given to answer
-  // the synthetic ctrl+wheel events before the sheet falls back to setting
-  // the zoom itself.
-  var ZOOM_PROBE_MS = 120;
   var ERROR_DISPLAY_MS = 4000;
   var FINISH_DISPLAY_MS = 4000;
   var HINT_MS = 2500;
   var SPEED_DEBOUNCE_MS = 300;
   var VOLUME_DEBOUNCE_MS = 300;
-  // The low-strain page (featrues/05-eye-strain.spec.md): the two typographic
-  // sliders persist on the same debounce as the speed.
-  var LINE_HEIGHT_DEBOUNCE_MS = 300;
-  var COLUMN_WIDTH_DEBOUNCE_MS = 300;
+  // Eye strain 2 (featrues/07-eye-strain-2/spec.md §5.3): the text size
+  // slider persists on the same debounce as the speed.
+  var TEXT_SIZE_DEBOUNCE_MS = 300;
   // The page's whole state lives on <html>, which crossnote never touches
-  // (05 §4.3): the scheme as an attribute, the two slider values as custom
-  // properties that media/read-aloud-page.css reads.
+  // (05 §4.3): the scheme as an attribute, and three custom properties that
+  // media/read-aloud-page.css reads — the text size in px (unitless), the
+  // line height derived from it, and the measure in em (07 §5.3).
   var PAGE_ATTR = 'data-mpe-ra-page';
+  var PAGE_TEXT_SIZE_PROP = '--mpe-ra-page-text-size';
   var PAGE_LINE_HEIGHT_PROP = '--mpe-ra-page-line-height';
   var PAGE_MEASURE_PROP = '--mpe-ra-page-measure';
+  // The word marker (07 §9): on the preview root, the help sheet and the
+  // sheet's swatch container, next to `data-mpe-ra-theme`.
+  var MARKER_ATTR = 'data-mpe-ra-marker';
+  // Dim while reading (07 §8): the two tier classes on readable blocks.
+  var TIER_NEAR_CLASS = 'mpe-ra-tier-near';
+  var TIER_FAR_CLASS = 'mpe-ra-tier-far';
+  // Follow-the-reading scroll (07 §7.3): a `scroll` event this far from the
+  // position the loop last wrote is somebody else's and suspends the
+  // following.
+  var FOLLOW_OWN_SCROLL_PX = 2;
+  var FOLLOW_CHIP_LABEL = 'Back to the reading';
+  // Panel auto-hide (07 §10): playback with no activity for this long fades
+  // the panel out.
+  var PANEL_IDLE_MS = 3000;
   var GLOBAL_THEME_LABELS = { auto: 'Auto', light: 'Light', dark: 'Dark' };
+  var WORD_MARKER_LABELS = { underline: 'Underline', box: 'Box', off: 'Off' };
   var FONT_DEFAULT_LABEL_PAGE = 'Default \u2014 Atkinson Hyperlegible';
   var FONT_DEFAULT_LABEL_OFF = 'Default \u2014 preview theme';
   var PAGE_OFF_HINT =
@@ -86,8 +91,6 @@
   var READER_GUIDANCE =
     'Match the screen\u2019s brightness to the room; every 20 minutes, look 20 feet away for 20 seconds.';
   var SELECTION_SETTLE_MS = 150;
-  var USER_SCROLL_IDLE_MS = 3000;
-  var PROGRAMMATIC_SCROLL_MS = 1200;
   var GUTTER_MIN_PX = 28;
   // Click to read (F17): wait out the double-click window before starting.
   var CLICK_READ_DELAY_MS = 250;
@@ -188,6 +191,8 @@
       '</svg>',
   };
 
+  // Keys that scroll the document when they reach it (07 §7.3): pressing one
+  // outside a form control or the panel suspends the following.
   var NAV_KEYS = {
     'ArrowUp': true,
     'ArrowDown': true,
@@ -196,6 +201,7 @@
     'Home': true,
     'End': true,
     ' ': true,
+    'Spacebar': true,
   };
 
   // ---------------------------------------------------------------------------
@@ -211,10 +217,12 @@
     modelId: '',
     highlightTheme: core.DEFAULT_HIGHLIGHT_THEME,
     font: core.DEFAULT_PLAYER_FONT,
-    // The low-strain page (05 §4.1, §9.3).
+    // The low-strain page (05 §4.1) and eye strain 2 (07 §15.2).
     globalTheme: core.DEFAULT_GLOBAL_THEME,
-    lineHeight: core.DEFAULT_LINE_HEIGHT,
-    columnWidth: core.DEFAULT_COLUMN_WIDTH,
+    textSize: core.DEFAULT_TEXT_SIZE,
+    wordMarker: core.DEFAULT_WORD_MARKER,
+    dimWhileReading: true,
+    panelAutoHide: true,
     // Help (04-help-module §7.1). `helpAvailable` is false in the web build,
     // where no process can be spawned, and hides the button entirely.
     helpAvailable: false,
@@ -245,8 +253,10 @@
         );
         config.font = core.normalisePlayerFont(parsed.font);
         config.globalTheme = core.normaliseGlobalTheme(parsed.globalTheme);
-        config.lineHeight = core.clampLineHeight(parsed.lineHeight);
-        config.columnWidth = core.clampColumnWidth(parsed.columnWidth);
+        config.textSize = core.clampTextSize(parsed.textSize);
+        config.wordMarker = core.normaliseWordMarker(parsed.wordMarker);
+        config.dimWhileReading = parsed.dimWhileReading !== false;
+        config.panelAutoHide = parsed.panelAutoHide !== false;
         applyHelpConfig(parsed);
       }
     }
@@ -283,6 +293,14 @@
   var barParts = null;
   // The user closed the panel with its × ; it comes back with the next read.
   var panelDismissed = false;
+  // Panel auto-hide (07 §10): the panel has faded out and the progress strip
+  // stands in for it. `pointerOverBar` keeps the countdown from starting
+  // while the pointer rests on the panel.
+  var panelIdle = false;
+  var panelIdleTimer = 0;
+  var pointerOverBar = false;
+  var strip = null;
+  var stripFill = null;
   var floatButton = null;
   var hintElement = null;
 
@@ -291,28 +309,33 @@
   var hintTimer = 0;
   var speedTimer = 0;
   var volumeTimer = 0;
-  var lineHeightTimer = 0;
-  var columnWidthTimer = 0;
+  var textSizeTimer = 0;
   var selectionTimer = 0;
   // The scheme the low-strain page is showing — 'light', 'dark', or null
   // while it is off (05 §4). Kept apart from `config.globalTheme` because
   // `auto` resolves to one of the two and can change under us.
   var pageScheme = null;
+  // The average advance of the face in use, in em (07 §6.2): measured from
+  // a sample passage laid out in the preview root, the default until then.
+  var charEm = core.DEFAULT_CHAR_EM;
 
-  // The preview's zoom, as the theme settings sheet means it to be. It is
-  // driven through crossnote's own ctrl+wheel handler (section 7b), whose
-  // React state settles a tick later, so the sheet keeps the value it asked
-  // for rather than reading the DOM back on every tick of the slider.
-  var zoomIntent = 1;
-  // null until the first change tells us whether crossnote's handler is
-  // there; false means the sheet sets `document.body.style.zoom` itself.
-  var zoomHandled = null;
-  var zoomProbeTimer = 0;
-  // The preview's font size with no zoom, measured once from the root.
-  var baseFontPx = 0;
+  /**
+   * Follow-the-reading scroll (07 §7): `engaged` is false from a manual
+   * scroll until the chip, a play, a skip or a scroll that brings the word
+   * back into the band; `moving` while an ease is under way; `wroteScrollTop`
+   * the last position the loop wrote, so the `scroll` event it causes is
+   * recognised as its own; `container` the scroll container of the read
+   * (`window` for the document, the sheet body for a help read); `reduced`
+   * follows `prefers-reduced-motion`.
+   */
+  var follow = {
+    engaged: true,
+    moving: false,
+    wroteScrollTop: null,
+    container: null,
+    reduced: false,
+  };
 
-  var lastUserScrollAt = 0;
-  var programmaticScrollUntil = 0;
   var floatSelection = null;
   var floatRect = null;
   // Which scope the floating affordance's selection belongs to: the preview
@@ -394,6 +417,12 @@
       spanIndex: 0,
       lastSpan: null,
       rafId: 0,
+      // The pause at a block boundary (07 §11): the timer, when the next
+      // block is due to start, and the chunk waiting behind the gap (−1 for
+      // none) so a pause during the gap resumes with the right chunk.
+      gapTimer: 0,
+      gapDueAt: 0,
+      pendingChunk: -1,
       errorCode: '',
       errorMessage: '',
     };
@@ -621,9 +650,11 @@
   }
 
   /**
-   * Publish the theme and scheme to CSS through attributes on the root — and
-   * on the help sheet, which is the second reading scope and paints the same
-   * pills and spoken-word boxes (04-help-module §5).
+   * Publish the theme, the scheme and the word marker (07 §9.1) to CSS
+   * through attributes on the root — and on the help sheet, which is the
+   * second reading scope and paints the same pills and spoken-word marks
+   * (04-help-module §5) — and the marker on the sheet's swatch container, so
+   * the cards preview it.
    */
   function applyThemeAttributes() {
     if (!root) {
@@ -632,12 +663,20 @@
     var scheme = detectScheme();
     root.setAttribute('data-mpe-ra-theme', config.highlightTheme);
     root.setAttribute('data-mpe-ra-scheme', scheme);
+    root.setAttribute(MARKER_ATTR, config.wordMarker);
     if (barParts && barParts.help) {
       barParts.help.root.setAttribute(
         'data-mpe-ra-theme',
         config.highlightTheme,
       );
       barParts.help.root.setAttribute('data-mpe-ra-scheme', scheme);
+      barParts.help.root.setAttribute(MARKER_ATTR, config.wordMarker);
+    }
+    if (barParts && barParts.sheet) {
+      barParts.sheet.swatchContainer.setAttribute(
+        MARKER_ATTR,
+        config.wordMarker,
+      );
     }
     applyBarScheme();
   }
@@ -646,6 +685,7 @@
     if (root) {
       root.removeAttribute('data-mpe-ra-theme');
       root.removeAttribute('data-mpe-ra-scheme');
+      root.removeAttribute(MARKER_ATTR);
     }
   }
 
@@ -662,13 +702,19 @@
     }
   }
 
+  /** The measure in em of the root: 66 characters at the face's advance (07 §6.4). */
+  function measureValue() {
+    return Math.round(core.MEASURE_CHARS * charEm * 100) / 100 + 'em';
+  }
+
   /**
    * Resolve the Global theme to a scheme and publish it on <html>, with the
-   * two slider values as custom properties (05 §4.3). With `off`, or with
-   * read aloud disabled, the attribute and the properties are removed and
-   * media/read-aloud-page.css matches nothing. Returns true when the scheme
-   * changed, so callers know whether the decoration and the panel must
-   * follow.
+   * three derived values as custom properties (05 §4.3, 07 §5.3): the text
+   * size in px, the line height derived from it, the measure in em. With
+   * `off`, or with read aloud disabled, the attribute and the properties are
+   * removed and media/read-aloud-page.css matches nothing. Returns true when
+   * the scheme changed, so callers know whether the decoration and the panel
+   * must follow.
    */
   function applyPage() {
     var html = document.documentElement;
@@ -684,13 +730,15 @@
     try {
       if (next) {
         html.setAttribute(PAGE_ATTR, next);
+        html.style.setProperty(PAGE_TEXT_SIZE_PROP, String(config.textSize));
         html.style.setProperty(
           PAGE_LINE_HEIGHT_PROP,
-          String(config.lineHeight),
+          String(core.deriveLineHeight(config.textSize)),
         );
-        html.style.setProperty(PAGE_MEASURE_PROP, config.columnWidth + 'ch');
+        html.style.setProperty(PAGE_MEASURE_PROP, measureValue());
       } else {
         html.removeAttribute(PAGE_ATTR);
+        html.style.removeProperty(PAGE_TEXT_SIZE_PROP);
         html.style.removeProperty(PAGE_LINE_HEIGHT_PROP);
         html.style.removeProperty(PAGE_MEASURE_PROP);
       }
@@ -704,6 +752,99 @@
 
   function pageIsOn() {
     return pageScheme !== null;
+  }
+
+  /**
+   * Measure the average advance of the face in use (07 §6.2): a probe inside
+   * the preview root — so it inherits the page's face or the player font
+   * override, and the body size — lays the sample out on one line next to a
+   * 100 em reference, and the ratio of the two widths divides the font size
+   * and any body zoom out. Called after the root attaches, after every font
+   * change and when the Atkinson face arrives (`document.fonts`), never from
+   * a rAF loop. The page is re-applied when the value moved.
+   */
+  function measureCharEm() {
+    if (!root || !root.isConnected) {
+      return false;
+    }
+    var next = charEm;
+    try {
+      mutateSilently(function () {
+        var probe = document.createElement('span');
+        probe.className = 'mpe-ra-ui mpe-ra-probe';
+        probe.setAttribute('aria-hidden', 'true');
+        probe.style.cssText =
+          'position:absolute;visibility:hidden;white-space:nowrap;' +
+          'left:-99999px;top:0;pointer-events:none';
+        var sample = document.createElement('span');
+        sample.textContent = core.MEASURE_SAMPLE;
+        var reference = document.createElement('span');
+        reference.style.cssText = 'display:inline-block;width:100em';
+        probe.appendChild(sample);
+        probe.appendChild(reference);
+        root.appendChild(probe);
+        try {
+          next = core.charEmFrom(
+            sample.getBoundingClientRect().width,
+            reference.getBoundingClientRect().width,
+            core.MEASURE_SAMPLE.length,
+          );
+        } finally {
+          probe.remove();
+        }
+      });
+    } catch (error) {
+      return false;
+    }
+    if (next === charEm) {
+      return false;
+    }
+    charEm = next;
+    applyPage();
+    return true;
+  }
+
+  /**
+   * The Atkinson face arrives with `font-display: swap` after the first
+   * paint; a measurement taken against `system-ui` would be a few percent
+   * off, so the face is measured again once the fonts have loaded.
+   */
+  function watchFonts() {
+    try {
+      var fonts = document.fonts;
+      if (fonts && typeof fonts.addEventListener === 'function') {
+        fonts.addEventListener('loadingdone', function () {
+          measureCharEm();
+        });
+      }
+    } catch (error) {
+      /* no Font Loading API here */
+    }
+  }
+
+  /** `prefers-reduced-motion` (07 §7.2): the follow jumps instead of easing. */
+  function watchReducedMotion() {
+    try {
+      var media =
+        window.matchMedia &&
+        window.matchMedia('(prefers-reduced-motion: reduce)');
+      if (!media) {
+        return;
+      }
+      follow.reduced = !!media.matches;
+      var update = function (event) {
+        follow.reduced = !!(event && typeof event.matches === 'boolean'
+          ? event.matches
+          : media.matches);
+      };
+      if (typeof media.addEventListener === 'function') {
+        media.addEventListener('change', update);
+      } else if (typeof media.addListener === 'function') {
+        media.addListener(update);
+      }
+    } catch (error) {
+      follow.reduced = false;
+    }
   }
 
   /**
@@ -797,6 +938,7 @@
     record.blockEls = [];
     undecorateBlocks(els);
     record.lastSpan = null;
+    clearTiers();
   }
 
   /**
@@ -804,7 +946,8 @@
    * the unsplit text nodes) resolves, then wrap the new word and the
    * characters touching it (core.wrapWord; the word's spans come first).
    * Every DOM call is guarded: a throw would escape the rAF callback and
-   * silently stop the highlight loop for the rest of the read.
+   * silently stop the highlight loop for the rest of the read. Scrolling is
+   * the follow loop's (07 §7), one step per frame, not the paint's.
    */
   function paintSpan(span) {
     clearWordBox();
@@ -823,33 +966,236 @@
       /* a stale map or a detached node must not stop playback */
     }
     record.wordSpans = spans;
-    if (spans.length) {
-      maybeScrollTo(spans[0]);
+  }
+
+  // -------------------------------------- follow-the-reading scroll (07 §7)
+
+  /**
+   * The scroll container of a read (07 §7.6): the sheet body for a help
+   * read — its own scroll element — else the first ancestor of the scope
+   * whose `overflow-y` computes to `auto` or `scroll` *and* that actually
+   * overflows, else `window`. crossnote's preview root is `overflow-y: auto`
+   * without ever scrolling (its height is its content's), and measuring the
+   * word against that box would keep it "inside the band" for ever.
+   */
+  function scrollContainerFor(scope) {
+    if (!scope) {
+      return window;
+    }
+    if (scope === helpBody()) {
+      return scope;
+    }
+    var el = scope;
+    while (el && el !== document.body && el !== document.documentElement) {
+      var overflow = '';
+      try {
+        overflow = window.getComputedStyle(el).overflowY;
+      } catch (error) {
+        overflow = '';
+      }
+      if (
+        (overflow === 'auto' || overflow === 'scroll') &&
+        el.scrollHeight > el.clientHeight + 1
+      ) {
+        return el;
+      }
+      el = el.parentElement;
+    }
+    return window;
+  }
+
+  function followContainer() {
+    return follow.container || window;
+  }
+
+  function readScrollTop(container) {
+    if (container === window) {
+      var top = window.scrollY;
+      if (typeof top !== 'number') {
+        top = window.pageYOffset;
+      }
+      if (typeof top !== 'number' && document.documentElement) {
+        top = document.documentElement.scrollTop;
+      }
+      return typeof top === 'number' && isFinite(top) ? top : 0;
+    }
+    return container.scrollTop || 0;
+  }
+
+  function writeScrollTop(container, value) {
+    try {
+      if (container === window) {
+        window.scrollTo(window.scrollX || 0, value);
+      } else {
+        container.scrollTop = value;
+      }
+    } catch (error) {
+      /* a container that cannot scroll */
     }
   }
 
-  function maybeScrollTo(el) {
-    if (Date.now() - lastUserScrollAt < USER_SCROLL_IDLE_MS) {
-      return;
+  /**
+   * The geometry of the spoken word against its container (07 §7.1): the
+   * word's top relative to the container's visible top, the visible height
+   * and the current scroll position; null when there is no word on screen.
+   */
+  function followGeometry() {
+    var spans = record.wordSpans;
+    if (!spans || !spans.length) {
+      return null;
     }
     var rect;
     try {
-      rect = el.getBoundingClientRect();
+      rect = spans[0].getBoundingClientRect();
     } catch (error) {
-      return;
+      return null;
     }
     if (!rect || (rect.width === 0 && rect.height === 0)) {
+      return null;
+    }
+    var container = followContainer();
+    var containerTop = 0;
+    var height = 0;
+    if (container === window) {
+      height = window.innerHeight || document.documentElement.clientHeight;
+    } else {
+      try {
+        containerTop = container.getBoundingClientRect().top;
+      } catch (error) {
+        containerTop = 0;
+      }
+      height = container.clientHeight;
+    }
+    if (!(height > 0)) {
+      return null;
+    }
+    return {
+      container: container,
+      wordTop: rect.top - containerTop,
+      viewportHeight: height,
+      scrollTop: readScrollTop(container),
+    };
+  }
+
+  function wordInsideBand(geometry) {
+    return (
+      geometry.wordTop >= core.FOLLOW_BAND_TOP * geometry.viewportHeight &&
+      geometry.wordTop <= core.FOLLOW_BAND_BOTTOM * geometry.viewportHeight
+    );
+  }
+
+  /**
+   * One frame of the following (07 §7.2): one rect read, one scroll write,
+   * only while playing and engaged.
+   */
+  function followFrame() {
+    if (!follow.engaged || record.state !== 'playing') {
       return;
     }
-    var viewport = window.innerHeight || document.documentElement.clientHeight;
-    if (rect.top >= 0 && rect.bottom <= viewport) {
+    var geometry = followGeometry();
+    if (!geometry) {
       return;
     }
-    if (!el.scrollIntoView) {
+    var step = core.followStep({
+      wordTop: geometry.wordTop,
+      viewportHeight: geometry.viewportHeight,
+      scrollTop: geometry.scrollTop,
+      anchor: core.FOLLOW_ANCHOR,
+      bandTop: core.FOLLOW_BAND_TOP,
+      bandBottom: core.FOLLOW_BAND_BOTTOM,
+      ease: core.FOLLOW_EASE,
+      settlePx: core.FOLLOW_SETTLE_PX,
+      reduced: follow.reduced,
+      moving: follow.moving,
+    });
+    follow.moving = step.moving;
+    if (step.scrollTop === geometry.scrollTop) {
       return;
     }
-    programmaticScrollUntil = Date.now() + PROGRAMMATIC_SCROLL_MS;
-    el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    // Remembered before the write, for an engine that fires `scroll`
+    // synchronously, and corrected after it to what the container actually
+    // took: at the end of the document the engine clamps the write, and the
+    // event reports the clamped position, which is still the loop's own.
+    follow.wroteScrollTop = step.scrollTop;
+    writeScrollTop(geometry.container, step.scrollTop);
+    follow.wroteScrollTop = readScrollTop(geometry.container);
+    if (follow.wroteScrollTop === geometry.scrollTop) {
+      // Nothing moved: the container is at its limit, the ease is over.
+      follow.moving = false;
+    }
+  }
+
+  /** Re-engage the following with an ease to the anchor (07 §7.4). */
+  function engageFollow() {
+    follow.engaged = true;
+    follow.moving = false;
+    syncChip();
+  }
+
+  /** A manual scroll: the page stays where the reader put it (07 §7.3). */
+  function suspendFollow() {
+    if (!follow.engaged) {
+      return;
+    }
+    follow.engaged = false;
+    follow.moving = false;
+    syncChip();
+  }
+
+  /**
+   * A `scroll` event of the container: the loop's own — within
+   * FOLLOW_OWN_SCROLL_PX of the position it last wrote — is ignored; any
+   * other suspends the following (crossnote's editor-to-preview sync, an
+   * anchor jump, a scrollbar drag). While suspended, a scroll that brings the
+   * spoken word back inside the band re-engages silently (07 §7.4): the page
+   * is already where the loop would keep it, so nothing moves against the
+   * reader.
+   */
+  function onContainerScroll(container) {
+    if (record.state === 'idle' || container !== followContainer()) {
+      return;
+    }
+    var position = readScrollTop(container);
+    if (follow.engaged) {
+      if (
+        follow.wroteScrollTop !== null &&
+        Math.abs(position - follow.wroteScrollTop) <= FOLLOW_OWN_SCROLL_PX
+      ) {
+        return;
+      }
+      suspendFollow();
+      return;
+    }
+    if (record.state !== 'playing') {
+      return;
+    }
+    var geometry = followGeometry();
+    if (geometry && wordInsideBand(geometry)) {
+      follow.wroteScrollTop = position;
+      engageFollow();
+    }
+  }
+
+  /** Whether a key press is the document's to scroll with (07 §7.3). */
+  function isScrollKey(event) {
+    if (!NAV_KEYS[event.key]) {
+      return false;
+    }
+    var target = event.target;
+    if (!target || target.nodeType !== 1) {
+      return true;
+    }
+    var tag = target.tagName;
+    if (
+      tag === 'INPUT' ||
+      tag === 'SELECT' ||
+      tag === 'TEXTAREA' ||
+      tag === 'BUTTON' ||
+      target.isContentEditable
+    ) {
+      return false;
+    }
+    return !(target.closest && target.closest('.mpe-ra-bar'));
   }
 
   // ---------------------------------------------------------------------------
@@ -924,9 +1270,9 @@
   }
 
   /**
-   * The theme settings sheet (`featrues/control2.png`): the player font, the
-   * player font size — which is the preview's own zoom — and the five
-   * highlight palettes. "Global theme" is deliberately not built yet.
+   * The theme settings sheet (`featrues/control2.png`, 07 §14): the Global
+   * theme, the player font, the text size (07 §5), the word marker (07 §9)
+   * and the five highlight palettes, then Reset and the reader guidance.
    */
   function makeSheet() {
     var sheet = document.createElement('div');
@@ -997,6 +1343,8 @@
     }
     fontLabel.appendChild(fontSelect);
 
+    // Text size (07 §5.6): one slider, 16–28 px, from which the line height,
+    // the measure and the heading sizes derive.
     var sizeLabel = document.createElement('label');
     sizeLabel.className = 'mpe-ra-sheet-label mpe-ra-sheet-size-label';
     var sizeText = document.createTextNode('');
@@ -1005,40 +1353,34 @@
     sizeRange.className =
       'mpe-ra-ui mpe-ra-pop-range mpe-ra-sheet-range mpe-ra-sheet-size';
     sizeRange.type = 'range';
-    sizeRange.min = String(ZOOM_MIN);
-    sizeRange.max = String(ZOOM_MAX);
-    sizeRange.step = String(ZOOM_STEP);
-    sizeRange.setAttribute('aria-label', 'Player font size');
+    sizeRange.min = String(core.TEXT_SIZE_MIN);
+    sizeRange.max = String(core.TEXT_SIZE_MAX);
+    sizeRange.step = String(core.TEXT_SIZE_STEP);
+    sizeRange.setAttribute('aria-label', 'Text size');
     sizeLabel.appendChild(sizeRange);
 
-    // Line height and column width (05 §9.3), built like the size slider.
-    var lineHeightLabel = document.createElement('label');
-    lineHeightLabel.className = 'mpe-ra-sheet-label';
-    var lineHeightText = document.createTextNode('');
-    lineHeightLabel.appendChild(lineHeightText);
-    var lineHeightRange = document.createElement('input');
-    lineHeightRange.className =
-      'mpe-ra-ui mpe-ra-pop-range mpe-ra-sheet-range mpe-ra-sheet-line-height';
-    lineHeightRange.type = 'range';
-    lineHeightRange.min = String(core.LINE_HEIGHT_MIN);
-    lineHeightRange.max = String(core.LINE_HEIGHT_MAX);
-    lineHeightRange.step = String(core.LINE_HEIGHT_STEP);
-    lineHeightRange.setAttribute('aria-label', 'Line height');
-    lineHeightLabel.appendChild(lineHeightRange);
-
-    var widthLabel = document.createElement('label');
-    widthLabel.className = 'mpe-ra-sheet-label';
-    var widthText = document.createTextNode('');
-    widthLabel.appendChild(widthText);
-    var widthRange = document.createElement('input');
-    widthRange.className =
-      'mpe-ra-ui mpe-ra-pop-range mpe-ra-sheet-range mpe-ra-sheet-column-width';
-    widthRange.type = 'range';
-    widthRange.min = String(core.COLUMN_WIDTH_MIN);
-    widthRange.max = String(core.COLUMN_WIDTH_MAX);
-    widthRange.step = String(core.COLUMN_WIDTH_STEP);
-    widthRange.setAttribute('aria-label', 'Column width');
-    widthLabel.appendChild(widthRange);
+    // Word marker (07 §9.3): a segmented control like the Global theme's.
+    var markerLabel = document.createElement('span');
+    markerLabel.className = 'mpe-ra-sheet-label';
+    markerLabel.textContent = 'Word marker';
+    var markerSeg = document.createElement('div');
+    markerSeg.className = 'mpe-ra-seg mpe-ra-seg-marker';
+    markerSeg.setAttribute('role', 'radiogroup');
+    markerSeg.setAttribute('aria-label', 'Word marker');
+    var markerSegments = Object.create(null);
+    for (var m = 0; m < core.WORD_MARKERS.length; m++) {
+      var marker = core.WORD_MARKERS[m];
+      var markerButton = document.createElement('button');
+      markerButton.type = 'button';
+      markerButton.className = 'mpe-ra-ui mpe-ra-seg-btn';
+      markerButton.setAttribute('data-mpe-ra-action', 'wordMarker');
+      markerButton.setAttribute('data-mpe-ra-marker-choice', marker);
+      markerButton.setAttribute('role', 'radio');
+      markerButton.setAttribute('aria-checked', 'false');
+      markerButton.textContent = WORD_MARKER_LABELS[marker] || marker;
+      markerSegments[marker] = markerButton;
+      markerSeg.appendChild(markerButton);
+    }
 
     var themeLabel = document.createElement('span');
     themeLabel.className = 'mpe-ra-sheet-label';
@@ -1048,6 +1390,8 @@
     swatches.className = 'mpe-ra-sheet-swatches';
     swatches.setAttribute('role', 'radiogroup');
     swatches.setAttribute('aria-label', 'Player highlight theme');
+    // The cards paint the chosen marker through this attribute (07 §9.3).
+    swatches.setAttribute(MARKER_ATTR, config.wordMarker);
     var swatchByTheme = Object.create(null);
     for (var t = 0; t < core.HIGHLIGHT_THEMES.length; t++) {
       var theme = core.HIGHLIGHT_THEMES[t];
@@ -1076,8 +1420,8 @@
     sheet.appendChild(pageHint);
     sheet.appendChild(fontLabel);
     sheet.appendChild(sizeLabel);
-    sheet.appendChild(lineHeightLabel);
-    sheet.appendChild(widthLabel);
+    sheet.appendChild(markerLabel);
+    sheet.appendChild(markerSeg);
     sheet.appendChild(themeLabel);
     sheet.appendChild(swatches);
     sheet.appendChild(footer);
@@ -1090,10 +1434,8 @@
       fontDefaultOption: fontSelect.options[0],
       sizeRange: sizeRange,
       sizeText: sizeText,
-      lineHeightRange: lineHeightRange,
-      lineHeightText: lineHeightText,
-      widthRange: widthRange,
-      widthText: widthText,
+      markerSegments: markerSegments,
+      swatchContainer: swatches,
       swatches: swatchByTheme,
       reset: reset,
     };
@@ -1297,6 +1639,11 @@
     status.setAttribute('role', 'status');
     status.setAttribute('aria-live', 'polite');
 
+    // _Back to the reading_ (07 §7.5): the status slot's other occupant.
+    var chip = makeButton('follow', FOLLOW_CHIP_LABEL, 'mpe-ra-bar-chip');
+    chip.textContent = FOLLOW_CHIP_LABEL;
+    chip.hidden = true;
+
     var volumePop = makePopover('mpe-ra-pop-volume', 'Volume', 0, 1, 0.05);
     var speedPop = makePopover(
       'mpe-ra-pop-speed',
@@ -1374,6 +1721,7 @@
 
     bar.appendChild(progress);
     bar.appendChild(status);
+    bar.appendChild(chip);
     bar.appendChild(volumePop.root);
     bar.appendChild(speedPop.root);
     bar.appendChild(sheet.root);
@@ -1388,10 +1736,22 @@
     bar.appendChild(close);
     document.body.appendChild(bar);
 
+    // The idle progress strip (07 §10.1): fixed at the bottom edge of the
+    // viewport, in <body> beside the panel, shown only while the panel is
+    // faded out.
+    strip = document.createElement('div');
+    strip.className = 'mpe-ra-strip mpe-ra-ui ' + UNZOOM_CLASS;
+    strip.setAttribute('aria-hidden', 'true');
+    strip.hidden = true;
+    stripFill = document.createElement('i');
+    strip.appendChild(stripFill);
+    document.body.appendChild(strip);
+
     barParts = {
       progress: progress,
       progressFill: progressFill,
       status: status,
+      chip: chip,
       volume: volumeButton,
       volumePop: volumePop,
       theme: themeButton,
@@ -1416,21 +1776,22 @@
       applyFont(sheet.font.value, true);
     });
     sheet.sizeRange.addEventListener('input', function () {
-      applyZoom(parseFloat(sheet.sizeRange.value), sheet.sizeRange);
+      applyTextSize(parseFloat(sheet.sizeRange.value), true, sheet.sizeRange);
     });
-    sheet.lineHeightRange.addEventListener('input', function () {
-      applyLineHeight(
-        parseFloat(sheet.lineHeightRange.value),
-        true,
-        sheet.lineHeightRange,
-      );
+    // Auto-hide (07 §10.1): the panel never fades under the pointer or with
+    // focus inside it; leaving it starts the countdown again.
+    bar.addEventListener('pointerenter', function () {
+      pointerOverBar = true;
+      touchPanel();
     });
-    sheet.widthRange.addEventListener('input', function () {
-      applyColumnWidth(
-        parseFloat(sheet.widthRange.value),
-        true,
-        sheet.widthRange,
-      );
+    bar.addEventListener('pointerleave', function () {
+      pointerOverBar = false;
+      armPanelIdle();
+    });
+    bar.addEventListener('focusin', touchPanel);
+    bar.addEventListener('focusout', function () {
+      // Let the focus land before deciding whether it left the panel.
+      setTimeout(armPanelIdle, 0);
     });
     helpSheet.input.addEventListener('keydown', function (event) {
       if (event.key === 'Enter') {
@@ -1460,6 +1821,9 @@
       return;
     }
     bar.setAttribute('data-mpe-ra-scheme', scheme);
+    if (strip) {
+      strip.setAttribute('data-mpe-ra-scheme', scheme);
+    }
     if (!barParts || !barParts.sheet) {
       return;
     }
@@ -1571,6 +1935,8 @@
     syncHelpButton();
     updateTimeDisplay();
     applyCanvasClasses();
+    syncChip();
+    armPanelIdle();
   }
 
   function showBar(statusText) {
@@ -1578,7 +1944,111 @@
     finishTimer = clearTimer(finishTimer);
     bar.hidden = !barVisible();
     barParts.status.textContent = statusText || '';
+    if (statusText) {
+      // A message — Loading…, Paused, Finished, an error — brings the panel
+      // back (07 §10.1).
+      wakePanel();
+    }
     renderBar();
+  }
+
+  /**
+   * _Back to the reading_ (07 §7.5): shown while a read is on, the following
+   * is suspended and the status slot is free; the messages win the slot.
+   */
+  function syncChip() {
+    if (!barParts || !barParts.chip) {
+      return;
+    }
+    var show =
+      record.state !== 'idle' &&
+      !follow.engaged &&
+      !barParts.status.textContent;
+    if (barParts.chip.hidden === !show) {
+      return;
+    }
+    barParts.chip.hidden = !show;
+  }
+
+  // ------------------------------------------------ panel auto-hide (07 §10)
+
+  /**
+   * Keyboard focus inside the panel (07 §10.1): a control reached with Tab
+   * keeps the panel on screen. A button the mouse clicked is focused too,
+   * but not `:focus-visible`, and must not pin the panel for the rest of
+   * the read; where the engine has no `:focus-visible`, any focus counts.
+   */
+  function keyboardFocusInBar() {
+    var active = document.activeElement;
+    if (!active || !bar || active === document.body || !bar.contains(active)) {
+      return false;
+    }
+    try {
+      return active.matches(':focus-visible');
+    } catch (error) {
+      return true;
+    }
+  }
+
+  /** Whether the panel may fade right now. */
+  function panelIdleEligible() {
+    return (
+      config.panelAutoHide &&
+      record.state === 'playing' &&
+      barVisible() &&
+      !!bar &&
+      !bar.hidden &&
+      !anyPopoverOpen() &&
+      !help.open &&
+      !pointerOverBar &&
+      !keyboardFocusInBar()
+    );
+  }
+
+  function setPanelIdle(idle) {
+    if (panelIdle === idle) {
+      return;
+    }
+    panelIdle = idle;
+    if (bar) {
+      bar.classList.toggle('mpe-ra-bar-idle', idle);
+    }
+    if (strip) {
+      strip.hidden = !idle;
+    }
+  }
+
+  /** Bring the panel back and stop the countdown. */
+  function wakePanel() {
+    panelIdleTimer = clearTimer(panelIdleTimer);
+    setPanelIdle(false);
+  }
+
+  /**
+   * Keep the countdown running while the panel may fade, without waking a
+   * panel that has already faded: called on every render, so a chunk
+   * hand-off does not pop the panel back.
+   */
+  function armPanelIdle() {
+    if (!panelIdleEligible()) {
+      wakePanel();
+      return;
+    }
+    if (panelIdle || panelIdleTimer) {
+      return;
+    }
+    panelIdleTimer = setTimeout(function () {
+      panelIdleTimer = 0;
+      if (panelIdleEligible()) {
+        setPanelIdle(true);
+      }
+    }, PANEL_IDLE_MS);
+  }
+
+  /** Activity: the panel comes back and the countdown restarts (07 §10.1). */
+  function touchPanel() {
+    wakePanel();
+    armPanelIdle();
   }
 
   /**
@@ -1601,10 +2071,12 @@
   function dismissBar() {
     finishTimer = clearTimer(finishTimer);
     closePopovers();
+    wakePanel();
     if (bar) {
       bar.hidden = true;
       if (barParts) {
         barParts.status.textContent = '';
+        barParts.chip.hidden = true;
       }
     }
     applyCanvasClasses();
@@ -1649,9 +2121,15 @@
     }
     if (record.current >= 0 && record.chunks[record.current]) {
       var playing = record.chunks[record.current];
+      // During a block gap (07 §11) the finished chunk has handed its
+      // element back: the read stands at its end.
       elapsed =
         record.offsets[record.current] +
-        (playing.slot ? playing.slot.el.currentTime : 0);
+        (record.gapTimer
+          ? chunkLength(playing)
+          : playing.slot
+            ? playing.slot.el.currentTime
+            : 0);
     }
     var text = formatTime(elapsed) + ' / ' + formatTime(total);
     if (text !== lastTimeText) {
@@ -1663,6 +2141,9 @@
     if (percent !== lastProgress) {
       lastProgress = percent;
       barParts.progressFill.style.width = percent + '%';
+      if (stripFill) {
+        stripFill.style.width = percent + '%';
+      }
     }
     syncSeekButtons();
   }
@@ -1741,6 +2222,7 @@
       found.pop.hidden = true;
       found.button.setAttribute('aria-expanded', 'false');
     }
+    armPanelIdle();
   }
 
   function togglePopover(name) {
@@ -1754,178 +2236,59 @@
     found.button.setAttribute('aria-expanded', open ? 'true' : 'false');
     if (open) {
       if (name === 'theme') {
-        // Somebody may have zoomed from crossnote's own menu since the sheet
-        // was last open.
-        adoptZoomFromPage();
         syncSheet();
       }
       if (lastGestureWasKey && found.focus && found.focus.focus) {
         found.focus.focus();
       }
     }
+    // An open sheet or popover keeps the panel on screen (07 §10.1).
+    touchPanel();
   }
 
   // ------------------------------------------------ 7b. Theme settings
 
   /**
-   * The zoom the page is actually on, from `document.body.style.zoom` —
-   * which is where crossnote's zoom effect writes it. 1 when it has never
-   * been set, or when the engine does not support the property.
+   * The player font: an override for the preview theme's own family. A new
+   * face has a new average advance, so the measure is taken again (07 §6.2).
    */
-  function pageZoom() {
-    var text = '';
-    try {
-      text = document.body.style.zoom || '';
-    } catch (error) {
-      text = '';
-    }
-    var raw = parseFloat(text);
-    // CSSOM may hand a `zoom` back as a percentage.
-    if (text.charAt(text.length - 1) === '%') {
-      raw /= 100;
-    }
-    return isFinite(raw) && raw > 0 ? raw : 1;
-  }
-
-  function roundZoom(value) {
-    return Math.round(value * 100) / 100;
-  }
-
-  function clampZoom(value) {
-    if (typeof value !== 'number' || !isFinite(value)) {
-      return 1;
-    }
-    return roundZoom(Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, value)));
-  }
-
-  /** Follow a zoom the reader made from crossnote's own menu or ctrl+wheel. */
-  function adoptZoomFromPage() {
-    if (zoomHandled === false) {
-      return;
-    }
-    var live = roundZoom(pageZoom());
-    if (Math.abs(live - zoomIntent) > 0.001) {
-      zoomIntent = live;
-    }
-  }
-
-  /**
-   * The preview's own font size, with no zoom on it — what the sheet's label
-   * multiplies by the zoom to name a size in pixels.
-   *
-   * Measured again on every read while the page is at zoom 1, so a preview
-   * theme that arrives after the player did is picked up, and frozen at the
-   * last such value while the page is zoomed: engines disagree over whether
-   * a computed font size carries the body zoom, and at zoom 1 they cannot.
-   */
-  function baseFontSize() {
-    if (pageZoom() === 1) {
-      var measured = NaN;
-      try {
-        measured = parseFloat(
-          window.getComputedStyle(root || document.body).fontSize,
-        );
-      } catch (error) {
-        measured = NaN;
-      }
-      if (isFinite(measured) && measured > 0) {
-        baseFontPx = measured;
-      }
-    }
-    return baseFontPx > 0 ? baseFontPx : FALLBACK_BASE_FONT_PX;
-  }
-
-  /**
-   * Zoom the preview to `level`, the same 0.1 steps as crossnote's Zoom In
-   * and Zoom Out: a synthetic ctrl+wheel event per step, which crossnote's
-   * own capture-phase handler turns into its `zoomLevel` state. Going
-   * through crossnote rather than writing `document.body.style.zoom`
-   * directly is what keeps the panel — and the context menu, and crossnote's
-   * own "Zoom (110%)" label — in step with the text.
-   *
-   * `from` is the slider the value came from, if any (see syncSpeedControls).
-   */
-  function applyZoom(level, from) {
-    var target = clampZoom(level);
-    var steps = Math.round((target - zoomIntent) / ZOOM_STEP);
-    zoomIntent = target;
-    syncSheet(from);
-    if (!steps) {
-      return;
-    }
-    if (zoomHandled !== false) {
-      for (var i = 0; i < Math.abs(steps); i++) {
-        dispatchZoomWheel(steps > 0);
-      }
-      probeZoom();
-      return;
-    }
-    applyZoomDirectly(target);
-  }
-
-  function dispatchZoomWheel(zoomIn) {
-    try {
-      document.dispatchEvent(
-        new WheelEvent('wheel', {
-          bubbles: true,
-          cancelable: true,
-          ctrlKey: true,
-          deltaY: zoomIn ? -120 : 120,
-        }),
-      );
-    } catch (error) {
-      zoomHandled = false;
-    }
-  }
-
-  /**
-   * Once, after the first change: did crossnote take the wheel events? If it
-   * did not — no crossnote on the page, or a build without the handler — the
-   * sheet keeps the zoom itself from here on.
-   */
-  function probeZoom() {
-    if (zoomHandled !== null || zoomProbeTimer) {
-      return;
-    }
-    zoomProbeTimer = setTimeout(function () {
-      zoomProbeTimer = 0;
-      if (zoomHandled !== null) {
-        return;
-      }
-      if (Math.abs(roundZoom(pageZoom()) - zoomIntent) < 0.001) {
-        zoomHandled = true;
-        return;
-      }
-      zoomHandled = false;
-      applyZoomDirectly(zoomIntent);
-    }, ZOOM_PROBE_MS);
-  }
-
-  /**
-   * The fallback: what crossnote's zoom effect does, including dividing the
-   * zoom out again on the elements that must keep their size on screen (the
-   * panel carries `fixed` for exactly that reason).
-   */
-  function applyZoomDirectly(level) {
-    try {
-      document.body.style.zoom = String(level);
-      var inverse = level === 1 ? '' : String(1 / level);
-      var fixed = document.querySelectorAll('.fixed, .contexify');
-      for (var i = 0; i < fixed.length; i++) {
-        fixed[i].style.zoom = inverse;
-      }
-    } catch (error) {
-      /* an engine without `zoom`: the sheet's label is still honest */
-    }
-  }
-
-  /** The player font: an override for the preview theme's own family. */
   function applyFont(value, persist) {
     config.font = core.normalisePlayerFont(value);
     applyFontToRoot();
+    measureCharEm();
     syncSheet();
     if (persist) {
       post('readAloudSetFont', [config.font]);
+    }
+  }
+
+  /**
+   * The text size slider (07 §5.3): the page follows at once — the line
+   * height and the measure derive from it in applyPage — and the host
+   * persists the value on the speed's debounce; its broadcast brings every
+   * other preview along. `from` is the slider the value came from, if any.
+   */
+  function applyTextSize(value, persist, from) {
+    config.textSize = core.clampTextSize(value);
+    applyPage();
+    syncSheet(from);
+    if (!persist) {
+      return;
+    }
+    textSizeTimer = clearTimer(textSizeTimer);
+    textSizeTimer = setTimeout(function () {
+      textSizeTimer = 0;
+      post('readAloudSetTextSize', [config.textSize]);
+    }, TEXT_SIZE_DEBOUNCE_MS);
+  }
+
+  /** The word marker (07 §9.3): applied at once, persisted through the host. */
+  function applyWordMarker(value, persist) {
+    config.wordMarker = core.normaliseWordMarker(value);
+    applyThemeAttributes();
+    syncSheet();
+    if (persist) {
+      post('readAloudSetWordMarker', [config.wordMarker]);
     }
   }
 
@@ -1962,45 +2325,15 @@
     }
   }
 
-  /** The line height slider (05 §9.3): reflows the column only. */
-  function applyLineHeight(value, persist, from) {
-    config.lineHeight = core.clampLineHeight(value);
-    applyPage();
-    syncSheet(from);
-    if (!persist) {
-      return;
-    }
-    lineHeightTimer = clearTimer(lineHeightTimer);
-    lineHeightTimer = setTimeout(function () {
-      lineHeightTimer = 0;
-      post('readAloudSetLineHeight', [config.lineHeight]);
-    }, LINE_HEIGHT_DEBOUNCE_MS);
-  }
-
-  /** The column width slider (05 §9.3). */
-  function applyColumnWidth(value, persist, from) {
-    config.columnWidth = core.clampColumnWidth(value);
-    applyPage();
-    syncSheet(from);
-    if (!persist) {
-      return;
-    }
-    columnWidthTimer = clearTimer(columnWidthTimer);
-    columnWidthTimer = setTimeout(function () {
-      columnWidthTimer = 0;
-      post('readAloudSetColumnWidth', [config.columnWidth]);
-    }, COLUMN_WIDTH_DEBOUNCE_MS);
-  }
-
   /**
-   * Reset page settings (05 §9.4): the host clears the four page settings
-   * and its broadcast restores the sheet; the zoom is not a setting, so the
-   * sheet puts it back itself. The highlight palette, speed and volume are
-   * player preferences and are left alone.
+   * Reset page settings (05 §9.4, 07 §14): the host clears the four page
+   * settings — the Global theme, the text size, the font, the word marker —
+   * and its broadcast restores the sheet. The highlight palette, speed,
+   * volume, dimming and auto-hide are player preferences and are left alone;
+   * crossnote's zoom is no longer a sheet control and is not touched.
    */
   function resetPage() {
     post('readAloudResetPage', []);
-    applyZoom(1);
   }
 
   /** The highlight palette: applied at once, persisted through the host. */
@@ -2013,7 +2346,7 @@
     }
   }
 
-  /** Every control of the sheet, from `config` and `zoomIntent`. */
+  /** Every control of the sheet, from `config`. */
   function syncSheet(from) {
     if (!barParts || !barParts.sheet) {
       return;
@@ -2021,7 +2354,7 @@
     var sheet = barParts.sheet;
     var on = pageIsOn();
     // Global theme: under `off` no segment is checked, the hint shows and
-    // the two page sliders are disabled (05 §9.1).
+    // the text size slider is disabled (05 §9.1, 07 §5.6).
     for (var g = 0; g < core.GLOBAL_THEMES.length; g++) {
       var choice = core.GLOBAL_THEMES[g];
       if (sheet.segments[choice]) {
@@ -2040,47 +2373,31 @@
     if (sheet.font.value !== config.font) {
       sheet.font.value = config.font;
     }
-    sheet.lineHeightText.data = 'Line height: ' + config.lineHeight;
-    sheet.lineHeightRange.setAttribute(
-      'aria-valuetext',
-      'line height ' + config.lineHeight,
-    );
-    if (sheet.lineHeightRange !== from) {
-      sheet.lineHeightRange.value = String(config.lineHeight);
-    }
-    setRangeFill(
-      sheet.lineHeightRange,
-      (config.lineHeight - core.LINE_HEIGHT_MIN) /
-        (core.LINE_HEIGHT_MAX - core.LINE_HEIGHT_MIN),
-    );
-    sheet.lineHeightRange.disabled = !on;
-    sheet.widthText.data = 'Column width: ' + config.columnWidth + ' ch';
-    sheet.widthRange.setAttribute(
-      'aria-valuetext',
-      config.columnWidth + ' characters',
-    );
-    if (sheet.widthRange !== from) {
-      sheet.widthRange.value = String(config.columnWidth);
-    }
-    setRangeFill(
-      sheet.widthRange,
-      (config.columnWidth - core.COLUMN_WIDTH_MIN) /
-        (core.COLUMN_WIDTH_MAX - core.COLUMN_WIDTH_MIN),
-    );
-    sheet.widthRange.disabled = !on;
-    var px = Math.round(baseFontSize() * zoomIntent);
-    sheet.sizeText.data = 'Player font size: ' + px + 'px';
-    sheet.sizeRange.setAttribute(
-      'aria-valuetext',
-      px + ' pixels, ' + Math.round(zoomIntent * 100) + ' percent',
-    );
+    // Text size (07 §5.6): the label shows the value even while disabled.
+    sheet.sizeText.data = 'Text size: ' + config.textSize + ' px';
+    sheet.sizeRange.setAttribute('aria-valuetext', config.textSize + ' pixels');
     if (sheet.sizeRange !== from) {
-      sheet.sizeRange.value = String(zoomIntent);
+      sheet.sizeRange.value = String(config.textSize);
     }
     setRangeFill(
       sheet.sizeRange,
-      (zoomIntent - ZOOM_MIN) / (ZOOM_MAX - ZOOM_MIN),
+      (config.textSize - core.TEXT_SIZE_MIN) /
+        (core.TEXT_SIZE_MAX - core.TEXT_SIZE_MIN),
     );
+    sheet.sizeRange.disabled = !on;
+    // Word marker (07 §9.3): not disabled under `off`; it needs no page.
+    for (var w = 0; w < core.WORD_MARKERS.length; w++) {
+      var marker = core.WORD_MARKERS[w];
+      if (sheet.markerSegments[marker]) {
+        sheet.markerSegments[marker].setAttribute(
+          'aria-checked',
+          marker === config.wordMarker ? 'true' : 'false',
+        );
+      }
+    }
+    if (sheet.swatchContainer.getAttribute(MARKER_ATTR) !== config.wordMarker) {
+      sheet.swatchContainer.setAttribute(MARKER_ATTR, config.wordMarker);
+    }
     for (var i = 0; i < core.HIGHLIGHT_THEMES.length; i++) {
       var theme = core.HIGHLIGHT_THEMES[i];
       sheet.swatches[theme].setAttribute(
@@ -2499,6 +2816,7 @@
     setHelpBodyHtml('');
     syncHelpSheet();
     syncHelpButton();
+    armPanelIdle();
     if (barParts && barParts.helpButton && !barParts.helpButton.hidden) {
       try {
         barParts.helpButton.focus();
@@ -3107,10 +3425,96 @@
     applyFontToRoot();
     applyGutter();
     rebindAfterRender();
+    // The registry was rebuilt: the tier classes go on the new elements
+    // (07 §8.4), or are cleared if the rebind ended the read.
+    applyTiers();
     // A re-render can take the paused block with it, which is what decides
     // whether Resume is still on offer (04-help-module §4 step 6).
     syncHelpSheet();
     syncHelpButton();
+  }
+
+  // ------------------------------------------- dim while reading (07 §8)
+
+  /**
+   * Put the tier classes on every readable block of the read's scope (07
+   * §8.1): none on the block being read (a selection read's blocks all count
+   * as active), `near` on the read's next block, `far` on every other. Only
+   * the registry's blocks are touched, so skipped content — code, diagrams,
+   * maths, images, tables in a continuous read — never carries a class.
+   * Cleared when the feature or the page is off, and by
+   * clearReadingDecoration when the read ends.
+   */
+  function applyTiers() {
+    var scope = record.scope;
+    if (
+      !scope ||
+      record.state === 'idle' ||
+      record.state === 'error' ||
+      !config.dimWhileReading ||
+      !pageIsOn()
+    ) {
+      clearTiers();
+      return;
+    }
+    var list = blocksIn(scope);
+    var activeEls = record.blockEls.length
+      ? record.blockEls
+      : record.blockEl
+        ? [record.blockEl]
+        : [];
+    var nextBlock = record.readBlocks[record.blockIndex + 1];
+    var nextEl = nextBlock && !nextBlock.missing ? nextBlock.el : null;
+    var activeIndex = -1;
+    var nextIndex = -1;
+    for (var i = 0; i < list.length; i++) {
+      if (activeEls.indexOf(list[i].el) >= 0) {
+        if (activeIndex < 0) {
+          activeIndex = i;
+        }
+      } else if (list[i].el === nextEl) {
+        nextIndex = i;
+      }
+    }
+    for (var j = 0; j < list.length; j++) {
+      var el = list[j].el;
+      var tier =
+        activeEls.indexOf(el) >= 0
+          ? 'active'
+          : core.tierFor(j, activeIndex, nextIndex);
+      setTier(el, tier);
+    }
+    // A scope's stale classes from an earlier read of the other scope.
+    var other = scope === root ? helpBody() : root;
+    if (other) {
+      clearTiersIn(other);
+    }
+  }
+
+  function setTier(el, tier) {
+    if (!el || !el.classList) {
+      return;
+    }
+    el.classList.toggle(TIER_NEAR_CLASS, tier === 'near');
+    el.classList.toggle(TIER_FAR_CLASS, tier === 'far');
+  }
+
+  function clearTiersIn(scope) {
+    if (!scope || !scope.querySelectorAll) {
+      return;
+    }
+    var marked = scope.querySelectorAll(
+      '.' + TIER_NEAR_CLASS + ', .' + TIER_FAR_CLASS,
+    );
+    for (var i = 0; i < marked.length; i++) {
+      marked[i].classList.remove(TIER_NEAR_CLASS);
+      marked[i].classList.remove(TIER_FAR_CLASS);
+    }
+  }
+
+  function clearTiers() {
+    clearTiersIn(root);
+    clearTiersIn(helpBody());
   }
 
   /** Playable text shows a pointer only while click to read is on (F17). */
@@ -3259,8 +3663,10 @@
     setButtonState(current.el, record.state, '');
     record.blockEls = [current.el];
     decorateBlocks(record.blockEls);
+    applyTiers();
     if (lastSpan) {
-      // Keep the word visible across a re-render, also while paused.
+      // Keep the word visible across a re-render, also while paused; the
+      // follow loop re-anchors from it on the next playing frame (07 §7.2).
       paintSpan(lastSpan);
       record.lastSpan = lastSpan;
     }
@@ -3339,8 +3745,16 @@
     }
   }
 
+  /** Drop a block gap that is waiting (07 §11.3). */
+  function cancelGap() {
+    record.gapTimer = clearTimer(record.gapTimer);
+    record.gapDueAt = 0;
+    record.pendingChunk = -1;
+  }
+
   function releaseChunks() {
     stopLoop();
+    cancelGap();
     for (var i = 0; i < record.chunks.length; i++) {
       releaseChunkAudio(record.chunks[i]);
     }
@@ -3376,6 +3790,9 @@
     var blockEl = record.blockEl;
     releaseChunks();
     clearReadingDecoration();
+    follow.container = null;
+    follow.wroteScrollTop = null;
+    follow.moving = false;
 
     record.state = next;
     record.kind = next === 'error' ? record.kind : null;
@@ -3450,6 +3867,11 @@
     panelDismissed = false;
     record = emptyRecord();
     record.state = 'loading';
+    // The reader has asked to hear from a place, so the page goes there
+    // (07 §7.4): the following is engaged, in the read's own container.
+    follow.container = scrollContainerFor(options.scope || root);
+    follow.wroteScrollTop = null;
+    engageFollow();
     record.requestId = nextRequestId();
     record.kind = options.kind;
     record.scope = options.scope || root;
@@ -3470,6 +3892,7 @@
           : [];
     applyThemeAttributes();
     decorateBlocks(record.blockEls);
+    applyTiers();
 
     var payload = { kind: options.kind };
     if (options.blockId) {
@@ -3792,6 +4215,7 @@
       local = 0;
     }
     stopLoop();
+    cancelGap();
     clearWordBox();
     var playing = record.chunks[record.current];
     if (playing && playing !== chunk && playing.slot) {
@@ -3813,6 +4237,8 @@
     } catch (error) {
       return false;
     }
+    // A click on a word is a request to hear from there (07 §7.4).
+    engageFollow();
     playChunk(chunkIndex);
     return true;
   }
@@ -4141,6 +4567,8 @@
     record.label = rb.label || record.label;
     record.blockEls = [rb.el];
     decorateBlocks(record.blockEls);
+    // The tiers move with the hand-off (07 §8.4).
+    applyTiers();
     releaseBlocksBefore(blockIndex);
     return true;
   }
@@ -4195,6 +4623,41 @@
     }
   }
 
+  /**
+   * The pause at a block boundary (07 §11.2): chunk `index` starts a new
+   * block, so it waits `delayMs` before playing. The state stays `playing`
+   * — the play button stays a pause button, the bar shows nothing — the
+   * last word stays painted, and the rAF loop keeps running for the follow
+   * step alone (nothing to paint), so an ease under way is not frozen.
+   */
+  function startGap(index, delayMs) {
+    cancelGap();
+    if (!(delayMs > 0)) {
+      playChunk(index);
+      return;
+    }
+    record.pendingChunk = index;
+    record.state = 'playing';
+    setButtonState(record.blockEl, 'playing', '');
+    showBar('');
+    record.gapTimer = setTimeout(function () {
+      record.gapTimer = 0;
+      var pending = record.pendingChunk;
+      record.pendingChunk = -1;
+      record.gapDueAt = 0;
+      if (pending >= 0) {
+        playChunk(pending);
+      }
+    }, delayMs);
+    startLoop();
+  }
+
+  /** The gap after the block `chunk` belongs to, at the current rate. */
+  function gapAfter(chunk) {
+    var rb = chunk ? record.readBlocks[chunk.blockIndex] : null;
+    return core.blockGapMs(rb ? rb.el : null, rate);
+  }
+
   function onChunkEnded(chunk) {
     // E6 guard (A-03).
     if (
@@ -4210,11 +4673,21 @@
       // Hand the element back so the chunk after next can preload on it.
       releaseSlot(chunk.slot);
     }
-    if (record.chunks[finished + 1]) {
+    var next = record.chunks[finished + 1];
+    if (next) {
+      if (next.blockIndex !== chunk.blockIndex) {
+        // A hand-off between blocks takes a breath (07 §11.1); chunks of the
+        // same block hand over gaplessly.
+        startGap(finished + 1, gapAfter(chunk));
+        return;
+      }
       playChunk(finished + 1);
       return;
     }
     if (finished + 1 < record.chunkCount) {
+      // The gap is measured from here; a chunk that arrives after it is
+      // due starts at once (07 §11.3).
+      record.gapDueAt = Date.now() + gapAfter(chunk);
       record.state = 'loading';
       stopLoop();
       clearWordBox();
@@ -4292,6 +4765,14 @@
     if (!chunk) {
       return;
     }
+    if (record.gapTimer) {
+      // A block gap (07 §11.2): the last word stays painted, only the
+      // follow step runs.
+      followFrame();
+      updateTimeDisplay();
+      record.rafId = window.requestAnimationFrame(tick);
+      return;
+    }
     var time =
       record.offsets[record.current] +
       (chunk.slot ? chunk.slot.el.currentTime : 0);
@@ -4310,6 +4791,8 @@
       paintSpan(current);
       record.lastSpan = current;
     }
+    // The follow step after the word for the frame is painted (07 §7.2).
+    followFrame();
     updateTimeDisplay();
     record.rafId = window.requestAnimationFrame(tick);
   }
@@ -4320,6 +4803,9 @@
       chunk.slot.el.pause();
     }
     stopLoop();
+    // A pause during a block gap keeps the chunk behind it (07 §11.3);
+    // resume plays it with no further gap.
+    record.gapTimer = clearTimer(record.gapTimer);
     record.state = 'paused';
     setButtonState(record.blockEl, 'paused', '');
     showBar('Paused');
@@ -4328,6 +4814,14 @@
   function resumePlayback() {
     var chunk = record.chunks[record.current];
     if (!chunk) {
+      return;
+    }
+    // Play from paused re-engages the following (07 §7.4).
+    engageFollow();
+    if (record.pendingChunk >= 0) {
+      var pending = record.pendingChunk;
+      record.pendingChunk = -1;
+      playChunk(pending);
       return;
     }
     playChunk(record.current);
@@ -4375,9 +4869,15 @@
     return {
       start: start,
       end: end,
+      // During a block gap the read stands at the finished chunk's end
+      // (07 §11.3): −10 s seeks inside the block, +10 s has nowhere to go.
       here:
         record.offsets[record.current] +
-        (chunk.slot ? chunk.slot.el.currentTime : 0),
+        (record.gapTimer || record.pendingChunk >= 0
+          ? chunkLength(chunk)
+          : chunk.slot
+            ? chunk.slot.el.currentTime
+            : 0),
       blockIndex: blockIndex,
     };
   }
@@ -4433,6 +4933,9 @@
     }
     var wasPaused = record.state === 'paused';
     stopLoop();
+    // A skip during a block gap cancels the gap (07 §11.3); it is taken
+    // again at the boundary.
+    cancelGap();
     clearWordBox();
     var playing = record.chunks[record.current];
     if (playing && playing !== chunk && playing.slot) {
@@ -4476,6 +4979,8 @@
       syncSeekButtons();
       return;
     }
+    // A skip re-engages the following (07 §7.4).
+    engageFollow();
     seekToTime(target);
     syncSeekButtons();
   }
@@ -4623,6 +5128,19 @@
       resetPage();
       return;
     }
+    // ------------------------------------------------ eye strain 2 (07)
+    if (action === 'wordMarker') {
+      applyWordMarker(
+        element ? element.getAttribute('data-mpe-ra-marker-choice') : '',
+        true,
+      );
+      return;
+    }
+    if (action === 'follow') {
+      // _Back to the reading_ (07 §7.5): the ease to the anchor resumes.
+      engageFollow();
+      return;
+    }
     // ------------------------------------------- help (04-help-module §4)
     if (action === 'help') {
       closePopovers();
@@ -4750,6 +5268,21 @@
       return;
     }
     if (record.state === 'loading') {
+      // A chunk that arrives after the previous block's audio has ended
+      // still takes the boundary gap, measured from that end (07 §11.3):
+      // whatever is left of it, nothing if the wait already exceeded it.
+      var previous = record.current >= 0 ? record.chunks[record.current] : null;
+      if (
+        previous &&
+        record.gapDueAt > 0 &&
+        record.chunks[index].blockIndex !== previous.blockIndex
+      ) {
+        var remaining = record.gapDueAt - Date.now();
+        record.gapDueAt = 0;
+        startGap(index, remaining);
+        return;
+      }
+      record.gapDueAt = 0;
       playChunk(index);
       return;
     }
@@ -4805,13 +5338,23 @@
     if (typeof message.globalTheme === 'string') {
       config.globalTheme = core.normaliseGlobalTheme(message.globalTheme);
     }
-    if (typeof message.lineHeight === 'number') {
-      config.lineHeight = core.clampLineHeight(message.lineHeight);
+    // Eye strain 2 (07 §15.2): the four fields, the way the page's are.
+    if (typeof message.textSize === 'number') {
+      config.textSize = core.clampTextSize(message.textSize);
     }
-    if (typeof message.columnWidth === 'number') {
-      config.columnWidth = core.clampColumnWidth(message.columnWidth);
+    if (typeof message.wordMarker === 'string') {
+      config.wordMarker = core.normaliseWordMarker(message.wordMarker);
+    }
+    if (typeof message.dimWhileReading === 'boolean') {
+      config.dimWhileReading = message.dimWhileReading;
+    }
+    if (typeof message.panelAutoHide === 'boolean') {
+      config.panelAutoHide = message.panelAutoHide;
     }
     applyPage();
+    if (typeof message.font === 'string') {
+      measureCharEm();
+    }
     // A model or effort change re-labels an open sheet at once (§7.1).
     applyHelpConfig(message);
     if (typeof message.speed === 'number') {
@@ -4849,6 +5392,10 @@
       applyThemeAttributes();
       applyClickClass();
     }
+    // Dimming or the page may have changed mid-read (07 §8.4), and the
+    // auto-hide may have been switched (07 §10).
+    applyTiers();
+    armPanelIdle();
     syncSpeedControls();
     syncVolumeControls();
     syncSheet();
@@ -4980,11 +5527,48 @@
     );
   }
 
-  function markUserScroll() {
-    if (Date.now() < programmaticScrollUntil) {
+  /**
+   * The suspension listeners of the follow-the-reading scroll (07 §7.3):
+   * a wheel, a touch, a press on the vertical scrollbar, a scrolling key
+   * outside a form control or the panel, and any scroll of the container
+   * that is not the loop's own. Every one of them is also activity for the
+   * panel's auto-hide (07 §10.1).
+   */
+  function onWheel(event) {
+    touchPanel();
+    var container = followContainer();
+    if (
+      container !== window &&
+      event.target &&
+      container.contains &&
+      !container.contains(event.target)
+    ) {
       return;
     }
-    lastUserScrollAt = Date.now();
+    suspendFollow();
+  }
+
+  function onTouchStart(event) {
+    touchPanel();
+    var container = followContainer();
+    if (
+      container !== window &&
+      event.target &&
+      container.contains &&
+      !container.contains(event.target)
+    ) {
+      return;
+    }
+    suspendFollow();
+  }
+
+  function onScrollbarMouseDown(event) {
+    var width = document.documentElement
+      ? document.documentElement.clientWidth
+      : 0;
+    if (width > 0 && event.clientX >= width) {
+      suspendFollow();
+    }
   }
 
   function attachRoot(candidate) {
@@ -5010,6 +5594,9 @@
       attributes: true,
       attributeFilter: ['class'],
     });
+    // The face's advance, now that there is a root to lay the sample out in
+    // (07 §6.2).
+    measureCharEm();
     decorate();
   }
 
@@ -5053,6 +5640,8 @@
     // switches once, here, before the root is decorated.
     applyPage();
     watchPageEnvironment();
+    watchReducedMotion();
+    watchFonts();
     attachRoot(document.querySelector(core.ROOT_SELECTOR));
     if (config.enabled) {
       // The control panel is part of the page, not just of a running read.
@@ -5075,6 +5664,8 @@
         // Any new press, including the second one of a double click,
         // cancels a click-to-read that is still waiting out its delay.
         cancelPendingClickRead();
+        // A press on the vertical scrollbar is a manual scroll (07 §7.3).
+        onScrollbarMouseDown(event);
         var element =
           event.target && event.target.nodeType === 1
             ? event.target
@@ -5101,20 +5692,45 @@
         updateFloatAffordance();
       }, SELECTION_SETTLE_MS);
     });
-    window.addEventListener('wheel', markUserScroll, { passive: true });
-    window.addEventListener('touchmove', markUserScroll, { passive: true });
-    window.addEventListener('scroll', markUserScroll, { passive: true });
+    // Follow-the-reading (07 §7.3) and panel auto-hide (07 §10.1): the
+    // suspension and activity listeners. All passive; the scroll listener
+    // of the document is on the window, the help sheet body's is attached
+    // when the sheet is built.
+    window.addEventListener('wheel', onWheel, { passive: true });
+    window.addEventListener('touchstart', onTouchStart, { passive: true });
+    window.addEventListener(
+      'scroll',
+      function () {
+        onContainerScroll(window);
+      },
+      { passive: true },
+    );
+    document.addEventListener(
+      'scroll',
+      function (event) {
+        // A scroll of the help sheet body (07 §7.6) does not bubble, but it
+        // is seen here in the capture phase.
+        var target = event.target;
+        if (target && target.nodeType === 1 && target === helpBody()) {
+          onContainerScroll(target);
+        }
+      },
+      true,
+    );
     window.addEventListener(
       'keydown',
       function (event) {
         unlockMediaPool();
         lastGestureWasKey = true;
-        if (NAV_KEYS[event.key]) {
-          markUserScroll();
+        touchPanel();
+        if (isScrollKey(event)) {
+          suspendFollow();
         }
       },
       true,
     );
+    window.addEventListener('pointermove', touchPanel, { passive: true });
+    window.addEventListener('pointerdown', touchPanel, { passive: true });
     window.addEventListener('scroll', hideFloat, { passive: true });
   }
 

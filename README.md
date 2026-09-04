@@ -148,7 +148,7 @@ eight controls, left to right:
 | Control            | What it does                                                                                                                                           |
 | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Volume**         | Opens a slider, 0–100 %. Applies to the audio straight away and persists in `markdown-preview-enhanced.readAloudVolume`. The glyph follows the level.  |
-| **Theme settings** | Opens the theme settings sheet: the global theme, the player font, the player font size, the line height, the column width and the highlight theme.    |
+| **Theme settings** | Opens the theme settings sheet: the global theme, the player font, the text size, the word marker and the highlight theme.                             |
 | **−10 s**          | Skips back ten seconds **inside the block being read**. Landing before its first word restarts the block rather than going back into the previous one. |
 | **Play / pause**   | With nothing loaded, reads from the first block still on screen to the end of the document — the same read a play button in the gutter starts.         |
 | **+10 s**          | Skips forward ten seconds. Landing past the last synthesised word of the block does nothing, and the button greys out when that is the case.           |
@@ -168,27 +168,50 @@ immediately mid-playback and never triggers re-synthesis. The chosen value persi
 ### Reading rhythm
 
 While read aloud is on, the preview is set to one vertical rhythm — the low-strain page's line
-height (1.6 by default, 1.4–1.8 from the sheet; 1.85 with the page off) and even spacing between
-paragraphs, lists and headings — and the pills of the block being read are drawn inside it, with
+height (derived from the text size: 1.70 at 16 px down to 1.45 at 26 px and above, 1.6 at the
+default 20 px; 1.85 with the page off) and even spacing between paragraphs, lists and headings —
+and the pills of the block being read are drawn inside it, with
 their padding cancelled by a negative margin. The pill padding is derived from the line height,
 so the lines of the block always overlap and read as one shape. Starting a read therefore moves nothing: the text
 keeps its size, its line breaks and its position. Every measurement is in `em`, so zooming the
 preview scales the whole canvas, decoration included.
 
+### While reading
+
+- **The page follows the reading.** The spoken line is kept near the upper third of the
+  viewport and the page is eased there a few pixels a frame, never jumped by half a screen.
+  Any scroll of your own — a wheel, a touch, a scrollbar drag, a page key, a scroll-sync from
+  the editor — suspends the following for as long as you like; a **Back to the reading** chip
+  above the panel, a play, a skip, a click on a word, or scrolling until the spoken word is
+  back where the page would keep it re-engages it. Under `prefers-reduced-motion` the page
+  jumps instead of easing.
+- **The rest is dimmed.** While a read plays, every other readable block of the low-strain
+  page is dimmed by colour in two tiers — the next block a little, the rest to a measured
+  floor — so the block being read stands out; code, tables, maths and images are never dimmed.
+  `markdown-preview-enhanced.readAloudDimWhileReading` (default `true`); no effect with the
+  page off.
+- **The spoken word is underlined.** An underline sweep in the highlight theme's colour marks
+  the word, so the glyphs keep their brightness; the filled box of the reader-app look and
+  _Off_ are the other two choices (`readAloudWordMarker`, also a row on the sheet).
+- **The panel fades.** After three seconds of playback with no mouse or keyboard activity the
+  panel fades out and a thin progress strip at the bottom edge stands in for it; any movement,
+  key, wheel, pause or message brings it back (`readAloudPanelAutoHide`, default `true`).
+- **A breath between blocks.** The read pauses 400 ms between blocks and 900 ms after a
+  heading, divided by the rate; chunks of the same block hand over gaplessly.
+
 ### Theme settings
 
-The second button of the panel opens a sheet with six controls and a reset. Each takes effect at
-once, also mid-playback, and none reloads the preview.
+The second button of the panel opens a sheet with five controls and a reset. Each takes effect
+at once, also mid-playback, and none reloads the preview.
 
 | Control                    | What it does                                                                                                                                                                                                                 |
 | -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Global theme**           | _Auto · Light · Dark_: the low-strain reading page (below), in place of the preview theme. _Auto_ follows the VS Code colour theme. Persists in `markdown-preview-enhanced.readAloudGlobalTheme`; `off` is a Settings value. |
 | **Player font**            | Overrides the page's face (or, with the page off, the preview theme's font). Persists in `markdown-preview-enhanced.readAloudFont`.                                                                                          |
-| **Player font size**       | The preview's zoom — the same one behind _Zoom In_ / _Zoom Out_ in the preview's context menu. Not persisted, like that zoom.                                                                                                |
-| **Line height**            | 1.4–1.8 in 0.1 steps. Persists in `markdown-preview-enhanced.readAloudLineHeight`. No effect while the page is off.                                                                                                          |
-| **Column width**           | 50–75 characters of the body font. Persists in `markdown-preview-enhanced.readAloudColumnWidth`. No effect while the page is off.                                                                                            |
-| **Player highlight theme** | Five palettes shown as sample cards. Persists in `markdown-preview-enhanced.readAloudHighlightTheme`.                                                                                                                        |
-| **Reset page settings**    | Clears the global theme, line height, column width and font settings (so their defaults apply again) and puts the zoom back to 1. Speed, volume and the highlight palette are left alone.                                    |
+| **Text size**              | 16–28 px, default 20. The line height, the width of the column and the heading sizes derive from it. Persists in `markdown-preview-enhanced.readAloudTextSize`. No effect while the page is off.                             |
+| **Word marker**            | _Underline · Box · Off_: how the spoken word is marked. Persists in `markdown-preview-enhanced.readAloudWordMarker`.                                                                                                         |
+| **Player highlight theme** | Five palettes shown as sample cards, painting the chosen marker. Persists in `markdown-preview-enhanced.readAloudHighlightTheme`.                                                                                            |
+| **Reset page settings**    | Clears the global theme, text size, font and word marker settings (so their defaults apply again). Speed, volume, the highlight palette, dimming, auto-hide and the preview's zoom are left alone.                           |
 
 The foot of the sheet carries one line of reader guidance: match the screen's brightness to the
 room, and every 20 minutes look 20 feet away for 20 seconds.
@@ -198,7 +221,8 @@ room, and every 20 minutes look 20 feet away for 20 seconds.
 With the global theme at _Auto_, _Light_ or _Dark_ (the default is _Auto_) the live preview is
 restyled as a reading page built to `featrues/05-eye-strain.md`: the Atkinson Hyperlegible Next
 face, bundled with the extension (`media/fonts/`, SIL Open Font License 1.1, 48 KB, never
-fetched), 20 px body text (18 px in a pane narrower than 48 rem), a 66-character column (centred
+fetched), 20 px body text by default (the text size slider, 16–28 px), a column of 66 characters of
+prose measured in the face in use (centred
 on a slightly darker canvas in the light scheme), weights 400 and 600 only, underlined links, and colour tokens for every
 surface a preview theme paints — text, rules, code, quotes, tables, admonitions, callouts, focus
 rings, a syntax palette for code blocks — in a light set checked at WCAG AAA and a dark set
@@ -288,11 +312,13 @@ degrades to a generic family where the first name is missing, and every family i
 machine already has or ships with the extension: no font is ever fetched over the network. The
 override is applied to the preview root, so code, diagrams and maths keep their own font.
 
-**Player font size** is not a font setting at all — it is the preview's zoom, in the same 0.1
-steps the context menu's _Zoom In_ and _Zoom Out_ use, between 0.6 and 2. The label names the
-size in pixels the prose ends up at. Because it drives crossnote's own zoom, the context menu's
-`Zoom (110%)` label, ⌘-scroll and the slider all agree, and the panel keeps its size on screen
-while the text scales.
+**Text size.** One slider, 16–28 px, from which everything else follows: the line height (1.70
+at 16 px down to 1.45 at 26 px and above), the heading sizes (in em of the body) and the
+reading column, which is always 66 characters of prose — the player lays out a sample passage
+in the face in use and sets the column from its average advance, so 66 means 66 in Atkinson,
+Georgia or Verdana, capped by the pane. The value is a real setting and survives a reload.
+crossnote's own zoom is still available from the preview's context menu and ⌘-scroll; the
+panel keeps its size on screen while the text scales.
 
 **Player highlight theme.** While a block is being read every line sits on a rounded pill and
 the spoken word gets a darker box inside it.
@@ -364,6 +390,8 @@ Rebind those two commands in _Keyboard Shortcuts_ if you use Windows.
   box for that.
 - The low-strain page restyles the live preview only; exports keep the preview theme. Diagram
   themes are not overridden, and a selection over the block being read paints on its pills.
+- A manual scroll stops the page following the reading until the _Back to the reading_ chip, a
+  play, a skip or a scroll back into place; there is no timed auto-resume.
 
 ## Identity
 

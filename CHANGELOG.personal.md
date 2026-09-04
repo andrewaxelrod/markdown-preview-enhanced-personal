@@ -306,6 +306,83 @@ blockId?, blocks? }]`, `readAloudCancel`, `readAloudPlaying`, `readAloudSetSpeed
     background as an inline style from its own light/dark detection (`prefers-color-scheme`,
     which in the webview follows the OS, so the TOC was `#181818` on the light page), so the
     page's TOC background is `!important` and its links take `--link`.
+  - **Eye strain 2** (`featrues/07-eye-strain-2/spec.md`, from the three-model analysis in
+    `featrues/07-eye-strain-2/06-eye-strain-2.md`): the theme settings sheet's three typographic
+    sliders become one, **Text size** (16–28 px, default 20,
+    `markdown-preview-enhanced.readAloudTextSize`), from which the line height (1.70 at 16 px to
+    1.45 at 26 px and above, 1.60 at 20), the heading sizes (now in `em`) and the reading column
+    derive. The column is **66 characters of prose**, measured: the player lays out a sample
+    passage in the face in use and sets the measure in `em` from its average advance, so 66 means
+    66 in Atkinson, Georgia or Verdana (the 05 column, `66ch`, held 83–84 characters, because `ch`
+    is the width of the digit zero). The reading page now **follows the reading**: the spoken line
+    is kept near the upper third of the viewport and the page eased there continuously instead of
+    jumped by half a screen; a wheel, a key, a scrollbar drag or a scroll-sync from the editor
+    suspends the following until a _Back to the reading_ chip, a play, a skip or a scroll that
+    brings the word back is seen; under `prefers-reduced-motion` the page jumps instead of easing.
+    While a read plays every other readable block is **dimmed by colour** in two tiers — the next
+    block less (`#626261` / `#c1c1c1`), the rest to a measured floor (`#858483` at 3.4:1 /
+    `#a2a2a2` at Lc 51) — over a 220 ms ramp; code, tables, maths and images are never dimmed
+    (`readAloudDimWhileReading`, default on). The spoken word is marked by an **underline sweep**
+    in a per-palette stroke colour at 3:1 against its pill, in place of the filled box, which stays
+    as _Box_ beside _Off_ (`readAloudWordMarker`, a segmented row on the sheet; the swatch cards
+    paint the chosen style); the light blue box and the dark blue, pink, green and orange boxes are
+    nudged so text on them reaches 4.5:1. The panel **fades after 3 s** of playback without
+    activity, leaving a 3 px progress strip at the bottom edge, and returns on any movement, key,
+    pause, message or hover (`readAloudPanelAutoHide`, default on); only keyboard focus
+    (`:focus-visible`) inside the panel pins it, so the button the mouse clicked to start the read
+    does not. The read takes a **400 ms breath between blocks and 900 ms after a heading**,
+    divided by the rate; the rAF loop keeps running through the gap for the follow step alone, so
+    an ease under way is not frozen. Light links are a low-chroma ink blue (`#33475f`, 8.7:1);
+    prose gets `text-wrap: pretty`. The token test now parses the highlight palettes too.
+    Validated on 2026-09-04 in Chrome through the Claude in Chrome tools against `test/harness/`
+    (the real player and stylesheets, a host shim bundled from the chunker and the Kokoro
+    alignment, Kokoro itself over CORS or a silent stand-in) — checks H1–H12 of the spec, all
+    passed: H1 the slider at 16 and 28 gave computed body sizes of 16 and 28 px, line heights 1.7
+    and 1.45, `h1` at 25.6 and 44.8 px (1.6×), one `readAloudSetTextSize` per drag, the panel at
+    13 px throughout; H2 a median of 64 characters per full line at 20 px in Atkinson (measure
+    29.07 em), 65 in Georgia (28.91 em) and 65 in Verdana (33.69 em), none above 72, the column
+    `content-box` at the measure; H3 over 12 s of playback the spoken word's top stayed within
+    0.383–0.413 of the viewport, no scroll step over 65 px, no `scrollIntoView`; H4 a wheel froze
+    the page and showed the chip, the chip brought the word back into the band in 434 ms, a
+    scroll back into the band re-engaged on its own; H5 near `#626261`, far `#858483`, the
+    active block `#2b2b2b`, `pre` and `table` untouched, the classes moved at the hand-off and
+    survived `mpeHarness.rerender()`; H6 the box `#788cf0` with no shadow, off transparent, the
+    underline a `#697cd8` inset shadow at 3.12:1 on the pill, the block height (256 px) and the
+    next heading's `offsetTop` (670 px) identical before and during the read under all three;
+    H7 after 4 s the panel at opacity 0 and `pointer-events: none` with the strip at 36 %, back
+    at opacity 1 within 200 ms of a mouse move, never while paused; H8 gaps of 402–403 ms after
+    paragraphs and 903 ms after a heading at 1×, 202–203 and 451–452 ms at 2×, none inside a
+    block; H9 the light link `#33475f`, underlined, focus ring `#1f4e8c` on Tab; H10 on the
+    dark page every palette's text on the box 4.67–4.91:1 and stroke on the pill 3.05–3.09:1;
+    H11 under `off` no page attribute or properties, the preview theme's font, the slider
+    disabled with the hint shown, the marker still applied, no tier classes, the following and
+    the fade working; H12 no console error, dropped message or unhandled rejection. Two
+    observations from the run: an automated click with no preceding pointer movement, landing
+    while the panel is faded, is hit-tested through the invisible panel (a real mouse moves first
+    and wakes it); and the harness's per-line character count splits a line at an inline `code`
+    or `mark` (the medians are unaffected). Then in the Extension Development Host over the
+    DevTools Protocol (an isolated profile, `test.md` built from the fixture's prose, the preview
+    beside the editor): the settings round trip applied `readAloudTextSize` and
+    `readAloudWordMarker` from the profile's `settings.json` to the page in 318 ms with the read
+    playing on; under emulated `prefers-reduced-motion: reduce` the page jumped to the anchor with
+    no intermediate position and the tier ramp and the panel fade computed to 0 s, and with the
+    preference off the same read eased in steps of 1–92 px; typing in the editor mid-read kept the
+    47 tier classes, the pills and the marker on the re-rendered elements while the edit's scroll
+    sync moved the preview and suspended the following with the chip shown; `readAloudGlobalTheme:
+off` mid-read dropped the page, its properties and every tier class and kept the marker and
+    the read, and `auto` brought them back; an offline HTML export carried no tier class, marker
+    attribute, page attribute, pill or read-aloud reference. The `off` fingerprint against the 05
+    §13.4 recording and a separate cursor-driven scroll-sync check were not run (the recording is
+    not in the repository; the edit's sync covered the suspension). One defect surfaced there and
+    is fixed: crossnote's preview root computes `overflow-y: auto` without ever scrolling, and
+    the follow loop had taken it for the scroll container, so the page never moved in the real
+    webview (it had in the harness, whose root has no such rule); an ancestor now counts only
+    when it actually overflows. Messages
+    `readAloudSetTextSize`, `readAloudSetWordMarker`; `readAloudConfig` carries `textSize`,
+    `wordMarker`, `dimWhileReading`, `panelAutoHide`. Files: `media/read-aloud-page.css`,
+    `media/read-aloud.css`, `media/read-aloud{,-core}.js`,
+    `src/read-aloud/{messages,settings,controller}.ts`, `test/harness/`, and the suites
+    `page-typography`, `follow-scroll`, `dim-tiers`, `word-marker`, `panel-autohide`.
   - **One reading rhythm for the whole canvas** (`.mpe-ra-canvas`): the 2.0 line height that used
     to be applied to the block being read moved to the whole preview at 1.85, together with even
     spacing for paragraphs, lists, blockquotes, tables and headings. Starting a read no longer
@@ -324,8 +401,20 @@ blockId?, blocks? }]`, `readAloudCancel`, `readAloudPlaying`, `readAloudSetSpeed
 - Changes to the read-aloud settings (all but `readAloudEnabled`) no longer reload every preview
   panel, so a speed or voice change does not interrupt playback. Every other
   `markdown-preview-enhanced.*` change still refreshes the previews as before.
-- The reading canvas takes its line height from the low-strain page (1.6 by default, sliders
-  1.4–1.8) while the page is on; the 1.85 rhythm of 02 remains for `readAloudGlobalTheme: off`.
+- The reading canvas takes its line height from the low-strain page (derived from the text
+  size, 1.6 at the default 20 px) while the page is on; the 1.85 rhythm of 02 remains for
+  `readAloudGlobalTheme: off`.
+- The light highlight palettes are the reference reader's light mode (`featrues/08-highlight/`,
+  sampled 2026-09-04): pill and word box per palette — blue `#e0e4fd` / `#aab5f9`, pink
+  `#f6dcfc` / `#e69bf7`, red `#fce1dd` / `#f47e74`, green `#cffbe9` / `#7be5aa`, orange
+  `#fcead1` / `#f5b768` — in place of 03's lighter tints and 07's darker boxes. The underline
+  strokes are re-derived from the new boxes (`#6f7cd0`, `#b35fc7`, `#de5448`, `#3c9b66`,
+  `#b57b32`) at 3.05–3.10:1 on their pills, and the page's text is 5.4–9.2:1 on the boxes. The
+  dark palettes are unchanged; the structure of the decoration is unchanged.
+- Reset page settings no longer touches crossnote's zoom, which is no longer a sheet control;
+  the zoom stays available from the preview's context menu and ctrl+wheel. The 18 px size below
+  48 rem is gone: the text size is the slider's at every pane width, and the column caps at the
+  pane.
 - The reading decoration is one continuous shape again, as in the reference reader: the pill
   padding is derived from the line height so that adjacent line fragments overlap by the corner
   radius (0.4 em) at every rhythm, the horizontal padding grew to 0.4 em, and the spoken-word
@@ -346,6 +435,10 @@ blockId?, blocks? }]`, `readAloudCancel`, `readAloudPlaying`, `readAloudSetSpeed
 
 ### Removed
 
+- The Player font size (zoom) slider, the Line height and Column width sliders, and the settings
+  `markdown-preview-enhanced.readAloudLineHeight` and `readAloudColumnWidth` with their messages
+  `readAloudSetLineHeight` and `readAloudSetColumnWidth`; both values now derive from
+  `readAloudTextSize`. A stale key in `settings.json` is ignored.
 - ElevenLabs support (client, key storage, voice and model resolution, cost guard, prosody
   context, the sent-text log and its `logs/` handling, the `readAloudProvider`,
   `elevenLabsVoiceId`, `elevenLabsModelId`, `elevenLabsBaseUrl` and `readAloudConfirmAbove`
@@ -355,6 +448,10 @@ blockId?, blocks? }]`, `readAloudCancel`, `readAloudPlaying`, `readAloudSetSpeed
 
 ### Fixed
 
+- Text on the dark blue, green and orange word boxes was 4.0–4.3:1, under the 4.5:1 the
+  highlight promised, and the dark pink box 4.44:1 against the page's real text colour
+  (`#e6e6e6`; the spec had estimated against `#f2f2f2`); the four boxes are a step darker and the
+  token test asserts all ten pairs against the page's tokens.
 - **Punctuation next to the spoken word stays visible.** The word box overhangs its word by its
   horizontal padding (0.35 em) on each side and is relatively positioned so that it paints above
   the pill fragment of the line below (see the entry after next), which also paints it above all

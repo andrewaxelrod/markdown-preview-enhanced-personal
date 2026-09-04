@@ -170,21 +170,59 @@
   ];
   var DEFAULT_PLAYER_FONT = 'default';
 
-  // The low-strain reading page (featrues/05-eye-strain.spec.md §4, §9.3):
-  // the Global theme and the two typographic sliders of the theme settings
-  // sheet. Same values as src/read-aloud/messages.ts. `off` is a Settings
-  // value only — the sheet shows Auto · Light · Dark — and restores the
-  // preview theme exactly as it was before the page existed.
+  // The low-strain reading page (featrues/05-eye-strain.spec.md §4): the
+  // Global theme of the theme settings sheet. Same values as
+  // src/read-aloud/messages.ts. `off` is a Settings value only — the sheet
+  // shows Auto · Light · Dark — and restores the preview theme exactly as it
+  // was before the page existed.
   var GLOBAL_THEMES = ['auto', 'light', 'dark', 'off'];
   var DEFAULT_GLOBAL_THEME = 'auto';
-  var LINE_HEIGHT_MIN = 1.4;
-  var LINE_HEIGHT_MAX = 1.8;
-  var LINE_HEIGHT_STEP = 0.1;
-  var DEFAULT_LINE_HEIGHT = 1.6;
-  var COLUMN_WIDTH_MIN = 50;
-  var COLUMN_WIDTH_MAX = 75;
-  var COLUMN_WIDTH_STEP = 5;
-  var DEFAULT_COLUMN_WIDTH = 66;
+
+  // Eye strain 2 (featrues/07-eye-strain-2/spec.md §5): one text-size
+  // slider, in px as the reader sees it on the label, applied in rem. The
+  // line height, the heading sizes and the reading column derive from it.
+  var TEXT_SIZE_MIN = 16;
+  var TEXT_SIZE_MAX = 28;
+  var TEXT_SIZE_STEP = 1;
+  var DEFAULT_TEXT_SIZE = 20;
+
+  // The measure (07 §6): always this many characters of prose, in whatever
+  // face is on, capped by the pane. `ch` is the advance of the digit zero,
+  // which in a proportional face is wider than the average character (66 ch
+  // of Atkinson held 83–84 characters), so the face's average advance is
+  // measured at runtime against this sample: ordinary English prose with
+  // normal spacing and punctuation, no quotes or apostrophes.
+  var MEASURE_CHARS = 66;
+  var MEASURE_SAMPLE =
+    'The quick study of a long page begins with its lines. A reader moves ' +
+    'along each one in a series of short hops, pausing on a few words at a ' +
+    'time, then sweeps back to find the start of the next. When a line ' +
+    'holds too many characters that return sweep lands in the wrong place ' +
+    'and the eye must hunt; when it holds too few the hops are cut short ' +
+    'and the rhythm breaks. Between those limits sits a measure that most ' +
+    'people find comfortable.';
+  // The em per character used until the face has been measured (jsdom lays
+  // nothing out, so the page always has a measure).
+  var DEFAULT_CHAR_EM = 0.5;
+
+  // The word marker (07 §9): an underline sweep in the palette's stroke
+  // colour (the glyphs keep their brightness), the filled box of 02, or
+  // nothing. Published as `data-mpe-ra-marker` on the preview root.
+  var WORD_MARKERS = ['underline', 'box', 'off'];
+  var DEFAULT_WORD_MARKER = 'underline';
+
+  // Follow-the-reading scroll (07 §7.1): the spoken word's top is kept inside
+  // a band of the visible height and eased to the anchor when it leaves it.
+  var FOLLOW_ANCHOR = 0.38;
+  var FOLLOW_BAND_TOP = 0.34;
+  var FOLLOW_BAND_BOTTOM = 0.42;
+  var FOLLOW_EASE = 0.12;
+  var FOLLOW_SETTLE_PX = 0.5;
+
+  // Pauses at block boundaries (07 §11): a breath between blocks, a longer
+  // one after a heading, both divided by the playback rate.
+  var BLOCK_GAP_MS = 400;
+  var HEADING_GAP_MS = 900;
 
   // Elements that establish a block of their own: their inline runs are
   // wrapped separately from the parent's. Anything else is treated as inline.
@@ -1773,26 +1811,135 @@
       : DEFAULT_GLOBAL_THEME;
   }
 
+  // ---------------------------------------------------------------------------
+  // Eye strain 2 (07): the text size and what derives from it
+  // ---------------------------------------------------------------------------
+
   /**
-   * Clamp to the slider's range and round to the step's precision (two
-   * decimals), not to the step: a hand-edited 1.55 is honoured.
+   * Whole pixels, clamped to the slider's range; anything that is not a
+   * finite number is the default (07 §5.1).
    */
-  function clampLineHeight(value) {
+  function clampTextSize(value) {
     if (typeof value !== 'number' || !isFinite(value)) {
-      return DEFAULT_LINE_HEIGHT;
+      return DEFAULT_TEXT_SIZE;
     }
-    var clamped = Math.min(LINE_HEIGHT_MAX, Math.max(LINE_HEIGHT_MIN, value));
-    return Math.round(clamped * 100) / 100;
+    return Math.min(TEXT_SIZE_MAX, Math.max(TEXT_SIZE_MIN, Math.round(value)));
   }
 
-  /** Whole characters, clamped to the range: a hand-edited 63 is honoured. */
-  function clampColumnWidth(value) {
-    if (typeof value !== 'number' || !isFinite(value)) {
-      return DEFAULT_COLUMN_WIDTH;
+  /**
+   * The line height for a text size (07 §5.2): 1.70 at 16 px down to 1.45 at
+   * 26 px and above, anchored at 1.60 for 20 px. Leading grows as the type
+   * gets smaller — the return sweep needs proportionally more separation —
+   * and shrinks as it gets larger, where 1.6 leaves gaps that read as rivers.
+   * Rounded on the integer-and-a-half value, so 152.5 is 153 and not a float
+   * artefact.
+   */
+  function deriveLineHeight(size) {
+    var px = clampTextSize(size);
+    var hundredths = Math.round(160 - (px - 20) * 2.5);
+    return Math.min(1.7, Math.max(1.45, hundredths / 100));
+  }
+
+  /**
+   * The average advance of the face in em (07 §6.2), from the width of the
+   * laid-out sample and the width of a 100 em reference measured in the same
+   * coordinate space — which divides out the font size and any body zoom.
+   * The default when either width is not a positive finite number.
+   */
+  function charEmFrom(sampleWidth, referenceWidth, sampleLength) {
+    var length =
+      typeof sampleLength === 'number' && sampleLength > 0
+        ? sampleLength
+        : MEASURE_SAMPLE.length;
+    if (
+      typeof sampleWidth !== 'number' ||
+      typeof referenceWidth !== 'number' ||
+      !isFinite(sampleWidth) ||
+      !isFinite(referenceWidth) ||
+      !(sampleWidth > 0) ||
+      !(referenceWidth > 0)
+    ) {
+      return DEFAULT_CHAR_EM;
     }
-    return Math.round(
-      Math.min(COLUMN_WIDTH_MAX, Math.max(COLUMN_WIDTH_MIN, value)),
-    );
+    var charEm = sampleWidth / length / (referenceWidth / 100);
+    if (!isFinite(charEm) || !(charEm > 0)) {
+      return DEFAULT_CHAR_EM;
+    }
+    return Math.round(charEm * 10000) / 10000;
+  }
+
+  /** One of WORD_MARKERS; anything else falls back to the underline. */
+  function normaliseWordMarker(value) {
+    return typeof value === 'string' && WORD_MARKERS.indexOf(value) >= 0
+      ? value
+      : DEFAULT_WORD_MARKER;
+  }
+
+  /**
+   * One frame of the follow-the-reading scroll (07 §7.1). With the word's
+   * top inside the band and no ease under way the position is left alone;
+   * otherwise the target puts the word's top at the anchor, reached at once
+   * under reduced motion and by a fraction of the remaining distance per
+   * frame otherwise, until the remainder is below `settlePx`.
+   *
+   * @param {{ wordTop: number, viewportHeight: number, scrollTop: number,
+   *           anchor: number, bandTop: number, bandBottom: number,
+   *           ease: number, settlePx: number, reduced: boolean,
+   *           moving: boolean }} input
+   * @returns {{ scrollTop: number, moving: boolean }}
+   */
+  function followStep(input) {
+    var wordTop = input.wordTop;
+    var height = input.viewportHeight;
+    var scrollTop = input.scrollTop;
+    var inBand =
+      wordTop >= input.bandTop * height && wordTop <= input.bandBottom * height;
+    if (inBand && !input.moving) {
+      return { scrollTop: scrollTop, moving: false };
+    }
+    var target = scrollTop + wordTop - input.anchor * height;
+    if (input.reduced) {
+      return { scrollTop: target, moving: false };
+    }
+    var remaining = target - scrollTop;
+    if (Math.abs(remaining) <= input.settlePx) {
+      return { scrollTop: target, moving: false };
+    }
+    var next = scrollTop + remaining * input.ease;
+    if (Math.abs(target - next) <= input.settlePx) {
+      return { scrollTop: target, moving: false };
+    }
+    return { scrollTop: next, moving: true };
+  }
+
+  /**
+   * The pause before the next block starts (07 §11): longer after a heading,
+   * divided by the playback rate so a 2× listener waits half as long.
+   */
+  function blockGapMs(previousEl, rate) {
+    var tag =
+      previousEl && typeof previousEl.tagName === 'string'
+        ? previousEl.tagName.toUpperCase()
+        : '';
+    var gap = HEADING_TAGS[tag] ? HEADING_GAP_MS : BLOCK_GAP_MS;
+    var speed =
+      typeof rate === 'number' && isFinite(rate) && rate > 0 ? rate : 1;
+    return Math.round(gap / speed);
+  }
+
+  /**
+   * The dim tier of the block at `index` in a read (07 §8.1): the block being
+   * read is active, the next is pre-warmed (near), every other readable block
+   * is far.
+   */
+  function tierFor(index, activeIndex, nextIndex) {
+    if (index === activeIndex) {
+      return 'active';
+    }
+    if (index === nextIndex) {
+      return 'near';
+    }
+    return 'far';
   }
 
   /**
@@ -1931,14 +2078,22 @@
     DEFAULT_PLAYER_FONT: DEFAULT_PLAYER_FONT,
     GLOBAL_THEMES: GLOBAL_THEMES,
     DEFAULT_GLOBAL_THEME: DEFAULT_GLOBAL_THEME,
-    LINE_HEIGHT_MIN: LINE_HEIGHT_MIN,
-    LINE_HEIGHT_MAX: LINE_HEIGHT_MAX,
-    LINE_HEIGHT_STEP: LINE_HEIGHT_STEP,
-    DEFAULT_LINE_HEIGHT: DEFAULT_LINE_HEIGHT,
-    COLUMN_WIDTH_MIN: COLUMN_WIDTH_MIN,
-    COLUMN_WIDTH_MAX: COLUMN_WIDTH_MAX,
-    COLUMN_WIDTH_STEP: COLUMN_WIDTH_STEP,
-    DEFAULT_COLUMN_WIDTH: DEFAULT_COLUMN_WIDTH,
+    TEXT_SIZE_MIN: TEXT_SIZE_MIN,
+    TEXT_SIZE_MAX: TEXT_SIZE_MAX,
+    TEXT_SIZE_STEP: TEXT_SIZE_STEP,
+    DEFAULT_TEXT_SIZE: DEFAULT_TEXT_SIZE,
+    MEASURE_CHARS: MEASURE_CHARS,
+    MEASURE_SAMPLE: MEASURE_SAMPLE,
+    DEFAULT_CHAR_EM: DEFAULT_CHAR_EM,
+    WORD_MARKERS: WORD_MARKERS,
+    DEFAULT_WORD_MARKER: DEFAULT_WORD_MARKER,
+    FOLLOW_ANCHOR: FOLLOW_ANCHOR,
+    FOLLOW_BAND_TOP: FOLLOW_BAND_TOP,
+    FOLLOW_BAND_BOTTOM: FOLLOW_BAND_BOTTOM,
+    FOLLOW_EASE: FOLLOW_EASE,
+    FOLLOW_SETTLE_PX: FOLLOW_SETTLE_PX,
+    BLOCK_GAP_MS: BLOCK_GAP_MS,
+    HEADING_GAP_MS: HEADING_GAP_MS,
     decorateReadingBlock: decorateReadingBlock,
     undecorateReadingBlock: undecorateReadingBlock,
     wrapRange: wrapRange,
@@ -1948,8 +2103,13 @@
     normalisePlayerFont: normalisePlayerFont,
     playerFontStack: playerFontStack,
     normaliseGlobalTheme: normaliseGlobalTheme,
-    clampLineHeight: clampLineHeight,
-    clampColumnWidth: clampColumnWidth,
+    clampTextSize: clampTextSize,
+    deriveLineHeight: deriveLineHeight,
+    charEmFrom: charEmFrom,
+    normaliseWordMarker: normaliseWordMarker,
+    followStep: followStep,
+    blockGapMs: blockGapMs,
+    tierFor: tierFor,
     resolvePageScheme: resolvePageScheme,
     backgroundLuminance: backgroundLuminance,
   };

@@ -79,20 +79,21 @@ import {
   type ReadAloudGlobalTheme,
   type ReadAloudHighlightTheme,
   type ReadAloudKind,
+  type ReadAloudWordMarker,
   type SynthesizeRequest,
 } from './messages';
 import {
   clearPageSettings,
   readHelpSettings,
   readReadAloudSettings,
-  writeColumnWidthSetting,
   writeFontSetting,
   writeGlobalThemeSetting,
   writeHelpModelSettings,
   writeHighlightThemeSetting,
-  writeLineHeightSetting,
   writeSpeedSetting,
+  writeTextSizeSetting,
   writeVolumeSetting,
+  writeWordMarkerSetting,
   type ReadAloudHelpSettings,
   type ReadAloudSettingKey,
   type ReadAloudSettings,
@@ -512,27 +513,27 @@ export class ReadAloudController implements vscode.Disposable {
     }
   }
 
-  /** `readAloudSetLineHeight`: the sheet's line height slider (05 §9.3). */
-  public async setLineHeight(value: number): Promise<void> {
+  /** `readAloudSetTextSize`: the sheet's text size slider (07 §5). */
+  public async setTextSize(value: number): Promise<void> {
     if (this.guardWebBuild()) {
       return;
     }
     try {
-      await writeLineHeightSetting(value);
+      await writeTextSizeSetting(value);
     } catch (error) {
-      readAloudLog(`line height persist failed: ${String(error)}`);
+      readAloudLog(`text size persist failed: ${String(error)}`);
     }
   }
 
-  /** `readAloudSetColumnWidth`: the sheet's column width slider (05 §9.3). */
-  public async setColumnWidth(value: number): Promise<void> {
+  /** `readAloudSetWordMarker`: the sheet's word marker row (07 §9.3). */
+  public async setWordMarker(style: ReadAloudWordMarker): Promise<void> {
     if (this.guardWebBuild()) {
       return;
     }
     try {
-      await writeColumnWidthSetting(value);
+      await writeWordMarkerSetting(style);
     } catch (error) {
-      readAloudLog(`column width persist failed: ${String(error)}`);
+      readAloudLog(`word marker persist failed: ${String(error)}`);
     }
   }
 
@@ -976,11 +977,14 @@ export class ReadAloudController implements vscode.Disposable {
       modelId: KOKORO_MODEL_ID,
       highlightTheme: settings.highlightTheme,
       font: settings.font,
-      // The low-strain page (05 §4.3): these three ride in `data-config`, so
-      // the page is applied at script evaluation, before <body> is parsed.
+      // The low-strain page (05 §4.3) and eye strain 2 (07 §15.2): these ride
+      // in `data-config`, so the page is applied at script evaluation, before
+      // <body> is parsed.
       globalTheme: settings.globalTheme,
-      lineHeight: settings.lineHeight,
-      columnWidth: settings.columnWidth,
+      textSize: settings.textSize,
+      wordMarker: settings.wordMarker,
+      dimWhileReading: settings.dimWhileReading,
+      panelAutoHide: settings.panelAutoHide,
       // Spawning a process is Node-only, so the button is hidden in the web
       // build the way every other Node-only path is (§1).
       helpAvailable: !this.deps.isWebBuild,

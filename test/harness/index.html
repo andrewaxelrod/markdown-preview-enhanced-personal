@@ -1,0 +1,38 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>MPE read aloud — eye strain 2 harness</title>
+    <meta
+      id="crossnote-data"
+      data-config='{"sourceUri":"file:///harness/fixture.md","isVSCode":true}'
+    />
+    <!-- crossnote's own preview styles, as the webview has them. -->
+    <link
+      rel="stylesheet"
+      href="../../crossnote/styles/preview_theme/github-light.css"
+    />
+    <link rel="stylesheet" href="../../crossnote/styles/prism_theme/github.css" />
+    <link
+      rel="stylesheet"
+      media="screen"
+      href="../../crossnote/styles/style-template.css"
+    />
+    <!-- The read-aloud head, in the order preview-provider.ts injects it. -->
+    <link rel="stylesheet" href="../../media/read-aloud.css" />
+    <link
+      rel="preload"
+      as="font"
+      type="font/woff2"
+      crossorigin
+      href="../../media/fonts/AtkinsonHyperlegibleNext-Variable.woff2"
+    />
+    <link rel="stylesheet" href="../../media/read-aloud-page.css" />
+    <!-- The host shim defines acquireVsCodeApi and writes the two player
+         script tags (core, then the player with its data-config). -->
+    <script src="dist/host-shim.js"></script>
+  </head>
+  <body class="preview-container">
+    <div class="crossnote markdown-preview" data-for="preview"></div>
+  </body>
+</html>

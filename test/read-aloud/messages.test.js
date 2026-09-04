@@ -483,4 +483,495 @@ suite('read-aloud/messages', function () {
       assert.strictEqual(messages.normaliseHighlightTheme(3), 'blue');
     });
   });
+
+  // -------------------------------------------------------------------------
+  // Help (`featrues/04-help-module.md` §9). This is the first read-aloud
+  // message that carries document text off the machine, so the shape is the
+  // only thing that gets through; over-long fields are truncated rather than
+  // rejected, because they are assembled from the document and a long section
+  // is the normal case.
+  // -------------------------------------------------------------------------
+
+  suite('parseHelpArgs', function () {
+    const PASSAGE = 'The passage the listener did not understand.';
+
+    function helpArgs(fieldOverrides, overrides) {
+      const base = {
+        sourceUri: URI,
+        requestId: REQUEST_ID,
+        passage: PASSAGE,
+      };
+      const merged = Object.assign({}, base, overrides);
+      const fields = Object.assign(
+        {
+          title: 'The Title',
+          breadcrumb: ['Chapter', 'Section'],
+          before: 'before',
+          after: 'after',
+          section: 'section',
+          contextMode: 'section',
+        },
+        fieldOverrides,
+      );
+      return [
+        merged.sourceUri,
+        merged.requestId,
+        merged.passage,
+        'fields' in merged ? merged.fields : fields,
+      ];
+    }
+
+    test('accepts the exact four-element shape', function () {
+      assert.deepStrictEqual(messages.parseHelpArgs(helpArgs()), {
+        sourceUri: URI,
+        requestId: REQUEST_ID,
+        passage: PASSAGE,
+        title: 'The Title',
+        breadcrumb: ['Chapter', 'Section'],
+        before: 'before',
+        after: 'after',
+        section: 'section',
+        contextMode: 'section',
+      });
+    });
+
+    test('accepts every context mode, and only those three', function () {
+      for (const contextMode of messages.HELP_CONTEXT_MODES) {
+        const parsed = messages.parseHelpArgs(helpArgs({ contextMode }));
+        assert.ok(parsed, contextMode);
+        assert.strictEqual(parsed.contextMode, contextMode);
+      }
+      for (const contextMode of ['whole', 'Section', '', 42, null, undefined]) {
+        assert.strictEqual(
+          messages.parseHelpArgs(helpArgs({ contextMode })),
+          undefined,
+          String(contextMode),
+        );
+      }
+    });
+
+    test('every optional field may be absent: only the passage is required', function () {
+      assert.deepStrictEqual(
+        messages.parseHelpArgs([
+          URI,
+          REQUEST_ID,
+          PASSAGE,
+          { contextMode: 'selection' },
+        ]),
+        {
+          sourceUri: URI,
+          requestId: REQUEST_ID,
+          passage: PASSAGE,
+          title: '',
+          breadcrumb: [],
+          before: '',
+          after: '',
+          section: '',
+          contextMode: 'selection',
+        },
+      );
+    });
+
+    test('rejects the wrong arity', function () {
+      assert.strictEqual(messages.parseHelpArgs([]), undefined);
+      assert.strictEqual(messages.parseHelpArgs([URI]), undefined);
+      assert.strictEqual(
+        messages.parseHelpArgs([URI, REQUEST_ID, PASSAGE]),
+        undefined,
+      );
+      assert.strictEqual(
+        messages.parseHelpArgs(helpArgs().concat(['extra'])),
+        undefined,
+      );
+      assert.strictEqual(messages.parseHelpArgs('nope'), undefined);
+      assert.strictEqual(messages.parseHelpArgs(undefined), undefined);
+      assert.strictEqual(
+        messages.parseHelpArgs({ 0: URI, length: 4 }),
+        undefined,
+      );
+    });
+
+    test('rejects a non-string or empty sourceUri', function () {
+      for (const sourceUri of ['', 42, null, undefined, {}, [URI]]) {
+        assert.strictEqual(
+          messages.parseHelpArgs(helpArgs(undefined, { sourceUri })),
+          undefined,
+          String(sourceUri),
+        );
+      }
+    });
+
+    test('rejects a requestId that fails REQUEST_ID_RE', function () {
+      for (const requestId of [
+        '',
+        'ra 1',
+        'ra/1',
+        'ra.1',
+        'ra:1',
+        '<script>',
+        'x'.repeat(65),
+        42,
+        null,
+        undefined,
+      ]) {
+        assert.strictEqual(
+          messages.parseHelpArgs(helpArgs(undefined, { requestId })),
+          undefined,
+          String(requestId),
+        );
+      }
+      // The shapes the webview actually mints do get through.
+      for (const requestId of ['ra-1', 'help_42', 'A-b_0', 'x'.repeat(64)]) {
+        assert.ok(
+          messages.parseHelpArgs(helpArgs(undefined, { requestId })),
+          requestId,
+        );
+      }
+    });
+
+    test('rejects an empty or whitespace-only passage', function () {
+      for (const passage of ['', '   ', '\n\n', '\r\n \t', 42, null, [], {}]) {
+        assert.strictEqual(
+          messages.parseHelpArgs(helpArgs(undefined, { passage })),
+          undefined,
+          JSON.stringify(passage),
+        );
+      }
+    });
+
+    test('rejects a fields argument that is not a plain object', function () {
+      for (const fields of ['fields', 42, null, undefined, [], [{}], true]) {
+        assert.strictEqual(
+          messages.parseHelpArgs(helpArgs(undefined, { fields })),
+          undefined,
+          String(fields),
+        );
+      }
+    });
+
+    test('rejects a non-string title, before, after or section', function () {
+      for (const key of ['title', 'before', 'after', 'section']) {
+        for (const value of [42, true, {}, ['a']]) {
+          const override = {};
+          override[key] = value;
+          assert.strictEqual(
+            messages.parseHelpArgs(helpArgs(override)),
+            undefined,
+            `${key}=${String(value)}`,
+          );
+        }
+      }
+    });
+
+    test('truncates over-long fields instead of rejecting them', function () {
+      const caps = messages.HELP_FIELD_CAPS;
+      const parsed = messages.parseHelpArgs(
+        helpArgs(
+          {
+            title: 'T'.repeat(caps.title + 500),
+            before: 'B'.repeat(caps.before + 500),
+            after: 'A'.repeat(caps.after + 500),
+            section: 'S'.repeat(caps.section + 500),
+          },
+          { passage: 'P'.repeat(caps.passage + 500) },
+        ),
+      );
+      assert.ok(
+        parsed,
+        'a long section is the normal case, not a rogue message',
+      );
+      assert.strictEqual(parsed.title.length, caps.title);
+      assert.strictEqual(parsed.before.length, caps.before);
+      assert.strictEqual(parsed.after.length, caps.after);
+      assert.strictEqual(parsed.section.length, caps.section);
+      assert.strictEqual(parsed.passage.length, caps.passage);
+      assert.deepStrictEqual(Object.assign({}, caps), {
+        title: 200,
+        breadcrumbLevels: 6,
+        breadcrumbLevel: 200,
+        before: 1500,
+        passage: 6000,
+        after: 1500,
+        // Four times the §3.1 prompt cap on purpose: this is a bound on a
+        // rogue message, and cutting from the front here would throw the
+        // [PASSAGE] marker away before help-prompt's trimAroundPassage saw it.
+        section: 24000,
+        question: 500,
+        previous: 6000,
+      });
+    });
+
+    test('the section cap leaves the [PASSAGE] marker for trimAroundPassage', function () {
+      const caps = messages.HELP_FIELD_CAPS;
+      assert.ok(
+        caps.section > 6000,
+        'the message cap must be looser than the §3.1 prompt cap',
+      );
+      const section = `${'A'.repeat(caps.section)}[PASSAGE]${'B'.repeat(50)}`;
+      const parsed = messages.parseHelpArgs(helpArgs({ section }));
+      assert.strictEqual(parsed.section.length, caps.section);
+      // A section big enough to lose the marker here is a rogue message, not a
+      // document: what the prompt sends is trimmed around the marker instead.
+      assert.ok(section.length > caps.section);
+    });
+
+    test('normalises CRLF in every capped field', function () {
+      const parsed = messages.parseHelpArgs(
+        helpArgs({ section: 'a\r\nb\rc' }, { passage: 'p\r\nq' }),
+      );
+      assert.strictEqual(parsed.section, 'a\nb\nc');
+      assert.strictEqual(parsed.passage, 'p\nq');
+    });
+
+    test('caps the breadcrumb at six levels and each level at 200 characters', function () {
+      const parsed = messages.parseHelpArgs(
+        helpArgs({
+          breadcrumb: ['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'h7', 'h8'],
+        }),
+      );
+      assert.deepStrictEqual(parsed.breadcrumb, [
+        'h1',
+        'h2',
+        'h3',
+        'h4',
+        'h5',
+        'h6',
+      ]);
+      assert.strictEqual(
+        parsed.breadcrumb.length,
+        messages.HELP_FIELD_CAPS.breadcrumbLevels,
+      );
+
+      const long = messages.parseHelpArgs(
+        helpArgs({ breadcrumb: ['x'.repeat(500), 'y'.repeat(201)] }),
+      );
+      assert.strictEqual(
+        long.breadcrumb[0].length,
+        messages.HELP_FIELD_CAPS.breadcrumbLevel,
+      );
+      assert.strictEqual(long.breadcrumb[1].length, 200);
+    });
+
+    test('an absent breadcrumb is an empty array', function () {
+      for (const breadcrumb of [undefined, null, []]) {
+        const parsed = messages.parseHelpArgs(helpArgs({ breadcrumb }));
+        assert.deepStrictEqual(parsed.breadcrumb, [], String(breadcrumb));
+      }
+    });
+
+    test('rejects a non-array breadcrumb and a non-string level', function () {
+      for (const breadcrumb of ['Chapter', 42, {}, true]) {
+        assert.strictEqual(
+          messages.parseHelpArgs(helpArgs({ breadcrumb })),
+          undefined,
+          String(breadcrumb),
+        );
+      }
+      for (const level of [42, null, {}, ['nested']]) {
+        assert.strictEqual(
+          messages.parseHelpArgs(helpArgs({ breadcrumb: ['ok', level] })),
+          undefined,
+          String(level),
+        );
+      }
+    });
+
+    test('accepts every known follow-up when it carries the explanation it follows', function () {
+      for (const followUp of messages.HELP_FOLLOW_UPS) {
+        const parsed = messages.parseHelpArgs(
+          helpArgs({
+            followUp,
+            previous: '### What it says\nthe answer on screen',
+            question: 'what does OIDC mean?',
+          }),
+        );
+        assert.ok(parsed, followUp);
+        assert.strictEqual(parsed.followUp, followUp);
+        assert.strictEqual(
+          parsed.previous,
+          '### What it says\nthe answer on screen',
+        );
+        assert.strictEqual(parsed.question, 'what does OIDC mean?');
+      }
+      assert.deepStrictEqual(Array.from(messages.HELP_FOLLOW_UPS), [
+        'simpler',
+        'deeper',
+        'example',
+        'question',
+      ]);
+    });
+
+    test('rejects an unknown follow-up', function () {
+      for (const followUp of ['harder', 'Simpler', '', 42, {}, ['simpler']]) {
+        assert.strictEqual(
+          messages.parseHelpArgs(helpArgs({ followUp, previous: 'prior' })),
+          undefined,
+          String(followUp),
+        );
+      }
+    });
+
+    test('rejects a follow-up with no previous explanation', function () {
+      for (const followUp of messages.HELP_FOLLOW_UPS) {
+        assert.strictEqual(
+          messages.parseHelpArgs(helpArgs({ followUp, question: 'why?' })),
+          undefined,
+          followUp,
+        );
+        assert.strictEqual(
+          messages.parseHelpArgs(
+            helpArgs({ followUp, previous: '', question: 'why?' }),
+          ),
+          undefined,
+          `${followUp} (empty previous)`,
+        );
+      }
+    });
+
+    test('rejects a question follow-up with no question', function () {
+      assert.strictEqual(
+        messages.parseHelpArgs(
+          helpArgs({ followUp: 'question', previous: 'prior' }),
+        ),
+        undefined,
+      );
+      assert.strictEqual(
+        messages.parseHelpArgs(
+          helpArgs({ followUp: 'question', previous: 'prior', question: '' }),
+        ),
+        undefined,
+      );
+      assert.ok(
+        messages.parseHelpArgs(
+          helpArgs({
+            followUp: 'question',
+            previous: 'prior',
+            question: 'why?',
+          }),
+        ),
+      );
+    });
+
+    test('a first request carries no followUp, question or previous', function () {
+      const parsed = messages.parseHelpArgs(helpArgs());
+      assert.strictEqual(parsed.followUp, undefined);
+      assert.strictEqual(parsed.question, undefined);
+      assert.strictEqual(parsed.previous, undefined);
+      assert.ok(!('followUp' in parsed));
+      assert.ok(!('question' in parsed));
+      assert.ok(!('previous' in parsed));
+    });
+
+    test('rejects a non-string question or previous', function () {
+      for (const value of [42, true, {}, ['a']]) {
+        assert.strictEqual(
+          messages.parseHelpArgs(helpArgs({ question: value })),
+          undefined,
+          `question=${String(value)}`,
+        );
+        assert.strictEqual(
+          messages.parseHelpArgs(helpArgs({ previous: value })),
+          undefined,
+          `previous=${String(value)}`,
+        );
+      }
+    });
+
+    test('truncates an over-long question and previous explanation', function () {
+      const parsed = messages.parseHelpArgs(
+        helpArgs({
+          followUp: 'question',
+          question: 'q'.repeat(1000),
+          previous: 'p'.repeat(10000),
+        }),
+      );
+      assert.strictEqual(
+        parsed.question.length,
+        messages.HELP_FIELD_CAPS.question,
+      );
+      assert.strictEqual(
+        parsed.previous.length,
+        messages.HELP_FIELD_CAPS.previous,
+      );
+    });
+
+    test('nothing beyond the F13 shape survives', function () {
+      const parsed = messages.parseHelpArgs(
+        helpArgs({
+          engine: 'custom',
+          command: ['rm', '-rf', '/'],
+          __proto__: {},
+        }),
+      );
+      assert.deepStrictEqual(Object.keys(parsed).sort(), [
+        'after',
+        'before',
+        'breadcrumb',
+        'contextMode',
+        'passage',
+        'requestId',
+        'section',
+        'sourceUri',
+        'title',
+      ]);
+    });
+  });
+
+  suite('parseHelpCancelArgs', function () {
+    test('accepts [uri, id] and [uri, id, reason]', function () {
+      assert.deepStrictEqual(messages.parseHelpCancelArgs([URI, REQUEST_ID]), {
+        sourceUri: URI,
+        requestId: REQUEST_ID,
+      });
+      assert.deepStrictEqual(
+        messages.parseHelpCancelArgs([URI, REQUEST_ID, 'sheet closed']),
+        { sourceUri: URI, requestId: REQUEST_ID, reason: 'sheet closed' },
+      );
+      assert.deepStrictEqual(
+        messages.parseHelpCancelArgs([URI, REQUEST_ID, undefined]),
+        { sourceUri: URI, requestId: REQUEST_ID },
+      );
+      assert.deepStrictEqual(
+        messages.parseHelpCancelArgs([URI, REQUEST_ID, null]),
+        { sourceUri: URI, requestId: REQUEST_ID },
+      );
+    });
+
+    test('flattens and caps the reason, which is only ever logged', function () {
+      assert.strictEqual(
+        messages.parseHelpCancelArgs([URI, REQUEST_ID, 'a\r\n\nb']).reason,
+        'a b',
+      );
+      assert.strictEqual(
+        messages.parseHelpCancelArgs([URI, REQUEST_ID, 'r'.repeat(500)]).reason
+          .length,
+        messages.MAX_CANCEL_REASON_CHARS,
+      );
+    });
+
+    test('rejects everything else', function () {
+      const bad = [
+        [],
+        [URI],
+        [URI, REQUEST_ID, 'reason', 'extra'],
+        ['', REQUEST_ID],
+        [42, REQUEST_ID],
+        [URI, 'bad id'],
+        [URI, ''],
+        [URI, 42],
+        [URI, REQUEST_ID, 42],
+        [URI, REQUEST_ID, {}],
+        'nope',
+        undefined,
+        null,
+      ];
+      for (const args of bad) {
+        assert.strictEqual(
+          messages.parseHelpCancelArgs(args),
+          undefined,
+          JSON.stringify(args),
+        );
+      }
+    });
+  });
 });

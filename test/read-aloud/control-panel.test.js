@@ -214,14 +214,16 @@ suite('read-aloud control panel (F3)', function () {
     }
   });
 
-  test('the panel is on screen from the start with the seven controls in order', function () {
+  test('the panel is on screen from the start with the eight controls in order', function () {
     assert.ok(bar(), 'the panel exists; logs: ' + logs.join('\n'));
     assert.strictEqual(bar().hidden, false, 'and is visible while idle');
-    // The panel's own row; the popovers and the theme settings sheet carry
-    // buttons of their own.
+    // The panel's own row; the popovers, the theme settings sheet and the
+    // help sheet carry buttons of their own.
     const order = Array.from(bar().querySelectorAll(':scope > button')).map(
       (el) => el.getAttribute('data-mpe-ra-action'),
     );
+    // 04-help-module §2: help sits between the speed and the ×, so the × is
+    // still the last control.
     assert.deepStrictEqual(order, [
       'volume',
       'theme',
@@ -229,8 +231,12 @@ suite('read-aloud control panel (F3)', function () {
       'play',
       'forward10',
       'speed',
+      'help',
       'close',
     ]);
+    // With no `helpAvailable` in the config — the web build, and this fixture
+    // — the button is not on screen at all.
+    assert.strictEqual(button('help').hidden, true);
     assert.strictEqual(button('speed').textContent, '1×');
     assert.strictEqual(button('back10').disabled, true, 'nothing to skip yet');
     assert.strictEqual(button('forward10').disabled, true);

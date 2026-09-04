@@ -37,7 +37,7 @@
     "run-in-browser:watch": "node build.js --web-dev && concurrently \"vscode-test-web --browser none --extensionDevelopmentPath=. ${SERVE_DIR:-.}\" \"npx http-server ./crossnote -p 6789 --cors\" \"node build.js --watch\"",
     "run-in-vscode-dev": "npx serve --cors -l 5000 --ssl-cert $HOME/certs/localhost.pem --ssl-key $HOME/certs/localhost-key.pem",
     "test": "pnpm test:unit",
-    "test:unit": "mocha --ui tdd --reporter spec test/find-fragment-target-line.test.js test/block-id-helpers.test.js test/rank-by-closeness.test.js test/read-aloud/word-spans.test.js test/read-aloud/chunker.test.js test/read-aloud/speakable.test.js test/read-aloud/error-mapping.test.js test/read-aloud/messages.test.js test/read-aloud/cache.test.js test/read-aloud/block-eligibility.test.js test/read-aloud/text-extraction.test.js test/read-aloud/selection.test.js test/read-aloud/click-to-read.test.js test/read-aloud/continuous-read.test.js test/read-aloud/player.test.js test/read-aloud/control-panel.test.js test/read-aloud/theme-settings.test.js test/read-aloud/reading-decoration.test.js test/read-aloud/kokoro-client.test.js test/read-aloud/kokoro-alignment.test.js",
+    "test:unit": "mocha --ui tdd --reporter spec test/find-fragment-target-line.test.js test/block-id-helpers.test.js test/rank-by-closeness.test.js test/read-aloud/word-spans.test.js test/read-aloud/chunker.test.js test/read-aloud/speakable.test.js test/read-aloud/error-mapping.test.js test/read-aloud/messages.test.js test/read-aloud/cache.test.js test/read-aloud/block-eligibility.test.js test/read-aloud/text-extraction.test.js test/read-aloud/selection.test.js test/read-aloud/click-to-read.test.js test/read-aloud/continuous-read.test.js test/read-aloud/player.test.js test/read-aloud/control-panel.test.js test/read-aloud/theme-settings.test.js test/read-aloud/reading-decoration.test.js test/read-aloud/kokoro-client.test.js test/read-aloud/kokoro-alignment.test.js test/read-aloud/help-prompt.test.js test/read-aloud/help-engine.test.js test/read-aloud/help-sheet.test.js",
     "vscode:prepublish": "pnpm install --frozen-lockfile && pnpm build",
     "watch": "gulp copy-files && gulp clean-out && node build.js --watch"
   },
@@ -212,6 +212,16 @@
       {
         "command": "markdown-preview-enhanced.readAloud.showLog",
         "title": "%markdown-preview-enhanced.readAloud.showLog.title%",
+        "enablement": "!isWeb"
+      },
+      {
+        "command": "markdown-preview-enhanced.readAloud.help",
+        "title": "%markdown-preview-enhanced.readAloud.help.title%",
+        "enablement": "!isWeb"
+      },
+      {
+        "command": "markdown-preview-enhanced.readAloud.help.chooseModel",
+        "title": "%markdown-preview-enhanced.readAloud.help.chooseModel.title%",
         "enablement": "!isWeb"
       }
     ],
@@ -953,6 +963,116 @@
           "type": "integer",
           "minimum": 1
         },
+        "markdown-preview-enhanced.readAloudHelpEngine": {
+          "description": "%markdown-preview-enhanced.readAloudHelpEngine.description%",
+          "default": "claude",
+          "type": "string",
+          "enum": [
+            "claude",
+            "codex",
+            "custom"
+          ],
+          "enumDescriptions": [
+            "%markdown-preview-enhanced.readAloudHelpEngine.enumDescriptions.0%",
+            "%markdown-preview-enhanced.readAloudHelpEngine.enumDescriptions.1%",
+            "%markdown-preview-enhanced.readAloudHelpEngine.enumDescriptions.2%"
+          ]
+        },
+        "markdown-preview-enhanced.readAloudHelpClaudeModel": {
+          "description": "%markdown-preview-enhanced.readAloudHelpClaudeModel.description%",
+          "default": "sonnet",
+          "type": "string",
+          "pattern": "^(fable|opus|sonnet|haiku|claude-[a-z0-9.-]+)$",
+          "patternErrorMessage": "%markdown-preview-enhanced.readAloudHelpClaudeModel.patternErrorMessage%"
+        },
+        "markdown-preview-enhanced.readAloudHelpClaudeEffort": {
+          "description": "%markdown-preview-enhanced.readAloudHelpClaudeEffort.description%",
+          "default": "low",
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        },
+        "markdown-preview-enhanced.readAloudHelpCodexModel": {
+          "description": "%markdown-preview-enhanced.readAloudHelpCodexModel.description%",
+          "default": "",
+          "type": "string"
+        },
+        "markdown-preview-enhanced.readAloudHelpCodexEffort": {
+          "description": "%markdown-preview-enhanced.readAloudHelpCodexEffort.description%",
+          "default": "low",
+          "type": "string",
+          "enum": [
+            "default",
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max",
+            "ultra"
+          ]
+        },
+        "markdown-preview-enhanced.readAloudHelpCommand": {
+          "description": "%markdown-preview-enhanced.readAloudHelpCommand.description%",
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "markdown-preview-enhanced.readAloudHelpContext": {
+          "description": "%markdown-preview-enhanced.readAloudHelpContext.description%",
+          "default": "section",
+          "type": "string",
+          "enum": [
+            "selection",
+            "section",
+            "document"
+          ],
+          "enumDescriptions": [
+            "%markdown-preview-enhanced.readAloudHelpContext.enumDescriptions.0%",
+            "%markdown-preview-enhanced.readAloudHelpContext.enumDescriptions.1%",
+            "%markdown-preview-enhanced.readAloudHelpContext.enumDescriptions.2%"
+          ]
+        },
+        "markdown-preview-enhanced.readAloudHelpAudience": {
+          "description": "%markdown-preview-enhanced.readAloudHelpAudience.description%",
+          "default": "a capable reader who is new to this subject",
+          "type": "string"
+        },
+        "markdown-preview-enhanced.readAloudHelpAutoPlay": {
+          "description": "%markdown-preview-enhanced.readAloudHelpAutoPlay.description%",
+          "default": true,
+          "type": "boolean"
+        },
+        "markdown-preview-enhanced.readAloudHelpTimeoutSeconds": {
+          "description": "%markdown-preview-enhanced.readAloudHelpTimeoutSeconds.description%",
+          "default": 90,
+          "type": "integer",
+          "minimum": 15,
+          "maximum": 300
+        },
+        "markdown-preview-enhanced.readAloudHelpBinaryPath": {
+          "description": "%markdown-preview-enhanced.readAloudHelpBinaryPath.description%",
+          "default": {},
+          "type": "object",
+          "scope": "machine",
+          "properties": {
+            "claude": {
+              "type": "string"
+            },
+            "codex": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
         "markdown-preview-enhanced.kokoroBaseUrl": {
           "description": "%markdown-preview-enhanced.kokoroBaseUrl.description%",
           "default": "http://127.0.0.1:8880",
@@ -1026,6 +1146,11 @@
       {
         "command": "markdown-preview-enhanced.readAloud.stop",
         "key": "alt+escape",
+        "when": "activeWebviewPanelId == 'markdown-preview-enhanced' || activeCustomEditorId == 'markdown-preview-enhanced'"
+      },
+      {
+        "command": "markdown-preview-enhanced.readAloud.help",
+        "key": "alt+h",
         "when": "activeWebviewPanelId == 'markdown-preview-enhanced' || activeCustomEditorId == 'markdown-preview-enhanced'"
       }
     ],

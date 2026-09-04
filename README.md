@@ -20,6 +20,7 @@ The original project README is preserved in git at `git show baseline-0.8.32:REA
 | Read aloud the preview selection | `⌥R`     |
 | Read aloud play/pause            | `⌥Space` |
 | Stop read aloud                  | `⌥Esc`   |
+| Explain the selection (help)     | `⌥H`     |
 
 ## Read aloud (Kokoro)
 
@@ -142,7 +143,7 @@ diagram or math is refused with a short inline hint.
 ### The control panel
 
 A rounded panel floats at the bottom centre of the preview whenever read aloud is enabled, with
-seven controls, left to right:
+eight controls, left to right:
 
 | Control            | What it does                                                                                                                                           |
 | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -152,6 +153,7 @@ seven controls, left to right:
 | **Play / pause**   | With nothing loaded, reads from the first block still on screen to the end of the document — the same read a play button in the gutter starts.         |
 | **+10 s**          | Skips forward ten seconds. Landing past the last synthesised word of the block does nothing, and the button greys out when that is the case.           |
 | **Speed**          | Shows the current rate and opens a slider, 0.25×–4×.                                                                                                   |
+| **Help (?)**       | Explains the selected passage with a headless LLM, in a sheet above the panel (below). Disabled until there is a selection to explain.                 |
 | **Close**          | Stops the read and puts the panel away. The next read brings it back.                                                                                  |
 
 Progress through the read is traced along the top edge of the panel, and _Loading…_, _Paused_,
@@ -183,6 +185,62 @@ also mid-playback.
 | **Player highlight theme** | Five palettes shown as sample cards. Persists in `markdown-preview-enhanced.readAloudHighlightTheme`.                         |
 
 _Global theme_ from the reference design is not built yet.
+
+### Help: explain the selection
+
+Select a passage you did not follow and press the **?** button (or <kbd>⌥H</kbd>). The read
+pauses where it is, a sheet opens above the panel, and a headless LLM writes an explanation of
+that passage in five parts — what it says, the terms, the passage in plain words, an example,
+and why it matters — written for the ear and about as long as the passage itself, never more
+than two minutes of audio. The answer is rendered through the preview's own markdown engine, so
+it looks like the document it explains, and it is read aloud as soon as it arrives.
+
+**The sheet is a second reading scope.** The same panel drives it: play/pause, ±10 s, speed,
+volume, the progress line and the word-by-word highlight all work there, a click on a word in
+the sheet starts or seeks the read, and a selection inside the sheet reads just that. A read in
+the sheet ends at the end of the sheet; the document's own read never wanders into it.
+
+**Resume** closes the sheet and continues the paused read from the same word. It survives an
+edit elsewhere in the document, because the paused block is remembered by its content rather
+than its position; if that block is gone, _Resume_ is disabled and says so.
+
+**Follow-ups.** _Simpler_, _Deeper_ and _Example_ ask again with the explanation on screen
+attached, and the _What confused you?_ box asks a question of your own. _Back_ walks the stack
+of explanations back up. Answers are cached by content, so a repeat is instant, and
+**Markdown Preview Enhanced: Clear Read Aloud Cache** empties them along with the audio.
+
+> **This is the only part of read aloud that sends text off this machine.** Kokoro is local;
+> help is not. It happens only when you press the help button, <kbd>⌥H</kbd>, a follow-up chip
+> or _Ask_ — never on opening a preview and never on selecting text. How much goes with the
+> passage is `markdown-preview-enhanced.readAloudHelpContext`: `selection` sends the passage,
+> the document title and the heading breadcrumb only; `section` (the default) adds the blocks
+> either side and the rest of the enclosing section; `document` sends the whole source. The
+> _MPE Read Aloud_ output channel logs character counts, never text.
+
+#### Which engine answers
+
+| Setting                                | Default                             | What it does                                                                        |
+| -------------------------------------- | ----------------------------------- | ----------------------------------------------------------------------------------- |
+| `readAloudHelpEngine`                  | `claude`                            | `claude -p`, `codex exec -`, or `custom`.                                           |
+| `readAloudHelpClaudeModel` / `…Effort` | `sonnet` / `low`                    | `--model` and `--effort` for claude (`fable`/`opus`/`sonnet`/`haiku`, `low`…`max`). |
+| `readAloudHelpCodexModel` / `…Effort`  | empty / `low`                       | `-m` and `model_reasoning_effort` for codex; empty and `default` omit the flag.     |
+| `readAloudHelpCommand`                 | `[]`                                | For `custom`: argv, prompt on stdin, answer on stdout.                              |
+| `readAloudHelpAudience`                | a capable reader new to the subject | Who the explanation is written for.                                                 |
+| `readAloudHelpAutoPlay`                | `true`                              | Read the explanation as soon as it arrives.                                         |
+| `readAloudHelpTimeoutSeconds`          | `90`                                | Kill the command after this.                                                        |
+| `readAloudHelpBinaryPath`              | `{}`                                | Absolute paths to `claude` / `codex`. Machine scope.                                |
+
+Effort is a trade you feel, because you are waiting with a read paused: `low` answers in a few
+seconds, `high` and above think for longer and cost more per answer. **Markdown Preview
+Enhanced: Choose Help Model** picks the model and the effort in two steps, and the sheet's own
+`claude · sonnet · low` label opens the same quick pick without leaving the preview.
+
+The command is spawned with an argv array — never a shell — in a fresh empty directory, so no
+project's `CLAUDE.md` or `AGENTS.md` is pulled into the prompt. If the binary is not on the
+extension host's `PATH` (it often is not, when VS Code is launched from the Dock) the login
+shell is asked; failing that, set `readAloudHelpBinaryPath`. The model's answer is treated as
+untrusted markdown: raw HTML is escaped and executable link targets are neutralised before
+anything is rendered.
 
 **Player font.** Ten choices — the theme's own font, the system UI font, Helvetica, Verdana,
 Trebuchet MS, Georgia, Palatino, Baskerville, Times New Roman and Menlo. Each is a stack that
@@ -237,11 +295,12 @@ scripts from being injected at all.
 
 ### Keybindings
 
-| Action               | Chord                  | Active when                                  |
-| -------------------- | ---------------------- | -------------------------------------------- |
-| Read aloud selection | `⌥R` / `Alt+R`         | the preview panel or custom editor has focus |
-| Play/pause           | `⌥Space` / `Alt+Space` | same                                         |
-| Stop                 | `⌥Esc` / `Alt+Esc`     | same                                         |
+| Action                | Chord                  | Active when                                  |
+| --------------------- | ---------------------- | -------------------------------------------- |
+| Read aloud selection  | `⌥R` / `Alt+R`         | the preview panel or custom editor has focus |
+| Play/pause            | `⌥Space` / `Alt+Space` | same                                         |
+| Stop                  | `⌥Esc` / `Alt+Esc`     | same                                         |
+| Explain the selection | `⌥H` / `Alt+H`         | same                                         |
 
 With the control panel focused, <kbd>Space</kbd> plays/pauses, <kbd>Esc</kbd> closes an open
 slider and otherwise stops, and <kbd>[</kbd>/<kbd>]</kbd> step through the speed stops.
@@ -258,6 +317,11 @@ Rebind those two commands in _Keyboard Shortcuts_ if you use Windows.
 - The server must be running; a stopped server is reported inline, not started for you.
 - A read is bounded by a 200,000-character request; a longer document is read up to the last
   block that fits.
+- Help needs a `claude` or `codex` CLI already signed in on this machine; it spawns a process,
+  so it is desktop-only too, and the **?** button is not there in VS Code for the Web.
+- Help explains a **selection**. Explaining the block being read without selecting it first is
+  not built yet, and neither is asking for help on the explanation itself — use the question
+  box for that.
 
 ## Identity
 

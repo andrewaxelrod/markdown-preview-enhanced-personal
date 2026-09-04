@@ -854,6 +854,253 @@
 }
 
 /* --------------------------------------------------------------------------
+ * 3d. The help sheet (`featrues/04-help-module.md` §4), opened from the ?
+ * button between the speed and the ×: the explanation, the follow-up chips
+ * and the question box.
+ *
+ * Wider and taller than the theme sheet, because it holds prose. Like the
+ * panel it carries `fixed`, so crossnote's zoom leaves it the same size on
+ * screen and the explanation does not zoom with the document (D8).
+ *
+ * `.mpe-ra-help-body` is the second reading scope (§5): it is deliberately
+ * *not* `.mpe-ra-ui`, so the reader sees its blocks, and it carries no
+ * styling of its own beyond width and scrolling — the preview theme, the
+ * player font and the highlight palette come from the document's own rules.
+ * ----------------------------------------------------------------------- */
+
+.mpe-ra-help {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 10px);
+  transform: translateX(-50%);
+  /* Below the volume, speed and theme popovers: the help sheet stays open
+   * while the reader works, and those three are momentary. */
+  z-index: 0;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 680px;
+  max-width: calc(100vw - 32px);
+  max-height: 60vh;
+  padding: 16px 20px 18px;
+  border: 1px solid var(--mpe-ra-panel-border);
+  border-radius: 16px;
+  background: var(--mpe-ra-panel-bg);
+  color: var(--mpe-ra-panel-fg);
+  box-shadow: var(--mpe-ra-panel-shadow);
+  font-family: var(--vscode-font-family, sans-serif);
+  font-size: 13px;
+  line-height: 1.35;
+  text-align: left;
+}
+
+.mpe-ra-help[hidden] {
+  display: none;
+}
+
+.mpe-ra-help:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, #007fd4);
+  outline-offset: 2px;
+}
+
+.mpe-ra-help-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+}
+
+.mpe-ra-help-title {
+  flex: 1 1 auto;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+/* The engine label is a button: it opens the Choose Help Model quick pick. */
+.mpe-ra-bar .mpe-ra-help-model {
+  flex: none;
+  padding: 3px 9px;
+  border: 1px solid var(--mpe-ra-panel-border);
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: nowrap;
+  cursor: pointer;
+  opacity: 0.85;
+}
+
+.mpe-ra-bar .mpe-ra-help-model:hover {
+  border-color: var(--mpe-ra-panel-track);
+  opacity: 1;
+}
+
+.mpe-ra-bar .mpe-ra-help-model:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, #007fd4);
+  outline-offset: 1px;
+}
+
+/* The typed question, above the answer *inside* the reading scope, so it is
+ * spoken before the answer is. This heading is the sheet's, not the model's. */
+.mpe-ra-help-body > .mpe-ra-help-question {
+  margin: 0 0 0.8em;
+  padding-left: 10px;
+  border-left: 3px solid var(--mpe-ra-panel-track);
+  font-style: italic;
+  opacity: 0.85;
+}
+
+.mpe-ra-help-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  /* The rendered explanation is preview markup, so it brings its own margins;
+   * only the first and last need flattening against the sheet's padding. */
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.mpe-ra-help-body > :first-child {
+  margin-top: 0;
+}
+
+.mpe-ra-help-body > :last-child {
+  margin-bottom: 0;
+}
+
+.mpe-ra-help-body h1,
+.mpe-ra-help-body h2,
+.mpe-ra-help-body h3,
+.mpe-ra-help-body h4 {
+  margin: 1em 0 0.35em;
+  border: 0;
+  font-size: 1em;
+  font-weight: 600;
+}
+
+.mpe-ra-help-body :is(p, ul, ol, blockquote) {
+  margin: 0.5em 0;
+}
+
+.mpe-ra-help-body :is(ul, ol) {
+  padding-left: 1.4em;
+}
+
+.mpe-ra-help-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  font-size: 12px;
+}
+
+.mpe-ra-help-status[hidden] {
+  display: none;
+}
+
+.mpe-ra-help-status-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  opacity: 0.85;
+}
+
+.mpe-ra-help-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  flex: none;
+  padding-top: 10px;
+  border-top: 1px solid var(--mpe-ra-panel-border);
+}
+
+.mpe-ra-help-chips,
+.mpe-ra-help-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mpe-ra-help-ask {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 220px;
+  min-width: 160px;
+}
+
+.mpe-ra-bar .mpe-ra-help-btn {
+  flex: none;
+  padding: 5px 11px;
+  border: 1px solid var(--mpe-ra-panel-border);
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.mpe-ra-bar .mpe-ra-help-btn:hover:not([disabled]) {
+  background: var(--mpe-ra-panel-hover);
+}
+
+.mpe-ra-bar .mpe-ra-help-btn:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, #007fd4);
+  outline-offset: 1px;
+}
+
+.mpe-ra-bar .mpe-ra-help-btn[disabled] {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.mpe-ra-bar .mpe-ra-help-btn[hidden] {
+  display: none;
+}
+
+/* Ask and Resume are the two the reader is meant to reach for. */
+.mpe-ra-bar .mpe-ra-help-send:not([disabled]),
+.mpe-ra-bar .mpe-ra-help-resume:not([disabled]) {
+  border-color: transparent;
+  background: var(--mpe-ra-accent);
+  color: var(--mpe-ra-accent-fg);
+}
+
+.mpe-ra-bar .mpe-ra-help-send:not([disabled]):hover,
+.mpe-ra-bar .mpe-ra-help-resume:not([disabled]):hover {
+  background: var(--mpe-ra-accent-hover);
+}
+
+.mpe-ra-help-input {
+  box-sizing: border-box;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 6px 11px;
+  border: 1px solid var(--mpe-ra-panel-border);
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.mpe-ra-help-input:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, #007fd4);
+  outline-offset: 1px;
+}
+
+.mpe-ra-help-input[disabled] {
+  opacity: 0.5;
+}
+
+/* --------------------------------------------------------------------------
  * 4. Selection affordance and hints (F2)
  * ----------------------------------------------------------------------- */
 
@@ -895,6 +1142,7 @@
   .mpe-ra-bar-status,
   .mpe-ra-pop,
   .mpe-ra-sheet,
+  .mpe-ra-help,
   .mpe-ra-float,
   .mpe-ra-hint {
     border-color: CanvasText;

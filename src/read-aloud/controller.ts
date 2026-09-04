@@ -16,6 +16,38 @@ import {
   type ErrorAction,
   type ReadAloudErrorInfo,
 } from './error-mapping';
+import { normaliseHelpAnswer, sanitizeHelpAnswer } from './help-answer';
+import {
+  HELP_CACHE_DIR_NAME,
+  helpCacheKey,
+  ReadAloudHelpCache,
+} from './help-cache';
+import {
+  CLAUDE_EFFORTS,
+  CLAUDE_MODEL_ALIASES,
+  CODEX_EFFORTS,
+  CLAUDE_MODEL_RE,
+  defaultHelpEngineDeps,
+  engineLabel,
+  HelpEngineError,
+  runHelpEngine,
+  type HelpEngineConfig,
+  type HelpEngineDeps,
+} from './help-engine';
+import {
+  buildCodexPrompt,
+  buildFirstRequest,
+  buildFollowUp,
+  buildSystemPrompt,
+  clampField,
+  followUpFor,
+  HELP_CAPS,
+  normaliseQuestion,
+  PASSAGE_MARKER,
+  trimAroundPassage,
+  wordTargetForPassage,
+  type HelpFields,
+} from './help-prompt';
 import { alignKokoroWords } from './kokoro-alignment';
 import {
   DEFAULT_KOKORO_VOICE,
@@ -35,23 +67,28 @@ import {
   readAloudLog,
   showReadAloudLog,
 } from './log';
-import type {
-  CancelRequest,
-  HostToWebviewMessage,
-  PlayingRequest,
-  ReadAloudConfigMessage,
-  ReadAloudControlAction,
-  ReadAloudFont,
-  ReadAloudHighlightTheme,
-  ReadAloudKind,
-  SynthesizeRequest,
+import {
+  HELP_FIELD_CAPS,
+  type CancelRequest,
+  type HelpRequest,
+  type HostToWebviewMessage,
+  type PlayingRequest,
+  type ReadAloudConfigMessage,
+  type ReadAloudControlAction,
+  type ReadAloudFont,
+  type ReadAloudHighlightTheme,
+  type ReadAloudKind,
+  type SynthesizeRequest,
 } from './messages';
 import {
+  readHelpSettings,
   readReadAloudSettings,
   writeFontSetting,
+  writeHelpModelSettings,
   writeHighlightThemeSetting,
   writeSpeedSetting,
   writeVolumeSetting,
+  type ReadAloudHelpSettings,
   type ReadAloudSettingKey,
   type ReadAloudSettings,
 } from './settings';
@@ -73,6 +110,8 @@ import type { WordSpan } from './word-spans';
 
 const WEB_BUILD_MESSAGE =
   'Read aloud is not available in VS Code for the Web (v1).';
+/** §11 check 12 — the help button is absent in the web build; `Alt+H` says so. */
+const HELP_WEB_BUILD_MESSAGE = 'Help is not available in the web extension.';
 const SETUP_CHOOSE_VOICE = 'Choose Read Aloud Voice';
 const SETUP_SHOW_LOG = 'Show Read Aloud Log';
 const SETUP_CHECK_KOKORO = 'Check Kokoro Server';
@@ -104,6 +143,14 @@ export interface ControllerDeps {
     exceptSourceUri?: string,
   ): Promise<void>;
   refreshAllPreviews(): void;
+  /**
+   * Help §6 — the model's markdown through the *preview's own* engine, so the
+   * explanation carries the same markdown-it plugins, the same classes and
+   * the same code-span and list markup as the document around it.
+   */
+  renderMarkdown(sourceUri: vscode.Uri, markdown: string): Promise<string>;
+  /** Help §3.1 — the markdown source, for `readAloudHelpContext = document`. */
+  getDocumentText(sourceUri: vscode.Uri): Promise<string | undefined>;
 }
 
 /** One block of a read, as the host sees it (decision 5). */
@@ -195,13 +242,67 @@ function metaOfError(error: unknown): ResponseMeta | undefined {
   return error instanceof KokoroHttpError ? error.meta : undefined;
 }
 
+/** The settings shape the engine wants (§7.1 -> §7.2). */
+function helpEngineConfig(help: ReadAloudHelpSettings): HelpEngineConfig {
+  return {
+    engine: help.engine,
+    claudeModel: help.claudeModel,
+    claudeEffort: help.claudeEffort,
+    codexModel: help.codexModel,
+    codexEffort: help.codexEffort,
+    command: help.command,
+    timeoutSeconds: help.timeoutSeconds,
+    binaryPath: help.binaryPath,
+  };
+}
+
+/**
+ * §14.2, `document` mode — put `[PASSAGE]` where the passage starts in the
+ * markdown source. The passage is *extracted* text, so it never matches the
+ * source byte for byte: the first few words are turned into a whitespace-
+ * tolerant pattern instead. When they cannot be found the marker is left out
+ * and the caller logs it, exactly as §14.2 says.
+ */
+export function insertPassageMarker(source: string, passage: string): string {
+  const words = passage.trim().split(/\s+/).filter(Boolean).slice(0, 8);
+  if (words.length === 0) {
+    return source;
+  }
+  const pattern = words
+    .map((word) => word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('[\\s\\S]{0,40}?');
+  let match: RegExpExecArray | null;
+  try {
+    match = new RegExp(pattern).exec(source);
+  } catch {
+    match = null;
+  }
+  if (!match) {
+    readAloudLog(
+      'help context=document: passage not found in the source; no marker',
+    );
+    return source;
+  }
+  return `${source.slice(0, match.index)}\n${PASSAGE_MARKER}\n${source.slice(match.index)}`;
+}
+
 let instance: ReadAloudController | undefined;
+
+/** One help request (§4): at most one in flight, a new one supersedes it. */
+interface HelpJob {
+  sourceUri: string;
+  requestId: string;
+  abort: AbortController;
+}
 
 export class ReadAloudController implements vscode.Disposable {
   private readonly deps: ControllerDeps;
   private readonly cache: ReadAloudCache;
+  private readonly helpCache: ReadAloudHelpCache;
+  private readonly helpEngineDeps: HelpEngineDeps;
   private webNoticeShown = false;
   private job: Job | null = null;
+  private helpJob: HelpJob | null = null;
 
   private constructor(context: vscode.ExtensionContext, deps: ControllerDeps) {
     this.deps = deps;
@@ -210,6 +311,10 @@ export class ReadAloudController implements vscode.Disposable {
       dir,
       readReadAloudSettings().cacheSizeMB * BYTES_PER_MB,
     );
+    this.helpCache = new ReadAloudHelpCache(
+      path.join(context.globalStorageUri.fsPath, HELP_CACHE_DIR_NAME),
+    );
+    this.helpEngineDeps = defaultHelpEngineDeps((line) => readAloudLog(line));
   }
 
   /** Idempotent. */
@@ -262,8 +367,10 @@ export class ReadAloudController implements vscode.Disposable {
     }
     try {
       const removed = this.cache.clear();
+      // D10 — the same command empties the help answers.
+      const help = this.helpCache.clear();
       void vscode.window.showInformationMessage(
-        `Read aloud cache cleared (${removed} entries).`,
+        `Read aloud cache cleared (${removed} audio entries, ${help} help answers).`,
       );
     } catch (error) {
       this.reportCommandError(error);
@@ -312,6 +419,12 @@ export class ReadAloudController implements vscode.Disposable {
 
   /** F3/F13 — `readAloudControl` from a command or keybinding. */
   public async control(action: ReadAloudControlAction): Promise<void> {
+    if (action === 'help' && this.deps.isWebBuild) {
+      // §11 check 12 — the web build has no help button, and `Alt+H` says why
+      // rather than falling through to the generic read-aloud notice.
+      void vscode.window.showInformationMessage(HELP_WEB_BUILD_MESSAGE);
+      return;
+    }
     if (this.guardWebBuild()) {
       return;
     }
@@ -376,6 +489,411 @@ export class ReadAloudController implements vscode.Disposable {
     }
   }
 
+  // ------------------------------------------------------------------- help
+
+  /**
+   * §7.1 — the _Choose Help Model_ quick pick: the model, then the effort,
+   * for whichever engine is in use. Writing the settings broadcasts a new
+   * `readAloudConfig`, which is what re-labels an open sheet at once.
+   */
+  public async chooseHelpModelCommand(): Promise<void> {
+    if (this.guardWebBuild()) {
+      return;
+    }
+    try {
+      const help = readHelpSettings();
+      if (help.engine === 'custom') {
+        void vscode.window.showInformationMessage(
+          'The help engine is set to `custom`, which takes its whole command from markdown-preview-enhanced.readAloudHelpCommand. Switch readAloudHelpEngine to claude or codex to choose a model here.',
+        );
+        return;
+      }
+      const model = await this.pickHelpModel(help);
+      if (model === undefined) {
+        return;
+      }
+      const effort = await this.pickHelpEffort(help);
+      if (effort === undefined) {
+        return;
+      }
+      await writeHelpModelSettings(help.engine, model, effort);
+      readAloudLog(
+        `help model set engine=${help.engine} model=${model || '(default)'} effort=${effort}`,
+      );
+    } catch (error) {
+      this.reportCommandError(error);
+    }
+  }
+
+  private async pickHelpModel(
+    help: ReadAloudHelpSettings,
+  ): Promise<string | undefined> {
+    const ENTER = 'Enter a model id…';
+    if (help.engine === 'claude') {
+      const items = CLAUDE_MODEL_ALIASES.map((alias) => ({
+        label: alias,
+        description:
+          alias === help.claudeModel
+            ? "the CLI's latest model of that name (current)"
+            : "the CLI's latest model of that name",
+      }));
+      const picked = await vscode.window.showQuickPick(
+        [
+          ...items,
+          { label: ENTER, description: 'a full id, e.g. claude-fable-5' },
+        ],
+        { placeHolder: `Help model for claude (now: ${help.claudeModel})` },
+      );
+      if (!picked) {
+        return undefined;
+      }
+      if (picked.label !== ENTER) {
+        return picked.label;
+      }
+      const typed = await vscode.window.showInputBox({
+        prompt: 'Model id for claude --model',
+        value: help.claudeModel,
+        validateInput: (value) =>
+          CLAUDE_MODEL_RE.test(value.trim())
+            ? undefined
+            : 'Use fable, opus, sonnet, haiku, or a full claude-… id.',
+      });
+      return typed === undefined ? undefined : typed.trim();
+    }
+    const typed = await vscode.window.showInputBox({
+      prompt: 'Model id for codex -m (empty uses the CLI’s configured default)',
+      value: help.codexModel,
+      placeHolder: 'gpt-5.6-sol',
+    });
+    return typed === undefined ? undefined : typed.trim();
+  }
+
+  private async pickHelpEffort(
+    help: ReadAloudHelpSettings,
+  ): Promise<string | undefined> {
+    // D6 — effort is a trade the listener feels: they are waiting with a read
+    // paused, so the cost of each level is spelled out rather than implied.
+    const descriptions: Record<string, string> = {
+      default: "no override; the CLI's configured effort answers",
+      none: 'no reasoning at all — fastest, weakest',
+      minimal: 'barely any reasoning',
+      low: 'a few seconds (default)',
+      medium: 'thinks a little longer',
+      high: 'thinks noticeably longer, costs more per answer',
+      xhigh: 'slower still; for genuinely hard material',
+      max: 'the most thinking the model will do',
+      ultra: 'beyond max, where the model accepts it',
+    };
+    const current =
+      help.engine === 'claude' ? help.claudeEffort : help.codexEffort;
+    const levels: readonly string[] =
+      help.engine === 'claude' ? CLAUDE_EFFORTS : CODEX_EFFORTS;
+    const picked = await vscode.window.showQuickPick(
+      levels.map((level) => ({
+        label: level,
+        description:
+          (descriptions[level] ?? '') + (level === current ? ' (current)' : ''),
+      })),
+      { placeHolder: `Effort for ${help.engine} (now: ${current})` },
+    );
+    return picked?.label;
+  }
+
+  /**
+   * §9 `readAloudHelp`. Resolves once the answer (or the error) has been
+   * posted. One request in flight per preview: a new one supersedes the old,
+   * killing its child.
+   */
+  public async help(request: HelpRequest): Promise<void> {
+    if (this.deps.isWebBuild) {
+      await this.postHelpError(
+        request.sourceUri,
+        request.requestId,
+        HELP_WEB_BUILD_MESSAGE,
+        false,
+      );
+      return;
+    }
+
+    const sourceUri = normalizeUri(request.sourceUri);
+    this.cancelHelp('superseded');
+    const job: HelpJob = {
+      sourceUri,
+      requestId: request.requestId,
+      abort: new AbortController(),
+    };
+    this.helpJob = job;
+
+    const help = readHelpSettings();
+    const started = Date.now();
+    try {
+      const fields = await this.buildHelpFields(request, help);
+      const words = wordTargetForPassage(request.passage);
+      const question = request.question
+        ? normaliseQuestion(request.question)
+        : '';
+      const followUp = request.followUp
+        ? followUpFor(request.followUp, words, question)
+        : null;
+      const finalWords = followUp ? followUp.words : words;
+      const previous = request.previous
+        ? clampField(request.previous, HELP_CAPS.previous)
+        : '';
+
+      const systemPrompt = buildSystemPrompt(help.audience);
+      const userPrompt = followUp
+        ? buildFollowUp(fields, previous, followUp.request, finalWords)
+        : buildFirstRequest(fields, finalWords);
+      const config = helpEngineConfig(help);
+      const label = engineLabel(config);
+
+      const key = helpCacheKey({
+        engine: label.engine,
+        model: label.model,
+        effort: label.effort,
+        audience: help.audience,
+        contextMode: fields.contextMode,
+        title: fields.title,
+        breadcrumb: fields.breadcrumb.join(' > '),
+        before: fields.before,
+        passage: fields.passage,
+        after: fields.after,
+        section:
+          fields.contextMode === 'document'
+            ? (fields.document ?? '')
+            : fields.section,
+        question: followUp ? `${request.followUp}:${question}` : '',
+        previous,
+      });
+
+      const cached = this.helpCache.get(key);
+      let markdown: string;
+      let cacheState: 'hit' | 'miss' = 'hit';
+      if (cached) {
+        markdown = cached.markdown;
+      } else {
+        cacheState = 'miss';
+        const run = await runHelpEngine(
+          {
+            config,
+            systemPrompt,
+            userPrompt,
+            codexPrompt: buildCodexPrompt(systemPrompt, userPrompt),
+            signal: job.abort.signal,
+          },
+          this.helpEngineDeps,
+        );
+        markdown = normaliseHelpAnswer(run.markdown);
+        if (!markdown) {
+          throw new HelpEngineError(
+            'engine_empty',
+            `${label.engine} returned an empty answer.`,
+            true,
+          );
+        }
+        this.helpCache.set(key, {
+          markdown,
+          engine: label.engine,
+          model: label.model,
+          effort: label.effort,
+          createdAt: Date.now(),
+        });
+      }
+
+      if (job.abort.signal.aborted) {
+        return;
+      }
+
+      // §6 — the answer is untrusted markdown, so every `<` is escaped and
+      // every executable link target neutralised *before* the preview engine
+      // is allowed anywhere near it.
+      const html = await this.deps.renderMarkdown(
+        vscode.Uri.parse(request.sourceUri),
+        sanitizeHelpAnswer(markdown),
+      );
+      if (job.abort.signal.aborted) {
+        return;
+      }
+      const durationMs = Date.now() - started;
+      this.logHelp(request, help, label, cacheState, userPrompt.length, {
+        durationMs,
+      });
+      if (this.helpJob === job) {
+        this.helpJob = null;
+      }
+      const sink = await this.deps.getSinkFor(
+        vscode.Uri.parse(request.sourceUri),
+      );
+      await sink.post({
+        command: 'readAloudHelpResult',
+        requestId: request.requestId,
+        html,
+        markdown,
+        engine: label.engine,
+        model: label.model,
+        effort: label.effort,
+        cached: cacheState === 'hit',
+        durationMs,
+      });
+    } catch (error) {
+      if (this.helpJob === job) {
+        this.helpJob = null;
+      }
+      if (error instanceof HelpEngineError && error.code === 'cancelled') {
+        return;
+      }
+      if (job.abort.signal.aborted) {
+        return;
+      }
+      const label = engineLabel(helpEngineConfig(help));
+      const message =
+        error instanceof HelpEngineError
+          ? error.message
+          : `Help failed: ${error instanceof Error ? error.message : String(error)}`;
+      const retryable =
+        error instanceof HelpEngineError ? error.retryable : true;
+      this.logHelp(request, help, label, 'miss', 0, {
+        durationMs: Date.now() - started,
+        error: error instanceof HelpEngineError ? error.code : 'unknown',
+      });
+      await this.postHelpError(
+        request.sourceUri,
+        request.requestId,
+        message,
+        retryable,
+      );
+    }
+  }
+
+  /** §9 `readAloudHelpCancel`; a no-op for anything but the running request. */
+  public helpCancel(cancel: CancelRequest): void {
+    if (this.deps.isWebBuild) {
+      return;
+    }
+    const job = this.helpJob;
+    if (
+      !job ||
+      job.requestId !== cancel.requestId ||
+      job.sourceUri !== normalizeUri(cancel.sourceUri)
+    ) {
+      return;
+    }
+    this.cancelHelp(cancel.reason ?? 'webview');
+  }
+
+  private cancelHelp(reason: string): void {
+    const job = this.helpJob;
+    if (!job) {
+      return;
+    }
+    this.helpJob = null;
+    job.abort.abort();
+    readAloudLog(`help cancelled req=${job.requestId} reason=${reason}`);
+  }
+
+  /**
+   * §3.1 — the fields the prompt is assembled from, capped here rather than in
+   * the webview so the caps are the host's, and with `document` mode's source
+   * read from the open document.
+   */
+  private async buildHelpFields(
+    request: HelpRequest,
+    help: ReadAloudHelpSettings,
+  ): Promise<HelpFields> {
+    const contextMode = help.contextMode;
+    const fields: HelpFields = {
+      title: clampField(request.title, HELP_CAPS.title),
+      breadcrumb: request.breadcrumb
+        .slice(0, HELP_CAPS.breadcrumbLevels)
+        .map((level) => clampField(level, HELP_CAPS.breadcrumbLevel))
+        .filter((level) => level.length > 0),
+      before: clampField(request.before, HELP_CAPS.before),
+      after: clampField(request.after, HELP_CAPS.after),
+      // `messages.ts` allows a wider section than the prompt wants, so the
+      // even trim around `[PASSAGE]` happens here rather than by a front cut
+      // at the boundary (§14.2).
+      section: trimAroundPassage(
+        clampField(request.section, HELP_FIELD_CAPS.section),
+        HELP_CAPS.section,
+      ),
+      passage: clampField(request.passage, HELP_CAPS.passage),
+      contextMode,
+    };
+    if (contextMode !== 'document') {
+      return fields;
+    }
+    let source: string | undefined;
+    try {
+      source = await this.deps.getDocumentText(
+        vscode.Uri.parse(request.sourceUri),
+      );
+    } catch (error) {
+      readAloudLog(`help document read failed: ${String(error)}`);
+    }
+    if (!source) {
+      readAloudLog('help context=document: no document text; using section');
+      fields.contextMode = 'section';
+      return fields;
+    }
+    if (source.length > HELP_CAPS.document) {
+      readAloudLog(
+        `help context=document: ${source.length} chars is over the ${HELP_CAPS.document} cap; using section`,
+      );
+      fields.contextMode = 'section';
+      return fields;
+    }
+    fields.document = insertPassageMarker(source, fields.passage);
+    return fields;
+  }
+
+  private async postHelpError(
+    sourceUri: string,
+    requestId: string,
+    message: string,
+    retryable: boolean,
+  ): Promise<void> {
+    try {
+      const sink = await this.deps.getSinkFor(vscode.Uri.parse(sourceUri));
+      await sink.post({
+        command: 'readAloudHelpError',
+        requestId,
+        message,
+        retryable,
+      });
+    } catch (error) {
+      readAloudLog(`help error post failed req=${requestId}: ${String(error)}`);
+    }
+  }
+
+  /** §4 — one line per request; character counts, never the text (§10). */
+  private logHelp(
+    request: HelpRequest,
+    help: ReadAloudHelpSettings,
+    label: { engine: string; model: string; effort: string },
+    cache: 'hit' | 'miss',
+    promptChars: number,
+    outcome: { durationMs: number; error?: string },
+  ): void {
+    const parts = [
+      'help',
+      `req=${request.requestId}`,
+      `engine=${label.engine}`,
+      `model=${label.model || '(default)'}`,
+      `effort=${label.effort}`,
+      `context=${help.contextMode}`,
+      `follow-up=${request.followUp ?? 'first'}`,
+      `passage=${request.passage.length}ch`,
+      `previous=${request.previous?.length ?? 0}ch`,
+      `sent=${promptChars}ch`,
+      `cache=${cache}`,
+      `dur=${outcome.durationMs}ms`,
+    ];
+    if (outcome.error) {
+      parts.push(`error=${outcome.error}`);
+    }
+    readAloudLog(parts.join(' '));
+  }
+
   // ----------------------------------------------------------------- config
 
   /**
@@ -385,6 +903,7 @@ export class ReadAloudController implements vscode.Disposable {
    */
   public buildInitialConfig(): ReadAloudConfigMessage {
     const settings = readReadAloudSettings();
+    const label = engineLabel(helpEngineConfig(settings.help));
     return {
       command: 'readAloudConfig',
       enabled: settings.enabled,
@@ -395,6 +914,13 @@ export class ReadAloudController implements vscode.Disposable {
       modelId: KOKORO_MODEL_ID,
       highlightTheme: settings.highlightTheme,
       font: settings.font,
+      // Spawning a process is Node-only, so the button is hidden in the web
+      // build the way every other Node-only path is (§1).
+      helpAvailable: !this.deps.isWebBuild,
+      helpEngine: label.engine,
+      helpModel: label.model,
+      helpEffort: label.effort,
+      helpAutoPlay: settings.help.autoPlay,
     };
   }
 
@@ -587,6 +1113,10 @@ export class ReadAloudController implements vscode.Disposable {
     if (this.deps.isWebBuild) {
       return;
     }
+    const helpJob = this.helpJob;
+    if (helpJob && helpJob.sourceUri === normalizeUri(sourceUri)) {
+      this.cancelHelp(reason);
+    }
     const job = this.job;
     if (!job || job.sourceUri !== normalizeUri(sourceUri)) {
       return;
@@ -633,6 +1163,7 @@ export class ReadAloudController implements vscode.Disposable {
 
   public dispose(): void {
     this.cancelAll('deactivated');
+    this.cancelHelp('deactivated');
     disposeReadAloudLog();
     if (instance === this) {
       instance = undefined;

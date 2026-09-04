@@ -86,6 +86,8 @@ const SOURCE_URI_GUARDED_COMMANDS: Set<string> = new Set([
   'readAloudSynthesize',
   'readAloudCancel',
   'readAloudPlaying',
+  'readAloudHelp',
+  'readAloudHelpCancel',
 ]);
 
 /**
@@ -118,6 +120,9 @@ const WEBVIEW_MESSAGE_COMMANDS: Set<string> = new Set([
   'pasteImageFile',
   'princeExport',
   'readAloudCancel',
+  'readAloudHelp',
+  'readAloudHelpCancel',
+  'readAloudHelpChooseModel',
   'readAloudOpenSetup',
   'readAloudPlaying',
   'readAloudSetFont',
@@ -489,6 +494,32 @@ export class PreviewProvider {
    * TODO: Free memory
    */
   public destroyEngine(_sourceUri: vscode.Uri) {}
+
+  /**
+   * Render one markdown fragment through *this document's own* engine
+   * (`featrues/04-help-module.md` §6): the read-aloud help sheet shows the
+   * model's explanation with the same markdown-it plugins, classes and list
+   * markup as the document around it, so it inherits the preview theme with no
+   * styling of its own.
+   *
+   * The caller is responsible for the escaping of §6 — the answer is untrusted
+   * markdown, and nothing here sanitises it.
+   */
+  public async renderMarkdownFragment(
+    sourceUri: vscode.Uri,
+    markdown: string,
+  ): Promise<string> {
+    const engine = this.getEngine(sourceUri);
+    if (!engine) {
+      throw new Error('No markdown engine for this document.');
+    }
+    const { html } = await engine.parseMD(markdown, {
+      isForPreview: true,
+      useRelativeFilePath: false,
+      hideFrontMatter: true,
+    });
+    return html;
+  }
 
   private getEngine(sourceUri: Uri) {
     return this.notebook.getNoteMarkdownEngine(sourceUri.fsPath);

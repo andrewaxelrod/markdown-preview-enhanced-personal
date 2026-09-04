@@ -73,6 +73,12 @@
   var GUTTER_MIN_PX = 28;
   // Click to read (F17): wait out the double-click window before starting.
   var CLICK_READ_DELAY_MS = 250;
+  // Help (04-help-module §4): how often the "Thinking… (n s)" counter ticks
+  // while the engine is working, and the class on the sheet's reading scope.
+  var HELP_TICK_MS = 1000;
+  var HELP_BODY_CLASS = 'mpe-ra-help-body';
+  var HELP_TOOLTIP = 'Explain the selection';
+  var HELP_TOOLTIP_DISABLED = 'Select text to get help';
   // Class on the preview root while click to read is on: playable text
   // shows a pointer (media/read-aloud.css).
   var CLICK_CLASS = 'mpe-ra-click';
@@ -155,6 +161,13 @@
       '<text x="11.6" y="15.3" text-anchor="middle" font-size="8"' +
       ' font-weight="700" fill="currentColor" stroke="none">10</text></svg>',
     close: STROKE + '<path d="M6.2 6.2 17.8 17.8M17.8 6.2 6.2 17.8"/></svg>',
+    // Help (04-help-module §2): a ? in a circle, between the speed and the ×.
+    help:
+      STROKE +
+      '<circle cx="12" cy="12" r="8.6"/>' +
+      '<path d="M9.7 9.5a2.35 2.35 0 1 1 2.9 2.28c-.53.14-.9.62-.9 1.17v.62"/>' +
+      '<circle cx="11.95" cy="16.4" r="1.05" fill="currentColor" stroke="none"/>' +
+      '</svg>',
   };
 
   var NAV_KEYS = {
@@ -180,6 +193,14 @@
     modelId: '',
     highlightTheme: core.DEFAULT_HIGHLIGHT_THEME,
     font: core.DEFAULT_PLAYER_FONT,
+    // Help (04-help-module §7.1). `helpAvailable` is false in the web build,
+    // where no process can be spawned, and hides the button entirely.
+    helpAvailable: false,
+    helpEngine: 'claude',
+    helpModel: 'sonnet',
+    helpEffort: 'low',
+    helpAutoPlay: true,
+    helpContextMode: 'section',
   };
   try {
     if (
@@ -201,6 +222,7 @@
           parsed.highlightTheme,
         );
         config.font = core.normalisePlayerFont(parsed.font);
+        applyHelpConfig(parsed);
       }
     }
   } catch (error) {
@@ -212,6 +234,12 @@
   var blocks = [];
   var blocksByKey = Object.create(null);
   var blocksByElement = new Map();
+  // The help sheet is a *second reading scope* (04-help-module §5): the same
+  // player, panel, highlighting and click-to-read, over the blocks of the
+  // sheet body instead of the preview root. Its block list is kept apart from
+  // the document's, because a re-render replaces one and never the other.
+  var helpBlocks = [];
+  var helpBlocksByElement = new Map();
   var rate = config.speed;
   var volume = config.volume;
   var requestCounter = 0;
@@ -251,6 +279,34 @@
   var programmaticScrollUntil = 0;
   var floatSelection = null;
   var floatRect = null;
+  // Which scope the floating affordance's selection belongs to: the preview
+  // root, or the help sheet's body. The help button follows the first only
+  // (04-help-module D9).
+  var floatScope = null;
+
+  /**
+   * The help sheet (04-help-module §4). One request in flight; `context` is
+   * the first request's material, which every follow-up reuses byte for byte
+   * (§14.3), and `stack` is the Back stack of explanations already shown.
+   */
+  var help = {
+    open: false,
+    // 'idle' | 'thinking' | 'ready' | 'error'
+    state: 'idle',
+    requestId: null,
+    markdown: '',
+    html: '',
+    stack: [],
+    question: '',
+    context: null,
+    resume: null,
+    startedAt: 0,
+    timer: 0,
+    message: '',
+    // What Retry resends, and which follow-up the answer in flight belongs to.
+    last: null,
+    pending: null,
+  };
   var pendingClick = null;
   var mediaPool = null;
   // Whether the last gesture was a key press: a popover opened from the
@@ -265,6 +321,11 @@
       state: 'idle',
       requestId: null,
       kind: null,
+      // The element the read belongs to (04-help-module §5): the preview root
+      // for a document read, the help sheet's body for a help read. Every
+      // click, selection and hand-off is relative to it, and a read never
+      // leaves it.
+      scope: null,
       blockEl: null,
       blockEls: [],
       // The blocks of the read in document order (F15, decision 5), each
@@ -392,7 +453,35 @@
   }
 
   function entryForElement(el) {
-    return el ? blocksByElement.get(el) || null : null;
+    if (!el) {
+      return null;
+    }
+    return blocksByElement.get(el) || helpBlocksByElement.get(el) || null;
+  }
+
+  /** The body of the help sheet, once it exists; the second reading scope. */
+  function helpBody() {
+    return barParts && barParts.help ? barParts.help.body : null;
+  }
+
+  /**
+   * Which scope `el` belongs to (04-help-module §5): the help sheet's body
+   * when it is inside it, the preview root otherwise. Null when neither.
+   */
+  function scopeOf(el) {
+    if (!el) {
+      return null;
+    }
+    var sheetBody = helpBody();
+    if (sheetBody && sheetBody.contains(el)) {
+      return sheetBody;
+    }
+    return root && root.contains(el) ? root : null;
+  }
+
+  /** The block list of a scope, in document order. */
+  function blocksIn(scope) {
+    return scope && scope === helpBody() ? helpBlocks : blocks;
   }
 
   /**
@@ -481,13 +570,25 @@
     return 'light';
   }
 
-  /** Publish the theme and scheme to CSS through attributes on the root. */
+  /**
+   * Publish the theme and scheme to CSS through attributes on the root — and
+   * on the help sheet, which is the second reading scope and paints the same
+   * pills and spoken-word boxes (04-help-module §5).
+   */
   function applyThemeAttributes() {
     if (!root) {
       return;
     }
+    var scheme = detectScheme();
     root.setAttribute('data-mpe-ra-theme', config.highlightTheme);
-    root.setAttribute('data-mpe-ra-scheme', detectScheme());
+    root.setAttribute('data-mpe-ra-scheme', scheme);
+    if (barParts && barParts.help) {
+      barParts.help.root.setAttribute(
+        'data-mpe-ra-theme',
+        config.highlightTheme,
+      );
+      barParts.help.root.setAttribute('data-mpe-ra-scheme', scheme);
+    }
     applyBarScheme();
   }
 
@@ -815,6 +916,136 @@
     return button;
   }
 
+  /** A footer button of the help sheet: a chip, Ask, Back, Resume, … */
+  function makeHelpButton(action, label, className) {
+    var button = makeButton(action, label, 'mpe-ra-help-btn ' + className);
+    button.textContent = label;
+    return button;
+  }
+
+  /**
+   * The help sheet (04-help-module §4): a wider sheet above the panel in the
+   * theme sheet's style, holding the explanation, the follow-up chips and the
+   * question box.
+   *
+   * Its **body** deliberately does not carry `.mpe-ra-ui`: it is the second
+   * reading scope (§5), so its rendered paragraphs, lists and headings are
+   * classified by the existing eligibility rules with no new code, while
+   * everything around it stays chrome the reader never speaks.
+   */
+  function makeHelpSheet() {
+    var sheet = document.createElement('div');
+    sheet.className = 'mpe-ra-ui mpe-ra-help';
+    sheet.setAttribute('role', 'dialog');
+    sheet.setAttribute('aria-label', 'Help');
+    sheet.setAttribute('tabindex', '-1');
+    sheet.hidden = true;
+
+    var head = document.createElement('div');
+    head.className = 'mpe-ra-help-head';
+    var title = document.createElement('span');
+    title.className = 'mpe-ra-help-title';
+    title.textContent = 'Help';
+    // The engine label is a button: it opens the same quick pick as the
+    // `Choose Help Model` command, so the model or the effort can be raised
+    // before Retry or a follow-up without leaving the preview (§4 step 2).
+    var label = makeButton(
+      'helpModel',
+      'Change the help model',
+      'mpe-ra-help-model',
+    );
+    var close = makeIconButton(
+      'helpClose',
+      'Close help',
+      'mpe-ra-bar-btn mpe-ra-sheet-close',
+      'close',
+    );
+    head.appendChild(title);
+    head.appendChild(label);
+    head.appendChild(close);
+
+    var body = document.createElement('div');
+    body.className = HELP_BODY_CLASS;
+
+    var status = document.createElement('div');
+    status.className = 'mpe-ra-help-status';
+    var statusText = document.createElement('span');
+    statusText.className = 'mpe-ra-help-status-text';
+    statusText.setAttribute('role', 'status');
+    statusText.setAttribute('aria-live', 'polite');
+    var cancel = makeHelpButton('helpCancel', 'Cancel', 'mpe-ra-help-cancel');
+    var retry = makeHelpButton('helpRetry', 'Retry', 'mpe-ra-help-retry');
+    status.appendChild(statusText);
+    status.appendChild(cancel);
+    status.appendChild(retry);
+
+    var footer = document.createElement('div');
+    footer.className = 'mpe-ra-help-footer';
+
+    var chips = document.createElement('div');
+    chips.className = 'mpe-ra-help-chips';
+    var simpler = makeHelpButton('helpSimpler', 'Simpler', 'mpe-ra-help-chip');
+    var deeper = makeHelpButton('helpDeeper', 'Deeper', 'mpe-ra-help-chip');
+    var example = makeHelpButton('helpExample', 'Example', 'mpe-ra-help-chip');
+    chips.appendChild(simpler);
+    chips.appendChild(deeper);
+    chips.appendChild(example);
+
+    var ask = document.createElement('div');
+    ask.className = 'mpe-ra-help-ask';
+    var input = document.createElement('input');
+    input.className = 'mpe-ra-ui mpe-ra-help-input';
+    input.type = 'text';
+    input.placeholder = 'What confused you?';
+    input.setAttribute('aria-label', 'Ask a question about the passage');
+    var askButton = makeHelpButton('helpAsk', 'Ask', 'mpe-ra-help-send');
+    ask.appendChild(input);
+    ask.appendChild(askButton);
+
+    var actions = document.createElement('div');
+    actions.className = 'mpe-ra-help-actions';
+    var back = makeHelpButton('helpBack', 'Back', 'mpe-ra-help-action');
+    var again = makeHelpButton(
+      'helpPlayAgain',
+      'Play again',
+      'mpe-ra-help-action',
+    );
+    var resume = makeHelpButton(
+      'helpResume',
+      'Resume',
+      'mpe-ra-help-action mpe-ra-help-resume',
+    );
+    actions.appendChild(back);
+    actions.appendChild(again);
+    actions.appendChild(resume);
+
+    footer.appendChild(chips);
+    footer.appendChild(ask);
+    footer.appendChild(actions);
+
+    sheet.appendChild(head);
+    sheet.appendChild(body);
+    sheet.appendChild(status);
+    sheet.appendChild(footer);
+
+    return {
+      root: sheet,
+      label: label,
+      body: body,
+      status: status,
+      statusText: statusText,
+      cancel: cancel,
+      retry: retry,
+      footer: footer,
+      chips: [simpler, deeper, example],
+      input: input,
+      ask: askButton,
+      back: back,
+      again: again,
+      resume: resume,
+    };
+  }
+
   function ensureBar() {
     if (bar && bar.isConnected) {
       return bar;
@@ -891,6 +1122,16 @@
     speedButton.setAttribute('aria-haspopup', 'true');
     speedButton.setAttribute('aria-expanded', 'false');
 
+    // 04-help-module §2: between the speed and the ×, so the × stays last.
+    var helpButton = makeIconButton(
+      'help',
+      HELP_TOOLTIP,
+      'mpe-ra-bar-btn mpe-ra-bar-help',
+      'help',
+    );
+    helpButton.setAttribute('aria-haspopup', 'dialog');
+    helpButton.setAttribute('aria-expanded', 'false');
+
     var close = makeIconButton(
       'close',
       'Close the player',
@@ -899,18 +1140,21 @@
     );
 
     var sheet = makeSheet();
+    var helpSheet = makeHelpSheet();
 
     bar.appendChild(progress);
     bar.appendChild(status);
     bar.appendChild(volumePop.root);
     bar.appendChild(speedPop.root);
     bar.appendChild(sheet.root);
+    bar.appendChild(helpSheet.root);
     bar.appendChild(volumeButton);
     bar.appendChild(themeButton);
     bar.appendChild(back);
     bar.appendChild(play);
     bar.appendChild(forward);
     bar.appendChild(speedButton);
+    bar.appendChild(helpButton);
     bar.appendChild(close);
     document.body.appendChild(bar);
 
@@ -927,6 +1171,8 @@
       forward: forward,
       speed: speedButton,
       speedPop: speedPop,
+      helpButton: helpButton,
+      help: helpSheet,
       close: close,
     };
 
@@ -942,12 +1188,20 @@
     sheet.sizeRange.addEventListener('input', function () {
       applyZoom(parseFloat(sheet.sizeRange.value), sheet.sizeRange);
     });
+    helpSheet.input.addEventListener('keydown', function (event) {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        askTypedQuestion();
+      }
+    });
+    helpSheet.input.addEventListener('input', syncHelpSheet);
     bar.addEventListener('keydown', onBarKeydown);
 
     applyBarScheme();
     syncSpeedControls();
     syncVolumeControls();
     syncSheet();
+    syncHelpSheet();
     renderBar();
     return bar;
   }
@@ -1070,6 +1324,7 @@
     syncSeekButtons();
     syncSpeedControls();
     syncVolumeControls();
+    syncHelpButton();
     updateTimeDisplay();
     applyCanvasClasses();
   }
@@ -1488,6 +1743,621 @@
     }
   }
 
+  // ------------------------------------------------------ 7c. Help (§4, §5)
+  //
+  // The help button explains the passage the listener selected, through a
+  // headless CLI on the host. The answer arrives as HTML rendered by the
+  // preview's own engine and goes into the sheet body, which is a second
+  // reading scope: the same player, panel, highlighting and click-to-read,
+  // bounded to the sheet the way a table-cell read is bounded to its cell.
+
+  function applyHelpConfig(message) {
+    if (typeof message.helpAvailable === 'boolean') {
+      config.helpAvailable = message.helpAvailable;
+    }
+    if (typeof message.helpEngine === 'string') {
+      config.helpEngine = message.helpEngine;
+    }
+    if (typeof message.helpModel === 'string') {
+      config.helpModel = message.helpModel;
+    }
+    if (typeof message.helpEffort === 'string') {
+      config.helpEffort = message.helpEffort;
+    }
+    if (typeof message.helpAutoPlay === 'boolean') {
+      config.helpAutoPlay = message.helpAutoPlay;
+    }
+    if (typeof message.helpContextMode === 'string') {
+      config.helpContextMode = message.helpContextMode;
+    }
+  }
+
+  /** `claude · sonnet · low` — the sheet's header button and its status line. */
+  function helpLabelText() {
+    var parts = [config.helpEngine];
+    if (config.helpModel) {
+      parts.push(config.helpModel);
+    }
+    if (config.helpEffort && config.helpEffort !== 'n/a') {
+      parts.push(config.helpEffort);
+    }
+    return parts.join(' · ');
+  }
+
+  /**
+   * §2 — what the help button would explain, or null when nothing can be:
+   *
+   * 1. a live preview selection that resolves the way the floating _Read
+   *    aloud_ affordance's does, or
+   * 2. the passage of a selection read that is playing or paused, remembered
+   *    on the job so a collapsed browser selection does not disable the
+   *    button mid-read.
+   *
+   * Both are bounded to the preview root, which is what keeps a selection
+   * inside the sheet from being explained (D9).
+   */
+  function helpPassage() {
+    if (
+      floatSelection &&
+      floatSelection.ok &&
+      floatScope === root &&
+      floatSelection.blocks &&
+      floatSelection.blocks.length
+    ) {
+      return { text: floatSelection.text, els: floatSelection.blocks.slice() };
+    }
+    if (
+      record.kind === 'selection' &&
+      record.scope === root &&
+      (record.state === 'playing' ||
+        record.state === 'paused' ||
+        record.state === 'loading') &&
+      record.text &&
+      record.blockEls.length
+    ) {
+      return { text: record.text, els: record.blockEls.slice() };
+    }
+    return null;
+  }
+
+  function syncHelpButton() {
+    if (!barParts || !barParts.helpButton) {
+      return;
+    }
+    var button = barParts.helpButton;
+    // §1 — the web build cannot spawn a process, so the button is not there.
+    button.hidden = !config.helpAvailable;
+    if (!config.helpAvailable) {
+      return;
+    }
+    var passage = help.open ? null : helpPassage();
+    var enabled = help.open || !!passage;
+    setEnabled(button, enabled);
+    var label = help.open
+      ? 'Close help'
+      : passage
+        ? HELP_TOOLTIP
+        : HELP_TOOLTIP_DISABLED;
+    button.setAttribute('title', label);
+    button.setAttribute('aria-label', label);
+    button.setAttribute('aria-expanded', help.open ? 'true' : 'false');
+  }
+
+  function helpElapsedSeconds() {
+    return Math.max(0, Math.round((Date.now() - help.startedAt) / 1000));
+  }
+
+  function syncHelpSheet() {
+    if (!barParts || !barParts.help) {
+      return;
+    }
+    var sheet = barParts.help;
+    var labelText = helpLabelText();
+    sheet.label.textContent = labelText;
+    sheet.label.setAttribute('title', 'Help model: ' + labelText);
+    sheet.label.setAttribute(
+      'aria-label',
+      'Help model: ' + labelText + '. Choose another.',
+    );
+
+    var thinking = help.state === 'thinking';
+    var failed = help.state === 'error';
+    sheet.cancel.hidden = !thinking;
+    sheet.retry.hidden = !failed;
+    sheet.statusText.textContent = thinking
+      ? 'Thinking… (' + labelText + ') — ' + helpElapsedSeconds() + ' s'
+      : failed
+        ? help.message
+        : '';
+    sheet.status.hidden = !thinking && !failed;
+
+    var ready = help.state === 'ready' && !!help.markdown;
+    for (var i = 0; i < sheet.chips.length; i++) {
+      setEnabled(sheet.chips[i], ready);
+    }
+    sheet.input.disabled = !ready;
+    setEnabled(sheet.ask, ready && sheet.input.value.trim().length > 0);
+    setEnabled(sheet.back, help.stack.length > 0);
+    setEnabled(sheet.again, ready && helpBlocks.length > 0);
+
+    var resumable = canResume();
+    setEnabled(sheet.resume, resumable);
+    sheet.resume.setAttribute(
+      'title',
+      resumable
+        ? 'Close help and continue the read where it paused'
+        : help.resume
+          ? 'The paused text is no longer in the document'
+          : 'No read was paused',
+    );
+  }
+
+  function startHelpTicker() {
+    stopHelpTicker();
+    help.timer = setInterval(function () {
+      if (help.state !== 'thinking') {
+        stopHelpTicker();
+        return;
+      }
+      syncHelpSheet();
+    }, HELP_TICK_MS);
+  }
+
+  function stopHelpTicker() {
+    if (help.timer) {
+      clearInterval(help.timer);
+      help.timer = 0;
+    }
+  }
+
+  /** The file name of the preview, when the document has no `h1` (§3.1). */
+  function documentTitleFallback() {
+    var name = String(sourceUri || '').split(/[?#]/)[0];
+    var parts = name.split('/');
+    try {
+      return decodeURIComponent(parts[parts.length - 1] || '');
+    } catch (error) {
+      return parts[parts.length - 1] || '';
+    }
+  }
+
+  /**
+   * §3.1 — the material of the *first* request, which every follow-up then
+   * reuses byte for byte (§14.3). Which fields are gathered follows
+   * `readAloudHelpContext`: `selection` sends the title, the breadcrumb and
+   * the passage only, so the least text leaves the machine.
+   */
+  function buildHelpContextFor(passage) {
+    var context = {
+      title: '',
+      breadcrumb: [],
+      before: '',
+      after: '',
+      section: '',
+      passage: passage.text,
+      contextMode: config.helpContextMode,
+    };
+    try {
+      var built = core.helpContext(root, passage.els);
+      context.title = built.title;
+      context.breadcrumb = built.breadcrumb;
+      if (config.helpContextMode === 'section') {
+        context.before = built.before;
+        context.after = built.after;
+        context.section = built.section;
+      }
+    } catch (error) {
+      /* the passage on its own is still worth explaining */
+    }
+    if (!context.title) {
+      context.title = documentTitleFallback();
+    }
+    return context;
+  }
+
+  // -------------------------------------------------- the remembered read
+
+  /**
+   * §4 step 1 — where the paused read was, so Resume can continue from the
+   * same word. A block read is remembered by the block's *content hash*, so
+   * it re-locates after a re-render exactly as a continuous read does; a
+   * selection read keeps its text, its offset map and its elements, and
+   * Resume is disabled once any of them leaves the document (D5).
+   */
+  function rememberResume() {
+    if (
+      record.state !== 'playing' &&
+      record.state !== 'paused' &&
+      record.state !== 'loading'
+    ) {
+      return null;
+    }
+    if (record.scope && record.scope !== root) {
+      // A help read is not something to come back to.
+      return null;
+    }
+    var spans = record.allSpans;
+    var span = record.lastSpan;
+    if (!span && spans.length) {
+      span =
+        spans[
+          record.spanIndex < spans.length ? record.spanIndex : spans.length - 1
+        ];
+    }
+    if (record.kind === 'block' && record.readBlocks.length) {
+      var rb = record.readBlocks[record.blockIndex] || record.readBlocks[0];
+      var offset = rb.startOffset;
+      if (span && span.charStart >= rb.start && span.charStart < rb.end) {
+        offset = rb.startOffset + (span.charStart - rb.start);
+      }
+      return {
+        kind: 'block',
+        key: rb.key,
+        offset: offset,
+        label: rb.label || record.label,
+      };
+    }
+    if (record.kind === 'selection' && record.text && record.map) {
+      return {
+        kind: 'selection',
+        text: record.text,
+        map: record.map,
+        offset: span ? span.charStart : 0,
+        els: record.blockEls.slice(),
+        label: record.label,
+      };
+    }
+    return null;
+  }
+
+  function canResume() {
+    var resume = help.resume;
+    if (!resume) {
+      return false;
+    }
+    if (resume.kind === 'block') {
+      return !!blocksByKey[resume.key];
+    }
+    if (!resume.text || !resume.els.length) {
+      return false;
+    }
+    for (var i = 0; i < resume.els.length; i++) {
+      var el = resume.els[i];
+      if (!el || !el.isConnected || !root || !root.contains(el)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /** §4 step 6 — close the sheet and continue the read where it paused. */
+  function resumeRead() {
+    var resume = help.resume;
+    if (!canResume()) {
+      return;
+    }
+    closeHelp('resume');
+    if (resume.kind === 'block') {
+      var entry = blocksByKey[resume.key];
+      if (entry) {
+        startBlockRead(entry, resume.offset);
+      }
+      return;
+    }
+    // A selection read resumes bounded to what is left of the selection.
+    var sliced;
+    try {
+      sliced = core.sliceExtraction(
+        { text: resume.text, map: resume.map },
+        resume.offset,
+      );
+    } catch (error) {
+      return;
+    }
+    if (!sliced || !sliced.text) {
+      return;
+    }
+    startRead({
+      kind: 'selection',
+      scope: root,
+      text: sliced.text,
+      map: sliced.map,
+      label: resume.label || 'Selection',
+      blocks: resume.els,
+    });
+  }
+
+  // ------------------------------------------------------- open, ask, close
+
+  function toggleHelp() {
+    if (help.open) {
+      closeHelp('button');
+      return;
+    }
+    openHelp();
+  }
+
+  /** §4 steps 1–2. */
+  function openHelp() {
+    if (!config.enabled || !config.helpAvailable) {
+      return;
+    }
+    var passage = helpPassage();
+    if (!passage) {
+      showHint(HELP_TOOLTIP_DISABLED, currentSelectionRect() || floatRect);
+      return;
+    }
+    ensureBar();
+    // The read is paused, not stopped: the position is remembered first, then
+    // the job is cancelled with reason `help` and its audio released.
+    help.resume = rememberResume();
+    if (record.state === 'error') {
+      clearTransientError();
+    } else if (record.state !== 'idle') {
+      endJob({ next: 'idle', reason: 'help' });
+    }
+    panelDismissed = false;
+    closePopovers();
+    hideFloat();
+
+    help.open = true;
+    help.state = 'idle';
+    help.markdown = '';
+    help.html = '';
+    help.stack = [];
+    help.question = '';
+    help.message = '';
+    help.context = buildHelpContextFor(passage);
+    barParts.help.root.hidden = false;
+    barParts.help.input.value = '';
+    setHelpBodyHtml('');
+    applyThemeAttributes();
+    showBar('');
+    sendHelpRequest(null, '');
+    focusHelpSheet();
+  }
+
+  function focusHelpSheet() {
+    if (!barParts || !barParts.help) {
+      return;
+    }
+    try {
+      barParts.help.root.focus();
+    } catch (error) {
+      /* jsdom and detached nodes */
+    }
+  }
+
+  /** §4 step 7 — close, kill the request, end a help read, empty the scope. */
+  function closeHelp(reason) {
+    if (!help.open) {
+      return;
+    }
+    cancelHelpRequest(reason || 'close');
+    if (record.scope && record.scope !== root && record.state !== 'idle') {
+      endJob({ next: 'idle', reason: 'help sheet closed' });
+    }
+    help.open = false;
+    help.state = 'idle';
+    help.markdown = '';
+    help.html = '';
+    help.stack = [];
+    help.question = '';
+    help.message = '';
+    help.context = null;
+    if (barParts && barParts.help) {
+      barParts.help.root.hidden = true;
+      barParts.help.input.value = '';
+    }
+    setHelpBodyHtml('');
+    syncHelpSheet();
+    syncHelpButton();
+    if (barParts && barParts.helpButton && !barParts.helpButton.hidden) {
+      try {
+        barParts.helpButton.focus();
+      } catch (error) {
+        /* the panel may be going away */
+      }
+    }
+  }
+
+  function cancelHelpRequest(reason) {
+    stopHelpTicker();
+    if (help.requestId) {
+      post('readAloudHelpCancel', [sourceUri, help.requestId, reason]);
+      help.requestId = null;
+    }
+  }
+
+  function sendHelpRequest(followUp, question) {
+    if (!help.context) {
+      return;
+    }
+    cancelHelpRequest('superseded');
+    help.last = { followUp: followUp, question: question };
+    help.pending = { followUp: followUp, question: question };
+    help.state = 'thinking';
+    help.message = '';
+    help.requestId = nextRequestId();
+    help.startedAt = Date.now();
+    startHelpTicker();
+
+    var fields = {
+      title: help.context.title,
+      breadcrumb: help.context.breadcrumb,
+      before: help.context.before,
+      after: help.context.after,
+      section: help.context.section,
+      contextMode: help.context.contextMode,
+    };
+    if (followUp) {
+      fields.followUp = followUp;
+      fields.previous = help.markdown;
+      if (question) {
+        fields.question = question;
+      }
+    }
+    post('readAloudHelp', [
+      sourceUri,
+      help.requestId,
+      help.context.passage,
+      fields,
+    ]);
+    syncHelpSheet();
+  }
+
+  /** §8 — the three chips, each with the previous explanation attached. */
+  function askFollowUp(kind) {
+    if (help.state !== 'ready' || !help.markdown) {
+      return;
+    }
+    sendHelpRequest(kind, '');
+  }
+
+  function askTypedQuestion() {
+    if (!barParts || !barParts.help) {
+      return;
+    }
+    // Whitespace collapsed here as well as on the host (§14.5), so the
+    // heading the listener hears is exactly the question the model was asked.
+    var question = barParts.help.input.value.replace(/\s+/g, ' ').trim();
+    if (!question || help.state !== 'ready' || !help.markdown) {
+      return;
+    }
+    barParts.help.input.value = '';
+    sendHelpRequest('question', question);
+  }
+
+  /** §8 — Back restores the previous explanation from the sheet's stack. */
+  function helpBackStep() {
+    var previous = help.stack.pop();
+    if (!previous) {
+      return;
+    }
+    // Going back abandons a follow-up that is still being written, rather
+    // than letting it land on top of the explanation just restored.
+    cancelHelpRequest('back');
+    stopHelpTicker();
+    if (record.scope && record.scope !== root && record.state !== 'idle') {
+      endJob({ next: 'idle', reason: 'help back' });
+    }
+    help.markdown = previous.markdown;
+    help.html = previous.html;
+    help.question = previous.question;
+    help.state = 'ready';
+    help.message = '';
+    setHelpBodyHtml(help.html);
+    syncHelpSheet();
+    syncHelpButton();
+  }
+
+  // ------------------------------------------------------ the sheet's scope
+
+  /**
+   * Put the rendered explanation into the sheet body and collect its blocks.
+   * The body is outside the preview DOM, so crossnote's `updateHtml` never
+   * replaces it and none of the re-render machinery applies here (§5).
+   */
+  function setHelpBodyHtml(html) {
+    var body = helpBody();
+    helpBlocks = [];
+    helpBlocksByElement = new Map();
+    if (!body) {
+      return;
+    }
+    body.innerHTML = html || '';
+    if (!html) {
+      return;
+    }
+    // §14.5 — a typed question goes above the answer as a one-line heading of
+    // the sheet's own, *inside* the reading scope, so the listener hears what
+    // is being answered before they hear the answer.
+    if (help.question) {
+      var heading = body.ownerDocument.createElement('p');
+      heading.className = 'mpe-ra-help-question';
+      heading.textContent = help.question;
+      body.insertBefore(heading, body.firstChild);
+    }
+    var collected = core.collectBlocks(body);
+    for (var i = 0; i < collected.length; i++) {
+      var el = collected[i].el;
+      var text = core.extractText(el).text;
+      var entry = {
+        el: el,
+        kind: collected[i].kind,
+        index: collected[i].index,
+        key: core.blockKey(el, text),
+        text: text,
+        label: core.blockLabel(text),
+        button: null,
+        scope: body,
+        // The sheet has no gutter play buttons: the panel drives it.
+        noButton: true,
+      };
+      helpBlocks.push(entry);
+      helpBlocksByElement.set(el, entry);
+      el.classList.add('mpe-ra-block');
+    }
+  }
+
+  /** §4 step 5 — read the explanation from its first block to the sheet's end. */
+  function playHelpFromStart() {
+    if (!helpBlocks.length) {
+      return;
+    }
+    startBlockRead(helpBlocks[0], 0);
+  }
+
+  // ------------------------------------------------------- host -> sheet
+
+  function onHelpResult(message) {
+    if (!help.open || !help.requestId || message.requestId !== help.requestId) {
+      return;
+    }
+    stopHelpTicker();
+    help.requestId = null;
+    if (help.markdown) {
+      help.stack.push({
+        markdown: help.markdown,
+        html: help.html,
+        question: help.question,
+      });
+    }
+    help.markdown =
+      typeof message.markdown === 'string' ? message.markdown : '';
+    help.html = typeof message.html === 'string' ? message.html : '';
+    help.question =
+      help.pending && help.pending.followUp === 'question'
+        ? help.pending.question
+        : '';
+    help.state = help.markdown ? 'ready' : 'error';
+    help.message = help.markdown ? '' : 'The help engine returned nothing.';
+    setHelpBodyHtml(help.html);
+    syncHelpSheet();
+    syncHelpButton();
+    if (help.state === 'ready' && config.helpAutoPlay) {
+      playHelpFromStart();
+    }
+  }
+
+  function onHelpError(message) {
+    if (!help.open || !help.requestId || message.requestId !== help.requestId) {
+      return;
+    }
+    stopHelpTicker();
+    help.requestId = null;
+    help.state = 'error';
+    help.message =
+      typeof message.message === 'string' && message.message
+        ? message.message
+        : 'Help failed.';
+    syncHelpSheet();
+    syncHelpButton();
+    // The same text goes in the panel's message line, so it is visible even
+    // when the sheet is scrolled (§4).
+    showBar(help.message);
+  }
+
   // ---------------------------------------------------------------- keys
 
   function onBarKeydown(event) {
@@ -1497,7 +2367,21 @@
         closePopovers();
         return;
       }
+      // Escape closes the help sheet, as it closes the theme sheet (§2).
+      if (help.open) {
+        closeHelp('escape');
+        return;
+      }
       handleStop();
+      return;
+    }
+    // The question box is a text field: `[` and `]` are characters there.
+    if (
+      barParts &&
+      barParts.help &&
+      event.target === barParts.help.input &&
+      event.key !== 'Escape'
+    ) {
       return;
     }
     if (event.key === '[') {
@@ -1636,6 +2520,14 @@
       floatButton.hidden = true;
     }
     floatSelection = null;
+    floatScope = null;
+    syncHelpButton();
+  }
+
+  /** Whether there is still a selection on the page with text in it. */
+  function selectionIsLive() {
+    var selection = window.getSelection();
+    return !!(selection && selection.rangeCount && !selection.isCollapsed);
   }
 
   var ZERO_RECT = { top: 0, right: 0, bottom: 0, left: 0, width: 0, height: 0 };
@@ -1684,18 +2576,33 @@
       range.commonAncestorContainer.nodeType === 1
         ? range.commonAncestorContainer
         : range.commonAncestorContainer.parentElement;
-    if (!container || !root.contains(container)) {
+    // A selection inside the help sheet gets the same affordance and reads
+    // bounded to the sheet (04-help-module §5); one anywhere else is not a
+    // reading scope at all.
+    var scope = scopeOf(container);
+    if (!scope) {
       hideFloat();
       return;
     }
     var rect = rectOfRange(range) || ZERO_RECT;
-    var resolved = core.resolveSelection(selection, root);
+    var resolved = core.resolveSelection(selection, scope);
     var element = ensureFloat();
     element.hidden = false;
-    element.style.top = rect.bottom + window.scrollY + 6 + 'px';
-    element.style.left = rect.left + window.scrollX + 'px';
+    if (scope === root) {
+      element.style.position = '';
+      element.style.top = rect.bottom + window.scrollY + 6 + 'px';
+      element.style.left = rect.left + window.scrollX + 'px';
+    } else {
+      // The sheet is fixed to the viewport, so its rects are already in
+      // client coordinates: adding the page scroll would misplace the button.
+      element.style.position = 'fixed';
+      element.style.top = rect.bottom + 6 + 'px';
+      element.style.left = rect.left + 'px';
+    }
     floatSelection = resolved;
+    floatScope = scope;
     floatRect = rect;
+    syncHelpButton();
   }
 
   // ---------------------------------------------------------------------------
@@ -1703,6 +2610,10 @@
   // ---------------------------------------------------------------------------
 
   function ensureButton(entry) {
+    // The help sheet is driven by the panel alone: no gutter play buttons.
+    if (entry.noButton) {
+      return null;
+    }
     if (entry.button && entry.button.parentNode === entry.el) {
       return entry.button;
     }
@@ -1821,6 +2732,8 @@
         text: text,
         label: core.blockLabel(text),
         button: null,
+        // The reading scope this block belongs to (04-help-module §5).
+        scope: root,
       };
       next.push(entry);
       byElement.set(el, entry);
@@ -1847,6 +2760,10 @@
     applyFontToRoot();
     applyGutter();
     rebindAfterRender();
+    // A re-render can take the paused block with it, which is what decides
+    // whether Resume is still on offer (04-help-module §4 step 6).
+    syncHelpSheet();
+    syncHelpButton();
   }
 
   /** Playable text shows a pointer only while click to read is on (F17). */
@@ -1915,6 +2832,13 @@
    */
   function rebindAfterRender() {
     if (record.state === 'idle') {
+      return;
+    }
+    // A help read lives in the sheet, which is outside the preview DOM:
+    // crossnote's `updateHtml` never replaces it, so a document re-render is
+    // none of its business (04-help-module §5).
+    if (record.scope && record.scope !== root) {
+      syncHelpSheet();
       return;
     }
     if (record.kind !== 'block' || !record.readBlocks.length) {
@@ -2181,6 +3105,7 @@
     record.state = 'loading';
     record.requestId = nextRequestId();
     record.kind = options.kind;
+    record.scope = options.scope || root;
     record.text = options.text;
     record.map = options.map;
     record.label = options.label;
@@ -2203,8 +3128,13 @@
     if (options.blockId) {
       payload.blockId = options.blockId;
     }
-    if (options.kind === 'block' && record.readBlocks.length) {
+    if (
+      (options.kind === 'block' || options.kind === 'help') &&
+      record.readBlocks.length
+    ) {
       // Decision 5: the host chunks block by block, never across a boundary.
+      // A help read is the same shape, over the sheet's blocks instead of the
+      // document's (04-help-module §5).
       payload.blocks = record.readBlocks.map(function (rb) {
         return { key: rb.key, start: rb.start, end: rb.end };
       });
@@ -2230,19 +3160,24 @@
    * up to the last block that still fits.
    */
   function startBlockRead(entry, startOffset) {
+    // The scope decides where the read ends: the document root reads to the
+    // end of the document, the help sheet's body to the end of the sheet
+    // (04-help-module §5).
+    var scope = entry.scope || root;
+    var list = blocksIn(scope);
     var start = startOffset > 0 ? startOffset : 0;
-    var position = blocks.indexOf(entry);
+    var position = list.indexOf(entry);
     if (position < 0) {
       return;
     }
     var elements = [];
     var total = 0;
-    for (var i = position; i < blocks.length; i++) {
-      var length = blocks[i].text.length + 1;
+    for (var i = position; i < list.length; i++) {
+      var length = list[i].text.length + 1;
       if (elements.length && total + length > core.MAX_TEXT_CHARS) {
         break;
       }
-      elements.push(blocks[i].el);
+      elements.push(list[i].el);
       total += length;
     }
     var extracted = core.extractBlocks(elements, start);
@@ -2270,10 +3205,11 @@
       return;
     }
     startRead({
-      kind: 'block',
+      kind: scope === root ? 'block' : 'help',
+      scope: scope,
       text: extracted.text,
       map: extracted.map,
-      label: readBlocks[0].label,
+      label: scope === root ? readBlocks[0].label : 'Help',
       blockId: entry.key + '#' + entry.index + (start > 0 ? '@' + start : ''),
       readBlocks: readBlocks,
     });
@@ -2281,9 +3217,23 @@
 
   function startSelectionRead(fallback) {
     var selection = window.getSelection();
-    var resolved = core.resolveSelection(selection, root);
+    // A selection inside the help sheet reads bounded to the sheet (§5).
+    var scope = null;
+    if (selection && selection.rangeCount) {
+      var container = selection.getRangeAt(0).commonAncestorContainer;
+      scope = scopeOf(
+        container && container.nodeType === 1
+          ? container
+          : container.parentElement,
+      );
+    }
+    if (!scope) {
+      scope = fallback && floatScope ? floatScope : root;
+    }
+    var resolved = core.resolveSelection(selection, scope);
     if (!resolved.ok && resolved.reason === 'empty' && fallback) {
       resolved = fallback;
+      scope = floatScope || root;
     }
     if (!resolved.ok) {
       if (resolved.hint) {
@@ -2293,10 +3243,11 @@
     }
     hideFloat();
     startRead({
-      kind: 'selection',
+      kind: scope === root ? 'selection' : 'help',
+      scope: scope,
       text: resolved.text,
       map: resolved.map,
-      label: 'Selection',
+      label: scope === root ? 'Selection' : 'Help',
       blocks: resolved.blocks,
     });
   }
@@ -2352,16 +3303,14 @@
    * whose second press cancels the timer, select text as usual.
    */
   function maybeClickToRead(event, element) {
-    if (
-      !config.enabled ||
-      !config.clickToRead ||
-      !root ||
-      !root.contains(element)
-    ) {
+    // The scope decides what the click resolves against: the preview root, or
+    // the help sheet's body (04-help-module §5).
+    var scope = scopeOf(element);
+    if (!config.enabled || !config.clickToRead || !scope) {
       traceClick('ignored', {
         enabled: config.enabled,
         clickToRead: config.clickToRead,
-        inRoot: !!(root && root.contains(element)),
+        inScope: !!scope,
       });
       return;
     }
@@ -2389,7 +3338,7 @@
     }
     var resolved;
     try {
-      resolved = core.resolveClick(caret.node, caret.offset, root);
+      resolved = core.resolveClick(caret.node, caret.offset, scope);
     } catch (error) {
       traceClick('resolve failed', String(error));
       return;
@@ -2398,6 +3347,7 @@
       traceClick('refused', resolved.reason);
       return;
     }
+    resolved.scope = scope;
     if (!resolved.el.contains(element)) {
       // The caret snapped into a neighbouring block: the click landed between
       // blocks, not inside this one's box.
@@ -2527,11 +3477,12 @@
    * unaffected by the decoration, so `resolved.start` stays valid.
    */
   function startClickRead(resolved) {
-    if (!config.enabled || !config.clickToRead || !root) {
+    var scope = resolved.scope || root;
+    if (!config.enabled || !config.clickToRead || !scope) {
       return;
     }
     var el = resolved.el;
-    if (!el.isConnected || !root.contains(el)) {
+    if (!el.isConnected || !scope.contains(el)) {
       return;
     }
     var offset = clickTargetsCurrentRead(resolved)
@@ -2563,7 +3514,8 @@
       return;
     }
     startRead({
-      kind: 'selection',
+      kind: scope === root ? 'selection' : 'help',
+      scope: scope,
       text: sliced.text,
       map: sliced.map,
       label: core.blockLabel(sliced.text),
@@ -3236,6 +4188,12 @@
 
   function handleTogglePlayPause() {
     if (record.state === 'idle') {
+      // With the help sheet open the panel drives the sheet: play reads the
+      // explanation from its first block (04-help-module §4 step 5).
+      if (help.open && helpBlocks.length) {
+        playHelpFromStart();
+        return;
+      }
       // Nothing loaded: read from the top of the viewport to the end of the
       // document, the same read a play button in the gutter would start.
       var entry = firstVisibleEntry();
@@ -3306,8 +4264,71 @@
       );
       return;
     }
+    // ------------------------------------------- help (04-help-module §4)
+    if (action === 'help') {
+      closePopovers();
+      toggleHelp();
+      return;
+    }
+    if (action === 'helpClose') {
+      closeHelp('close');
+      return;
+    }
+    if (action === 'helpCancel') {
+      cancelHelpRequest('user');
+      // With an explanation already on screen the sheet goes back to it;
+      // with nothing to go back to, Retry is what the sheet has to offer.
+      help.state = help.markdown ? 'ready' : 'error';
+      help.message = help.markdown ? '' : 'Cancelled.';
+      syncHelpSheet();
+      return;
+    }
+    if (action === 'helpRetry') {
+      sendHelpRequest(
+        help.last ? help.last.followUp : null,
+        help.last ? help.last.question : '',
+      );
+      return;
+    }
+    if (action === 'helpSimpler') {
+      askFollowUp('simpler');
+      return;
+    }
+    if (action === 'helpDeeper') {
+      askFollowUp('deeper');
+      return;
+    }
+    if (action === 'helpExample') {
+      askFollowUp('example');
+      return;
+    }
+    if (action === 'helpAsk') {
+      askTypedQuestion();
+      return;
+    }
+    if (action === 'helpBack') {
+      helpBackStep();
+      return;
+    }
+    if (action === 'helpPlayAgain') {
+      if (record.scope && record.scope !== root && record.state !== 'idle') {
+        endJob({ next: 'idle', reason: 'help replay' });
+      }
+      playHelpFromStart();
+      return;
+    }
+    if (action === 'helpResume') {
+      resumeRead();
+      return;
+    }
+    if (action === 'helpModel') {
+      post('readAloudHelpChooseModel', []);
+      return;
+    }
     if (action === 'close') {
       handleStop();
+      // Closing the panel closes the sheet (§4 step 7).
+      closeHelp('panel closed');
       panelDismissed = true;
       dismissBar();
       return;
@@ -3420,6 +4441,8 @@
       config.font = core.normalisePlayerFont(message.font);
       applyFontToRoot();
     }
+    // A model or effort change re-labels an open sheet at once (§7.1).
+    applyHelpConfig(message);
     if (typeof message.speed === 'number') {
       var incoming = normaliseRate(message.speed);
       if (incoming !== rate) {
@@ -3439,10 +4462,14 @@
       }
       errorTimer = clearTimer(errorTimer);
       clearTransientError();
+      closeHelp('read aloud disabled');
       removeDecorations();
       dismissBar();
       hideFloat();
       return;
+    }
+    if (!config.helpAvailable && help.open) {
+      closeHelp('help unavailable');
     }
     if (!wasEnabled) {
       decorate();
@@ -3454,6 +4481,8 @@
     syncSpeedControls();
     syncVolumeControls();
     syncSheet();
+    syncHelpSheet();
+    syncHelpButton();
   }
 
   function handleControl(action) {
@@ -3470,6 +4499,11 @@
     }
     if (action === 'readSelection') {
       startSelectionRead();
+      return;
+    }
+    // §2 — `Alt+H`, the same thing the panel's ? button does.
+    if (action === 'help') {
+      toggleHelp();
     }
   }
 
@@ -3500,6 +4534,12 @@
           onErrorMessage(message);
         }
         return;
+      case 'readAloudHelpResult':
+        onHelpResult(message);
+        return;
+      case 'readAloudHelpError':
+        onHelpError(message);
+        return;
       default:
         return;
     }
@@ -3526,9 +4566,28 @@
       handleBlockButton(button);
       return;
     }
+    // The help sheet's body is a reading scope, not chrome: a click in it
+    // starts or seeks the help read exactly as a click in the document does
+    // (04-help-module §5). It sits inside the panel, which is `.mpe-ra-ui`,
+    // so it has to be recognised before the chrome branch below.
+    var sheetBody = helpBody();
+    if (sheetBody && sheetBody.contains(element)) {
+      event.stopPropagation();
+      closePopovers();
+      hideFloat();
+      maybeClickToRead(event, element);
+      return;
+    }
     var ui = element.closest('.mpe-ra-ui');
     if (!ui) {
-      hideFloat();
+      // A drag ends with a click, and that click must not take the selection
+      // affordance — or the help button, which follows the same predicate —
+      // away again while the selection it belongs to is still on screen. A
+      // plain click has already collapsed the selection by the time this
+      // runs, so only that case dismisses them.
+      if (!selectionIsLive()) {
+        hideFloat();
+      }
       closePopovers();
       maybeClickToRead(event, element);
       return;
@@ -3603,8 +4662,15 @@
           event.target && event.target.nodeType === 1
             ? event.target
             : event.target && event.target.parentElement;
-        if (element && element.closest && element.closest('.mpe-ra-float')) {
-          // Keep the selection alive until the click handler reads it.
+        if (
+          element &&
+          element.closest &&
+          element.closest('.mpe-ra-float, .mpe-ra-bar-help')
+        ) {
+          // Keep the selection alive until the click handler reads it. The
+          // help button needs this for the same reason the float does: a
+          // mousedown on a control collapses the document selection, and both
+          // of them are about the passage that selection covers.
           event.preventDefault();
         }
       },

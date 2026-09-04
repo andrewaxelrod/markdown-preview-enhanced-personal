@@ -90,7 +90,13 @@ Categories: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Security`.
     `readAloudSpeed` (0.25–4, default 1), `readAloudVolume` (0–1, default 1),
     `readAloudHighlightTheme` (`blue`, `pink`, `red`, `green`, `orange`), `readAloudFont`
     (`default`, `system`, `helvetica`, `verdana`, `trebuchet`, `georgia`, `palatino`,
-    `baskerville`, `times`, `menlo`), `readAloudCacheSizeMB`.
+    `baskerville`, `times`, `menlo`), `readAloudCacheSizeMB`; and for help
+    `readAloudHelpEngine` (`claude`, `codex`, `custom`), `readAloudHelpClaudeModel`
+    (`sonnet`), `readAloudHelpClaudeEffort` (`low`), `readAloudHelpCodexModel` (empty),
+    `readAloudHelpCodexEffort` (`low`), `readAloudHelpCommand` (`[]`),
+    `readAloudHelpContext` (`section`), `readAloudHelpAudience`, `readAloudHelpAutoPlay`
+    (`true`), `readAloudHelpTimeoutSeconds` (90) and `readAloudHelpBinaryPath` (`{}`,
+    machine scope, for the same reason as `kokoroBaseUrl`).
     Changes to any of them except `readAloudEnabled` apply live without reloading the preview.
   - Commands: `markdown-preview-enhanced.readAloud.readSelection` (`Alt+R`),
     `.togglePlayPause` (`Alt+Space`), `.stop` (`Alt+Esc`), `.chooseVoice` (QuickPick over
@@ -167,6 +173,63 @@ blockId?, blocks? }]`, `readAloudCancel`, `readAloudPlaying`, `readAloudSetSpeed
       sample text with one word spoken in the palette it offers, in the panel's own light or
       dark scheme. The choice is applied at once and persisted through
       `readAloudSetHighlightTheme`.
+  - **Help** (`featrues/04-help-module.md`): a `?` button on the panel, between the speed and
+    the close ×, enabled when a selection can be read or a selection read is playing. It
+    pauses the read, asks a headless CLI — `claude -p` by default, `codex exec -` or a custom
+    command (`readAloudHelpEngine`, `readAloudHelpCommand`), with the model and effort per
+    engine (`readAloudHelpClaudeModel` + `readAloudHelpClaudeEffort`: `fable` / `opus` /
+    `sonnet` × `low` … `max`; `readAloudHelpCodexModel` + `readAloudHelpCodexEffort`: a model
+    id × `none` … `ultra`; or the _Choose Help Model_ quick pick, also behind the sheet's own
+    label) — for a five-part explanation of the passage written for the ear (gist, terms,
+    restatement, example, why it matters; about as long as the passage, never more than two
+    minutes of audio), with the enclosing section as context (`readAloudHelpContext`) and the
+    audience from `readAloudHelpAudience`. The answer is rendered through the preview engine
+    into a sheet above the panel, read aloud at once (`readAloudHelpAutoPlay`) as a read
+    bounded to the sheet, and the paused read resumes from the same word. _Simpler_,
+    _Deeper_, _Example_ and a _What confused you?_ box ask follow-ups with the previous
+    explanation attached. Answers are cached by content in `globalStorageUri`; the raw HTML of
+    an answer is escaped before rendering; the binary is found through the login shell or
+    `readAloudHelpBinaryPath` (machine scope). Desktop only. `Alt+H`. This is the first
+    read-aloud feature that sends document text off the machine, and only on the button.
+    - **The sheet is a second reading scope**: the same player, panel, highlighting and
+      click-to-read, over the blocks of the sheet body instead of the preview root. A read in
+      the sheet is `kind: 'help'` and ends at the sheet's last block, the way a table-cell
+      read ends at its cell; the document's continuous read never enters the sheet and a help
+      read never leaves it. The sheet body deliberately does not carry `.mpe-ra-ui`, so its
+      rendered paragraphs, lists and headings are classified by the existing eligibility
+      rules with no new code. Because the sheet lives outside the preview DOM, crossnote's
+      `updateHtml` never replaces it and none of the re-render machinery applies to it.
+    - **Pause and resume**: the help button remembers where the read was — a block read by the
+      block's content hash and the word offset inside it, a selection read by its text, offset
+      map and elements — cancels the job with reason `help` and releases its audio. _Resume_
+      closes the sheet and continues from the same word, re-locating the block after an edit
+      elsewhere in the document; once the paused block is gone, _Resume_ is disabled and its
+      tooltip says why.
+    - **The engine** is spawned with an argv array, never a shell, in a fresh empty directory
+      under the temp dir, so no project's `CLAUDE.md` or `AGENTS.md` is auto-loaded into the
+      prompt. `claude` gets `--tools ""`, `--no-session-persistence`, `--disable-slash-commands`
+      and the explanation prompt as `--system-prompt` (`--bare` is deliberately not used: it
+      would restrict auth to `ANTHROPIC_API_KEY` and break a subscription login); `codex exec -`
+      gets `-s read-only`, `--ephemeral` and writes its answer to a file. Cancel and timeout
+      send SIGTERM then SIGKILL after 3 s. The binary is resolved from
+      `readAloudHelpBinaryPath`, then the current `PATH`, then the login shell.
+    - **Untrusted output**: the document is untrusted input to the model and the answer is
+      untrusted markdown, so every `<` is escaped and `javascript:`, `data:` and `vbscript:`
+      link targets are neutralised before the preview engine renders it. The prompt also
+      forbids HTML, but the escape is the guarantee.
+    - Commands `markdown-preview-enhanced.readAloud.help` (`Alt+H`) and
+      `.readAloud.help.chooseModel`; messages webview → host `readAloudHelp`,
+      `readAloudHelpCancel`, `readAloudHelpChooseModel` and host → webview
+      `readAloudHelpResult`, `readAloudHelpError` plus the new `help` action of
+      `readAloudControl`; `readAloudConfig` now also carries `helpAvailable`, `helpEngine`,
+      `helpModel`, `helpEffort`, `helpAutoPlay` and `helpContextMode`. `readAloud.clearCache`
+      empties the help answers as well. One line per request in the _MPE Read Aloud_ channel:
+      engine, model, effort, context mode, character counts, cache hit or miss and duration,
+      never the text.
+    - Files: `src/read-aloud/help-{prompt,engine,cache,answer}.ts`, the help section of
+      `media/read-aloud.js` and `helpContext` in `media/read-aloud-core.js`, `§3d` of
+      `media/read-aloud.css`, and the mocha suites `help-prompt.test.js`,
+      `help-engine.test.js` and `help-sheet.test.js`.
   - **One reading rhythm for the whole canvas** (`.mpe-ra-canvas`): the 2.0 line height that used
     to be applied to the block being read moved to the whole preview at 1.85, together with even
     spacing for paragraphs, lists, blockquotes, tables and headings. Starting a read no longer
@@ -206,6 +269,16 @@ blockId?, blocks? }]`, `readAloudCancel`, `readAloudPlaying`, `readAloudSetSpeed
 
 ### Fixed
 
+- **The floating _Read aloud_ affordance no longer disappears when a slow drag ends.** The
+  mouseup that finishes a drag-selection also fires a `click`, and the click handler dismissed
+  the affordance on any click outside its own UI. For a quick drag the 150 ms selection debounce
+  put it straight back, which is why this went unnoticed; for a drag with a pause in it the
+  affordance appeared during the drag and vanished on release. The click now dismisses it only
+  when the click actually left no selection behind — a plain click has already collapsed the
+  selection by the time the handler runs, so that case is unaffected. The help button follows
+  the same predicate and had the same symptom, and like the affordance it now suppresses the
+  default on its own `mousedown`, so pressing it cannot collapse the selection it is about to
+  explain.
 - **Reads no longer stop after the first chunk.** VS Code's webview iframe is not granted the
   `autoplay` permission, so Chromium lets a media element play only if `play()` was first called
   on it within about five seconds of a click or key press in the preview. The player used to

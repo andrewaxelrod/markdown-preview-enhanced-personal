@@ -82,7 +82,12 @@ export function normalisePlayerFont(value: unknown): ReadAloudFont {
     : DEFAULT_PLAYER_FONT;
 }
 
-export type ReadAloudKind = 'block' | 'selection';
+/**
+ * `help` is the help sheet's own read (`featrues/04-help-module.md` §5): a
+ * bounded multi-block read, like a selection, whose scope is the sheet body
+ * rather than the preview root.
+ */
+export type ReadAloudKind = 'block' | 'selection' | 'help';
 
 /**
  * One block of a continuous read (F15, decision 5): the half-open range
@@ -162,21 +167,55 @@ export interface ReadAloudConfigMessage {
   highlightTheme: ReadAloudHighlightTheme;
   /** Theme settings — the preview font override, by id. */
   font: ReadAloudFont;
+  /** Help (§7): false in the web build, where no process can be spawned. */
+  helpAvailable: boolean;
+  /** The sheet's own label, e.g. `claude · sonnet · low` (§4 step 2). */
+  helpEngine: string;
+  helpModel: string;
+  helpEffort: string;
+  /** D2 — read the explanation as soon as it arrives. */
+  helpAutoPlay: boolean;
 }
 
 export type ReadAloudControlAction =
-  'stop' | 'togglePlayPause' | 'readSelection';
+  | 'stop'
+  | 'togglePlayPause'
+  | 'readSelection'
+  /** §2 — `Alt+H` and the `readAloud.help` command. */
+  | 'help';
 
 export interface ReadAloudControlMessage {
   command: 'readAloudControl';
   action: ReadAloudControlAction;
 }
 
+/** §9 — the rendered explanation, plus the markdown a follow-up sends back. */
+export interface ReadAloudHelpResultMessage {
+  command: 'readAloudHelpResult';
+  requestId: string;
+  html: string;
+  markdown: string;
+  engine: string;
+  model: string;
+  effort: string;
+  cached: boolean;
+  durationMs: number;
+}
+
+export interface ReadAloudHelpErrorMessage {
+  command: 'readAloudHelpError';
+  requestId: string;
+  message: string;
+  retryable: boolean;
+}
+
 export type HostToWebviewMessage =
   | ReadAloudAudioMessage
   | ReadAloudErrorMessage
   | ReadAloudConfigMessage
-  | ReadAloudControlMessage;
+  | ReadAloudControlMessage
+  | ReadAloudHelpResultMessage
+  | ReadAloudHelpErrorMessage;
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -257,7 +296,7 @@ export function parseSynthesizeArgs(
     return undefined;
   }
   const kind = rawOptions.kind;
-  if (kind !== 'block' && kind !== 'selection') {
+  if (kind !== 'block' && kind !== 'selection' && kind !== 'help') {
     return undefined;
   }
   const options: SynthesizeOptions = { kind };
@@ -394,6 +433,198 @@ export function parseSetHighlightThemeArgs(
     (HIGHLIGHT_THEMES as readonly string[]).includes(theme)
     ? (theme as ReadAloudHighlightTheme)
     : undefined;
+}
+
+// ---------------------------------------------------------------------------
+// Help (`featrues/04-help-module.md` §9)
+//
+// The webview assembles every field from the DOM it already extracts for
+// reading, so what the model sees is what the listener heard; the host
+// validates every field and every cap of §3.1 here before the engine sees it.
+// This is the first read-aloud message that carries document text off the
+// machine (§10), which is why nothing beyond the exact shape gets through.
+// ---------------------------------------------------------------------------
+
+export const HELP_FIELD_CAPS = {
+  title: 200,
+  breadcrumbLevels: 6,
+  breadcrumbLevel: 200,
+  before: 1500,
+  passage: 6000,
+  after: 1500,
+  /**
+   * Deliberately four times the 6,000-character *prompt* cap of §3.1. This is
+   * a bound on a rogue message, not the prompt's budget: §14.2 trims the
+   * section evenly around its `[PASSAGE]` marker, and truncating from the
+   * front here would throw that marker away before `trimAroundPassage` in
+   * `help-prompt.ts` ever saw it.
+   */
+  section: 24000,
+  question: 500,
+  previous: 6000,
+} as const;
+
+export const HELP_CONTEXT_MODES = ['selection', 'section', 'document'] as const;
+export type HelpContextMode = (typeof HELP_CONTEXT_MODES)[number];
+
+/**
+ * §8 — which follow-up this is. The three chips carry a *kind*, not their
+ * instruction text: §14.4 fixes that text in `help-prompt.ts` as the single
+ * copy the implementation uses, and each chip has its own word target (§3.3),
+ * which the host could not recover from free text. `question` is the typed
+ * box, and is the only kind that also carries `question` text.
+ */
+export const HELP_FOLLOW_UPS = [
+  'simpler',
+  'deeper',
+  'example',
+  'question',
+] as const;
+export type HelpFollowUp = (typeof HELP_FOLLOW_UPS)[number];
+
+export interface HelpRequest {
+  sourceUri: string;
+  requestId: string;
+  passage: string;
+  title: string;
+  breadcrumb: string[];
+  before: string;
+  after: string;
+  section: string;
+  contextMode: HelpContextMode;
+  followUp?: HelpFollowUp;
+  question?: string;
+  previous?: string;
+}
+
+/** A capped, newline-normalised string, or `undefined` when it is not one. */
+function capped(value: unknown, limit: number): string | undefined {
+  if (value === undefined || value === null) {
+    return '';
+  }
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  return value.replace(/\r\n?/g, '\n').slice(0, limit);
+}
+
+/**
+ * `readAloudHelp` -> `[sourceUri, requestId, passage, fields]` (§9).
+ *
+ * The passage must be non-empty: there is nothing to explain otherwise, and
+ * the button is disabled in that state. Every other field may be empty, and
+ * over-long fields are truncated rather than rejected, because they are
+ * assembled from the document rather than typed: a long section is the normal
+ * case, not a rogue message.
+ */
+export function parseHelpArgs(args: unknown): HelpRequest | undefined {
+  if (!Array.isArray(args) || args.length !== 4) {
+    return undefined;
+  }
+  const [sourceUri, requestId, rawPassage, rawFields] = args as unknown[];
+  if (typeof sourceUri !== 'string' || sourceUri.length === 0) {
+    return undefined;
+  }
+  if (typeof requestId !== 'string' || !REQUEST_ID_RE.test(requestId)) {
+    return undefined;
+  }
+  const passage = capped(rawPassage, HELP_FIELD_CAPS.passage);
+  if (passage === undefined || passage.trim().length === 0) {
+    return undefined;
+  }
+  if (!isPlainObject(rawFields)) {
+    return undefined;
+  }
+  const contextMode = rawFields.contextMode;
+  if (
+    typeof contextMode !== 'string' ||
+    !(HELP_CONTEXT_MODES as readonly string[]).includes(contextMode)
+  ) {
+    return undefined;
+  }
+  const title = capped(rawFields.title, HELP_FIELD_CAPS.title);
+  const before = capped(rawFields.before, HELP_FIELD_CAPS.before);
+  const after = capped(rawFields.after, HELP_FIELD_CAPS.after);
+  const section = capped(rawFields.section, HELP_FIELD_CAPS.section);
+  if (
+    title === undefined ||
+    before === undefined ||
+    after === undefined ||
+    section === undefined
+  ) {
+    return undefined;
+  }
+
+  const rawBreadcrumb = rawFields.breadcrumb;
+  const breadcrumb: string[] = [];
+  if (rawBreadcrumb !== undefined && rawBreadcrumb !== null) {
+    if (!Array.isArray(rawBreadcrumb)) {
+      return undefined;
+    }
+    for (const level of rawBreadcrumb as unknown[]) {
+      if (typeof level !== 'string') {
+        return undefined;
+      }
+      if (breadcrumb.length >= HELP_FIELD_CAPS.breadcrumbLevels) {
+        break;
+      }
+      breadcrumb.push(level.slice(0, HELP_FIELD_CAPS.breadcrumbLevel));
+    }
+  }
+
+  const request: HelpRequest = {
+    sourceUri,
+    requestId,
+    passage,
+    title,
+    breadcrumb,
+    before,
+    after,
+    section,
+    contextMode: contextMode as HelpContextMode,
+  };
+
+  const followUp = rawFields.followUp;
+  if (followUp !== undefined && followUp !== null) {
+    if (
+      typeof followUp !== 'string' ||
+      !(HELP_FOLLOW_UPS as readonly string[]).includes(followUp)
+    ) {
+      return undefined;
+    }
+    request.followUp = followUp as HelpFollowUp;
+  }
+
+  const question = capped(rawFields.question, HELP_FIELD_CAPS.question);
+  if (question === undefined) {
+    return undefined;
+  }
+  if (question) {
+    request.question = question;
+  }
+
+  const previous = capped(rawFields.previous, HELP_FIELD_CAPS.previous);
+  if (previous === undefined) {
+    return undefined;
+  }
+  if (previous) {
+    request.previous = previous;
+  }
+
+  // A follow-up without the explanation it follows is a bug in the webview,
+  // not a request: the model would be told to go deeper on nothing.
+  if (request.followUp && !request.previous) {
+    return undefined;
+  }
+  if (request.followUp === 'question' && !request.question) {
+    return undefined;
+  }
+  return request;
+}
+
+/** `readAloudHelpCancel` -> `[sourceUri, requestId, reason?]` (§9). */
+export function parseHelpCancelArgs(args: unknown): CancelRequest | undefined {
+  return parseCancelArgs(args);
 }
 
 /** `readAloudSetFont` -> `[font]` (F13), the mirror of the theme above. */

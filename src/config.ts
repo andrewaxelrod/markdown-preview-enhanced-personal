@@ -59,7 +59,18 @@ type VSCodeMPEConfigKey =
   | 'readAloudHighlightTheme'
   | 'readAloudFont'
   | 'readAloudCacheSizeMB'
-  | 'kokoroBaseUrl';
+  | 'kokoroBaseUrl'
+  | 'readAloudHelpEngine'
+  | 'readAloudHelpClaudeModel'
+  | 'readAloudHelpClaudeEffort'
+  | 'readAloudHelpCodexModel'
+  | 'readAloudHelpCodexEffort'
+  | 'readAloudHelpCommand'
+  | 'readAloudHelpContext'
+  | 'readAloudHelpAudience'
+  | 'readAloudHelpAutoPlay'
+  | 'readAloudHelpTimeoutSeconds'
+  | 'readAloudHelpBinaryPath';
 
 type ConfigKey = keyof NotebookConfig | VSCodeMPEConfigKey;
 

@@ -1027,6 +1027,186 @@
   }
 
   // ---------------------------------------------------------------------------
+  // Help context (`featrues/04-help-module.md` §3.1)
+  //
+  // The selection alone is not enough: a passage leans on terms the document
+  // set up chapters earlier. The fields below are assembled from the DOM the
+  // reader already extracts, so what the model sees is exactly what the
+  // listener heard — code, tables, diagrams and math are already gone. Caps
+  // are the host's business (src/read-aloud/messages.ts); these are the
+  // rules for *which* text, not how much of it.
+  // ---------------------------------------------------------------------------
+
+  /** The line that stands in for the passage inside `<section>` (§14.2). */
+  var PASSAGE_MARKER = '[PASSAGE]';
+
+  /** 1–6 for h1–h6, 0 for anything else. */
+  function headingLevel(el) {
+    var tag = el && el.tagName ? el.tagName : '';
+    return HEADING_TAGS[tag] ? parseInt(tag.charAt(1), 10) : 0;
+  }
+
+  /** Nearest direct child of `scope` containing (or equal to) `el`. */
+  function topLevelOf(el, scope) {
+    var current = nearestElement(el);
+    while (current && current !== scope) {
+      if (current.parentElement === scope) {
+        return current;
+      }
+      current = current.parentElement;
+    }
+    return null;
+  }
+
+  /**
+   * `{ title, breadcrumb, before, after, section }` for a selection of the
+   * direct children `els` of `scope`.
+   *
+   * - **title**: the first `h1` of the scope, else ''; the caller falls back
+   *   to the file name.
+   * - **breadcrumb**: the headings above the passage, nearest of each level,
+   *   outermost first — h2 > h3 rather than every h3 on the way down.
+   * - **before** / **after**: the one eligible block either side.
+   * - **section**: the eligible blocks from the nearest preceding heading to
+   *   the next heading of the same or a higher level, minus before, the
+   *   passage and after, with {@link PASSAGE_MARKER} where the passage sits.
+   */
+  function helpContext(scope, els) {
+    var empty = {
+      title: '',
+      breadcrumb: [],
+      before: '',
+      after: '',
+      section: '',
+    };
+    if (!scope || !els || !els.length) {
+      return empty;
+    }
+    var children = [];
+    for (var c = 0; c < scope.children.length; c++) {
+      children.push(scope.children[c]);
+    }
+    // A table-cell selection resolves to the cell, not to a child of the
+    // scope: climb to the block the cell belongs to (its table).
+    var first = -1;
+    var last = -1;
+    for (var e = 0; e < els.length; e++) {
+      var top = topLevelOf(els[e], scope);
+      var at = top ? children.indexOf(top) : -1;
+      if (at < 0) {
+        continue;
+      }
+      if (first < 0 || at < first) {
+        first = at;
+      }
+      if (at > last) {
+        last = at;
+      }
+    }
+    if (first < 0) {
+      return empty;
+    }
+
+    var title = '';
+    for (var t = 0; t < children.length; t++) {
+      if (children[t].tagName === 'H1') {
+        title = extractText(children[t]).text;
+        break;
+      }
+    }
+
+    // Breadcrumb: walk back, keeping a heading only when it is *outside* the
+    // one already kept, so h2 > h3 comes back rather than h3 > h3 > h3.
+    var breadcrumb = [];
+    var minLevel = 7;
+    var enclosing = -1;
+    for (var b = first - 1; b >= 0; b--) {
+      var level = headingLevel(children[b]);
+      if (!level || level >= minLevel) {
+        continue;
+      }
+      if (enclosing < 0) {
+        enclosing = b;
+      }
+      breadcrumb.unshift(extractText(children[b]).text);
+      minLevel = level;
+      if (level === 1) {
+        break;
+      }
+    }
+
+    function eligibleText(index) {
+      return index >= 0 &&
+        index < children.length &&
+        classifyBlock(children[index]).eligible
+        ? extractText(children[index]).text
+        : '';
+    }
+
+    // The one eligible block either side, skipping anything unreadable
+    // between (a fence, an image) rather than reporting nothing.
+    var before = '';
+    for (var i = first - 1; i >= 0 && !before; i--) {
+      before = eligibleText(i);
+    }
+    var after = '';
+    for (var j = last + 1; j < children.length && !after; j++) {
+      after = eligibleText(j);
+    }
+
+    // The enclosing section: from the heading found above to the next heading
+    // of the same or a higher level.
+    var sectionStart = enclosing >= 0 ? enclosing + 1 : 0;
+    var sectionLevel = enclosing >= 0 ? headingLevel(children[enclosing]) : 0;
+    var sectionEnd = children.length;
+    for (var k = last + 1; k < children.length; k++) {
+      var next = headingLevel(children[k]);
+      if (next && sectionLevel && next <= sectionLevel) {
+        sectionEnd = k;
+        break;
+      }
+    }
+    var beforeIndex = -1;
+    for (var bi = first - 1; bi >= 0; bi--) {
+      if (classifyBlock(children[bi]).eligible) {
+        beforeIndex = bi;
+        break;
+      }
+    }
+    var afterIndex = -1;
+    for (var ai = last + 1; ai < children.length; ai++) {
+      if (classifyBlock(children[ai]).eligible) {
+        afterIndex = ai;
+        break;
+      }
+    }
+    var head = [];
+    var tail = [];
+    for (var s = sectionStart; s < sectionEnd; s++) {
+      if (s === beforeIndex || s === afterIndex || (s >= first && s <= last)) {
+        continue;
+      }
+      if (!classifyBlock(children[s]).eligible) {
+        continue;
+      }
+      var text = extractText(children[s]).text;
+      if (!text) {
+        continue;
+      }
+      (s < first ? head : tail).push(text);
+    }
+    var section = head.concat([PASSAGE_MARKER]).concat(tail).join('\n\n');
+
+    return {
+      title: title,
+      breadcrumb: breadcrumb,
+      before: before,
+      after: after,
+      section: section,
+    };
+  }
+
+  // ---------------------------------------------------------------------------
   // Click to read (F17)
   // ---------------------------------------------------------------------------
 
@@ -1544,6 +1724,8 @@
     offsetToDom: offsetToDom,
     spanToRange: spanToRange,
     resolveSelection: resolveSelection,
+    helpContext: helpContext,
+    PASSAGE_MARKER: PASSAGE_MARKER,
     caretToTextOffset: caretToTextOffset,
     wordAt: wordAt,
     sliceExtraction: sliceExtraction,

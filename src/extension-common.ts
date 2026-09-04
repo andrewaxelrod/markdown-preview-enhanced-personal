@@ -7,6 +7,8 @@ import { ReadAloudController } from './read-aloud/controller';
 import { readAloudLog } from './read-aloud/log';
 import {
   parseCancelArgs,
+  parseHelpArgs,
+  parseHelpCancelArgs,
   parsePlayingArgs,
   parseSetFontArgs,
   parseSetHighlightThemeArgs,
@@ -100,6 +102,29 @@ export async function initExtensionCommon(context: vscode.ExtensionContext) {
       getAllPreviewProviders().forEach((provider) =>
         provider.refreshAllPreviews(),
       );
+    },
+    // Help (`featrues/04-help-module.md` §6): the explanation goes through the
+    // preview's own engine, so it looks like the document it explains.
+    renderMarkdown: async (uri, markdown) => {
+      const provider = await getPreviewContentProvider(uri);
+      return provider.renderMarkdownFragment(uri, markdown);
+    },
+    // Help §3.1 `readAloudHelpContext = document`: the markdown source. The
+    // open document wins over the file on disk, so unsaved edits are what the
+    // model sees, exactly as the preview shows them.
+    getDocumentText: async (uri) => {
+      const open = vscode.workspace.textDocuments.find(
+        (candidate) => candidate.uri.toString() === uri.toString(),
+      );
+      if (open) {
+        return open.getText();
+      }
+      try {
+        const document = await vscode.workspace.openTextDocument(uri);
+        return document.getText();
+      } catch {
+        return undefined;
+      }
     },
   });
   context.subscriptions.push(readAloud);
@@ -1810,6 +1835,26 @@ export async function initExtensionCommon(context: vscode.ExtensionContext) {
     ),
   );
 
+  // Help (`featrues/04-help-module.md` §2): `Alt+H` reaches the webview as the
+  // `help` control action, which is what the panel's ? button does too.
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      'markdown-preview-enhanced.readAloud.help',
+      async () => {
+        await readAloud.control('help');
+      },
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      'markdown-preview-enhanced.readAloud.help.chooseModel',
+      async () => {
+        await readAloud.chooseHelpModelCommand();
+      },
+    ),
+  );
+
   context.subscriptions.push(
     vscode.commands.registerCommand(
       'markdown-preview-enhanced.readAloud.chooseVoice',
@@ -1862,6 +1907,34 @@ export async function initExtensionCommon(context: vscode.ExtensionContext) {
           return;
         }
         readAloud.cancel(request);
+      },
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      '_crossnote.readAloudHelp',
+      async (...args: unknown[]) => {
+        const request = parseHelpArgs(args);
+        if (!request) {
+          readAloudLog('dropped invalid readAloudHelp message');
+          return;
+        }
+        await readAloud.help(request);
+      },
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      '_crossnote.readAloudHelpCancel',
+      (...args: unknown[]) => {
+        const request = parseHelpCancelArgs(args);
+        if (!request) {
+          readAloudLog('dropped invalid readAloudHelpCancel message');
+          return;
+        }
+        readAloud.helpCancel(request);
       },
     ),
   );
@@ -1932,6 +2005,15 @@ export async function initExtensionCommon(context: vscode.ExtensionContext) {
           return;
         }
         await readAloud.setFont(font);
+      },
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      '_crossnote.readAloudHelpChooseModel',
+      async () => {
+        await readAloud.chooseHelpModelCommand();
       },
     ),
   );

@@ -94,11 +94,21 @@
   // Reading decoration (F4 look): the block being read gets READING_CLASS, each
   // run of inline content inside it is wrapped in a PILL_CLASS span (one rounded
   // "pill" per rendered line via box-decoration-break: clone) and the spoken
-  // word is wrapped in WORD_CLASS spans. The palettes live in
-  // media/read-aloud.css.
+  // word is wrapped in WORD_CLASS spans. The characters touching the word on
+  // either side are wrapped in WORD_EDGE_CLASS spans at the same time, up to
+  // WORD_EDGE_CHARS of them per side: the word box overhangs its word by its
+  // horizontal padding and is painted above the block's text, so whatever
+  // stands in that overhang — the hyphen of "read-only", the full stop after
+  // a sentence's last word — would be hidden under it; the edge spans are
+  // positioned a step above the box so those glyphs are painted over it. The
+  // palettes live in media/read-aloud.css.
   var READING_CLASS = 'mpe-ra-reading';
   var PILL_CLASS = 'mpe-ra-pill';
   var WORD_CLASS = 'mpe-ra-word';
+  var WORD_EDGE_CLASS = 'mpe-ra-word-edge';
+  // The overhang is 0.35 em; three glyphs are wider than that even in the
+  // narrowest punctuation, so nothing under the box is ever left unwrapped.
+  var WORD_EDGE_CHARS = 3;
   var HIGHLIGHT_THEMES = ['blue', 'pink', 'red', 'green', 'orange'];
   var DEFAULT_HIGHLIGHT_THEME = 'blue';
 
@@ -893,6 +903,23 @@
     return null;
   }
 
+  /** DOM Range covering text offsets `[from, to)` of `map`, or null. */
+  function offsetsToRange(map, from, to, doc) {
+    if (!map || !(to > from)) {
+      return null;
+    }
+    var start = offsetToDom(map, from);
+    var end = offsetToDom(map, to - 1);
+    if (!start || !end) {
+      return null;
+    }
+    var document_ = doc || start.node.ownerDocument;
+    var range = document_.createRange();
+    range.setStart(start.node, start.offset);
+    range.setEnd(end.node, end.offset + 1);
+    return range;
+  }
+
   /**
    * DOM Range covering one word span. Ranges are cached on the span for the map
    * they were built from, so the rAF highlight loop stays O(1) (contract §3.2).
@@ -904,18 +931,52 @@
     if (span._range && span._rangeMap === map) {
       return span._range;
     }
-    var start = offsetToDom(map, span.charStart);
-    var end = offsetToDom(map, span.charEnd - 1);
-    if (!start || !end) {
+    var range = offsetsToRange(map, span.charStart, span.charEnd, doc);
+    if (!range) {
       return null;
     }
-    var document_ = doc || start.node.ownerDocument;
-    var range = document_.createRange();
-    range.setStart(start.node, start.offset);
-    range.setEnd(end.node, end.offset + 1);
     span._range = range;
     span._rangeMap = map;
     return range;
+  }
+
+  /**
+   * The characters touching a word span on either side, as text offsets of
+   * `map`: `before` is the run of non-whitespace characters that ends at
+   * `charStart`, `after` the run that starts at `charEnd`, each cut to
+   * `maxChars` (WORD_EDGE_CHARS by default) and null when the word is
+   * bounded by whitespace or by the text's end. A run never crosses
+   * whitespace, so it never crosses a block boundary either (blocks are
+   * '\n'-separated in a multi-block map).
+   */
+  function wordEdges(map, span, maxChars) {
+    var text = map && typeof map.text === 'string' ? map.text : '';
+    var limit = typeof maxChars === 'number' ? maxChars : WORD_EDGE_CHARS;
+    var out = { before: null, after: null };
+    if (!span || !text || !(limit > 0)) {
+      return out;
+    }
+    var from = span.charStart;
+    while (from > 0 && span.charStart - from < limit) {
+      if (isWhitespaceCode(text.charCodeAt(from - 1))) {
+        break;
+      }
+      from--;
+    }
+    if (from < span.charStart) {
+      out.before = { from: from, to: span.charStart };
+    }
+    var to = span.charEnd;
+    while (to < text.length && to - span.charEnd < limit) {
+      if (isWhitespaceCode(text.charCodeAt(to))) {
+        break;
+      }
+      to++;
+    }
+    if (to > span.charEnd) {
+      out.after = { from: span.charEnd, to: to };
+    }
+    return out;
   }
 
   // ---------------------------------------------------------------------------
@@ -1564,7 +1625,11 @@
    * identity, and with it the offset map, survives a wrap/unwrap cycle.
    */
   function wrapRange(range, className) {
-    var pieces = textPiecesInRange(range);
+    return wrapPieces(textPiecesInRange(range), className);
+  }
+
+  /** wrapRange over pieces taken beforehand (see wrapWord for why). */
+  function wrapPieces(pieces, className) {
     var spans = [];
     for (var i = 0; i < pieces.length; i++) {
       var piece = pieces[i];
@@ -1587,6 +1652,42 @@
       spans[spans.length - 1].classList.add(className + '-end');
     }
     return spans;
+  }
+
+  /**
+   * Paint one word: wrap the text `span` covers in WORD_CLASS spans and the
+   * characters touching it (wordEdges) in WORD_EDGE_CLASS spans. Returns
+   * every span made, the word's first, so the caller can scroll to the word
+   * and hand the whole list to unwrapSpans. Nothing is wrapped when the word
+   * itself cannot be resolved.
+   *
+   * The pieces of all three ranges are taken before any node is split and
+   * wrapped last to first in document order: splitText keeps the original
+   * node as the head, so a piece that comes earlier in the same node keeps
+   * its offsets while a later one is being wrapped.
+   */
+  function wrapWord(map, span, doc) {
+    var range = spanToRange(map, span, doc);
+    if (!range) {
+      return [];
+    }
+    var wordPieces = textPiecesInRange(range);
+    if (!wordPieces.length) {
+      return [];
+    }
+    var edges = wordEdges(map, span);
+    var before = edges.before
+      ? offsetsToRange(map, edges.before.from, edges.before.to, doc)
+      : null;
+    var after = edges.after
+      ? offsetsToRange(map, edges.after.from, edges.after.to, doc)
+      : null;
+    var beforePieces = before ? textPiecesInRange(before) : [];
+    var afterPieces = after ? textPiecesInRange(after) : [];
+    var afterSpans = wrapPieces(afterPieces, WORD_EDGE_CLASS);
+    var wordSpans = wrapPieces(wordPieces, WORD_CLASS);
+    var beforeSpans = wrapPieces(beforePieces, WORD_EDGE_CLASS);
+    return wordSpans.concat(afterSpans, beforeSpans);
   }
 
   /**
@@ -1806,7 +1907,9 @@
     extractBlocks: extractBlocks,
     remapBlocks: remapBlocks,
     offsetToDom: offsetToDom,
+    offsetsToRange: offsetsToRange,
     spanToRange: spanToRange,
+    wordEdges: wordEdges,
     resolveSelection: resolveSelection,
     helpContext: helpContext,
     PASSAGE_MARKER: PASSAGE_MARKER,
@@ -1820,6 +1923,8 @@
     READING_CLASS: READING_CLASS,
     PILL_CLASS: PILL_CLASS,
     WORD_CLASS: WORD_CLASS,
+    WORD_EDGE_CLASS: WORD_EDGE_CLASS,
+    WORD_EDGE_CHARS: WORD_EDGE_CHARS,
     HIGHLIGHT_THEMES: HIGHLIGHT_THEMES,
     DEFAULT_HIGHLIGHT_THEME: DEFAULT_HIGHLIGHT_THEME,
     PLAYER_FONTS: PLAYER_FONTS,
@@ -1837,6 +1942,7 @@
     decorateReadingBlock: decorateReadingBlock,
     undecorateReadingBlock: undecorateReadingBlock,
     wrapRange: wrapRange,
+    wrapWord: wrapWord,
     unwrapSpans: unwrapSpans,
     normaliseHighlightTheme: normaliseHighlightTheme,
     normalisePlayerFont: normalisePlayerFont,

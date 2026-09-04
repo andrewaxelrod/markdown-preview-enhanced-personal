@@ -261,16 +261,51 @@ blockId?, blocks? }]`, `readAloudCancel`, `readAloudPlaying`, `readAloudSetSpeed
     themes are not overridden. Desktop only, live preview only, never in an export. Files:
     `media/read-aloud-page.css`, `media/fonts/*`, the page section of `media/read-aloud.js`,
     the resolver and normalisers in `media/read-aloud-core.js`, and the suites
-    `page-tokens.test.js` and `page-theme.test.js`. Of the spec's manual acceptance checks
-    (§13) only the stylesheet's rendering was checked in a browser against crossnote's own
-    theme files; the Extension Development Host checks are still to be done. The first of them
-    found the page's colour never reaching running text under the `night` preview theme (nor
-    would it under `gothic` or `medium`): those themes colour `p`, `li`, `table`, `dt` and
-    `.math` directly, which beats inheritance from `body` whatever the specificity, so on
-    _Light_ paragraphs and list numbers stayed the theme's `#dedede` on the off-white column,
-    and the sheet's caption — a `<p>` — with them. The page now names those elements (and `dd`,
-    `td`, `.mathjax-exps`), the sheet's two paragraphs inherit the panel colour, and the token
-    test scans the bundled themes for element-level colour rules and holds the page to them.
+    `page-tokens.test.js` and `page-theme.test.js`. The spec's fifteen §13 acceptance checks were run on
+    2026-09-04 in an Extension Development Host driven over the Chrome DevTools Protocol (an
+    isolated profile, a `page-check.md` with every surface the page paints, `test-file.md`),
+    all passed: 1 cold load — `dark` under a light VS Code and `light` under a dark one, the
+    attribute written by the head script with the stylesheet linked before it; 2 _Auto_
+    following a colour-theme switch in the same tick as VS Code's body classes, the 150 ms
+    crossfade, the word cursor still advancing, no reload; 3 `atom-dark` and `github-light`
+    rendering identically under the page (a computed-style fingerprint of 322 elements) and an
+    offline HTML export carrying no page attribute, stylesheet, script or font; 4 `off` against
+    a build of `0d2e7c9` on the same document, element for element (322 computed-style rows,
+    zero differences, the 1.85 rhythm and 1.1 em gap) — only the pill padding differs, on
+    purpose (see _Changed_); 5 the syntax palette on TypeScript, JSON and diff fences under
+    _Dark_ over `github-light` with `auto.css`; 6 admonitions and callouts of every type on
+    both schemes; 7 the WCAG 1.4.12 spacing overrides in and out of a read with nothing clipped
+    (crossnote's callout title overflows its box by 3 px on its own, overrides or not); 8 zoom
+    2 in a 752 px pane — no horizontal scrollbar, code and tables scrolling inside themselves,
+    the panel at its 412 px and 13 px; 9 the font files renamed — `system-ui` at the same
+    sizes and weights, the font row still _Default_; 10 `prefers-reduced-motion` removing every
+    transition, the switch then instant; 11 print emulation black on white with the column
+    released and the controls hidden; 12 every stop of the sheet — three segments, the select,
+    three sliders, five swatches, reset — with a `--focus` ring (the sliders' on the thumb),
+    Space choosing a segment, Escape closing the sheet with the read still running (a second
+    Escape stops the read only while focus is inside the panel, as 03 built it; closing the
+    sheet leaves focus on the body; arrow keys inside the group, a MAY, are not built); 13
+    selection across a paragraph and inside the block being read on both schemes; 14 the help
+    sheet in Atkinson with the pill text token, _Resume_ resuming; 15 `media/fonts` at 48 KB.
+    Four things the checks found are fixed. Under the `night` preview theme (and `gothic` and
+    `medium`) the page's colour never reached running text: those themes colour `p`, `li`,
+    `table`, `dt` and `.math` directly, which beats inheritance from `body` whatever the
+    specificity, so on _Light_ paragraphs and list numbers stayed the theme's `#dedede` on the
+    off-white column, and the sheet's caption — a `<p>` — with them; the page now names those
+    elements (and `dd`, `td`, `.mathjax-exps`), the sheet's two paragraphs inherit the panel
+    colour, and the token test scans the bundled themes for element-level colour rules and
+    holds the page to them. A `#tag` was the link blue on VS Code's badge background
+    (`--vscode-badge-background`, which follows the editor's theme: `#616161` behind `#1f4e8c`
+    on the light page under a dark VS Code); tags keep crossnote's badge shape on the page's
+    `--code-surface` in `--link`, and the token test holds that pair. Code blocks under nine of
+    the bundled prism themes (`atom-*`, `one-*`, `monokai`, `solarized-*`, `pen-paper-coffee`,
+    which `codeBlockTheme: auto.css` selects from the preview theme) kept the prism theme's
+    background, because those themes declare it `!important`; the page's `pre` background and
+    padding (1 em) are now `!important` too — the two exceptions to the stylesheet's
+    no-`!important` rule, with the TOC's the third: crossnote writes the sidebar TOC's
+    background as an inline style from its own light/dark detection (`prefers-color-scheme`,
+    which in the webview follows the OS, so the TOC was `#181818` on the light page), so the
+    page's TOC background is `!important` and its links take `--link`.
   - **One reading rhythm for the whole canvas** (`.mpe-ra-canvas`): the 2.0 line height that used
     to be applied to the block being read moved to the whole preview at 1.85, together with even
     spacing for paragraphs, lists, blockquotes, tables and headings. Starting a read no longer
@@ -320,6 +355,23 @@ blockId?, blocks? }]`, `readAloudCancel`, `readAloudPlaying`, `readAloudSetSpeed
 
 ### Fixed
 
+- **Punctuation next to the spoken word stays visible.** The word box overhangs its word by its
+  horizontal padding (0.35 em) on each side and is relatively positioned so that it paints above
+  the pill fragment of the line below (see the entry after next), which also paints it above all
+  of the block's text; any glyph standing in that overhang was hidden under it: the hyphen of
+  _read-only_ while _only_ was spoken, the full stop after _firewall_, the comma after _hook_,
+  all but the tip of the question mark after _hold_, a closing quote or bracket, the _d_ of
+  _boldfaced_ when _face_ sat inside a `<strong>`. CSS alone cannot put the box between the
+  pill's background and the block's text — an inline stacking context paints its own background
+  after its negative-z-index descendants, so a `::before` at z-index −1 lands under the pill, and
+  an unpositioned box is painted over by the next line's pill fragment — so the player now
+  wraps the characters touching the word on either side in `.mpe-ra-word-edge` spans positioned
+  one step above the box (`core.wrapWord`, `core.wordEdges`; the non-whitespace run next to the
+  word, at most `WORD_EDGE_CHARS = 3` characters, never across whitespace and so never across a
+  block). They have no offset and no background, are split out and merged back with the same
+  `splitText` machinery as the word so node identity and the offset map survive, and are cleared
+  with the word. Hit testing is unchanged: the word span is still the topmost element over its
+  own glyphs. Six new tests in `test/read-aloud/reading-decoration.test.js`.
 - **The player's root classes survive a crossnote render.** crossnote's React root rewrites
   the preview root's `class` attribute on every render, including renders that change no child
   node — the second render of an `updateHtml`, a zoom, a scroll-sync message — and the player

@@ -238,9 +238,17 @@ html[data-mpe-ra-page]
 
 /* The sidebar TOC, when open, sits on the canvas. */
 html[data-mpe-ra-page] body:not([data-presentation-mode]) .md-sidebar-toc {
-  background-color: var(--canvas);
+  /* !important: crossnote writes the TOC's background as an inline style
+   * from its own light/dark detection, which is dark on the light page
+   * whenever the OS is dark. The links are outside the preview root, so the
+   * link rule of §3 does not reach them. */
+  background-color: var(--canvas) !important;
   color: var(--text);
   font-family: inherit;
+}
+
+html[data-mpe-ra-page] body:not([data-presentation-mode]) .md-sidebar-toc a {
+  color: var(--link);
 }
 
 /* --------------------------------------------------------------------------
@@ -370,6 +378,19 @@ html[data-mpe-ra-page]
   outline-offset: 2px;
 }
 
+/* Tags (#tag) keep crossnote's badge shape and take the page's surfaces.
+ * crossnote paints them with VS Code's badge colours
+ * (`--vscode-badge-background`), which follow the editor's theme rather than
+ * the page's: on the light page under a dark VS Code the badge was #616161
+ * behind the link blue (1.6:1). */
+html[data-mpe-ra-page]
+  body:not([data-presentation-mode])
+  :is(.markdown-preview, .mpe-ra-help-body)
+  :is(a.tag, span.tag:not(.token)) {
+  color: var(--link);
+  background-color: var(--code-surface);
+}
+
 html[data-mpe-ra-page] body:not([data-presentation-mode]) .markdown-preview hr {
   height: 1px;
   margin: 2em 0;
@@ -405,7 +426,13 @@ html[data-mpe-ra-page]
   :is(.markdown-preview, .mpe-ra-help-body)
   pre {
   color: var(--text);
-  background-color: var(--code-surface);
+  /* !important, twice: nine bundled prism themes (atom-*, one-*, monokai,
+   * solarized-*, pen-paper-coffee) force their own `pre` background with
+   * !important and one forces the padding, so this is the one place where
+   * specificity alone cannot win. Between two importants specificity decides
+   * again, and this selector beats every prism rule. */
+  background-color: var(--code-surface) !important;
+  padding: 1em !important;
   border: 1px solid var(--rule);
   border-radius: 0.3em;
   overflow: auto;
@@ -415,7 +442,7 @@ html[data-mpe-ra-page]
   body:not([data-presentation-mode])
   :is(.markdown-preview, .mpe-ra-help-body)
   pre > code {
-  background-color: transparent;
+  background-color: transparent !important; /* see `pre` above */
   color: inherit;
 }
 

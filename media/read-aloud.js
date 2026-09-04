@@ -801,9 +801,10 @@
 
   /**
    * Paint one word: unwrap the previous one first, so the offset map (built on
-   * the unsplit text nodes) resolves, then wrap the new range. Every DOM call
-   * is guarded: a throw would escape the rAF callback and silently stop the
-   * highlight loop for the rest of the read.
+   * the unsplit text nodes) resolves, then wrap the new word and the
+   * characters touching it (core.wrapWord; the word's spans come first).
+   * Every DOM call is guarded: a throw would escape the rAF callback and
+   * silently stop the highlight loop for the rest of the read.
    */
   function paintSpan(span) {
     clearWordBox();
@@ -815,12 +816,8 @@
       // The DOM changes between words; a Range cached on the span is stale.
       span._range = null;
       span._rangeMap = null;
-      var range = core.spanToRange(record.map, span, document);
-      if (!range) {
-        return;
-      }
       mutateSilently(function () {
-        spans = core.wrapRange(range, core.WORD_CLASS);
+        spans = core.wrapWord(record.map, span, document);
       });
     } catch (error) {
       /* a stale map or a detached node must not stop playback */

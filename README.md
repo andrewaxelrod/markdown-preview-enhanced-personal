@@ -219,7 +219,7 @@ What it overrides, and what it does not:
 - The page lives on the `<html>` element (`data-mpe-ra-page`), which crossnote never rewrites, and
   is applied before the body is parsed, so a cold load never flashes the wrong theme. The
   stylesheet is `media/read-aloud-page.css`; its rules are prefixed with `html[data-mpe-ra-page]`,
-  so a user `style.less` that wants to win must use the same prefix or `!important`.
+  so a user `style.less` that wants to win must use the same prefix or `!important`. (The page itself uses `!important` in three declarations only — the `pre` background and padding, which nine bundled prism themes force with `!important`, and the sidebar TOC background, which crossnote sets as an inline style — so a `style.less` rule for those three needs `!important` as well.)
 - A selection drawn over the pills of the block being read paints on the pill, not on the page's
   surface; it is still visible, but the dual test is defined against the surface.
 - Presentation mode (reveal.js) is never restyled, and the page is desktop-only, like the rest of

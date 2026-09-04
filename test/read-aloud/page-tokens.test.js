@@ -191,6 +191,12 @@ suite('read-aloud low-strain page: the light tokens (WCAG 2.x)', () => {
   test('muted text, links and focus', () => {
     atLeast(wcag(LIGHT['text-muted'], LIGHT.surface), 4.5, 'muted on surface');
     atLeast(wcag(LIGHT.link, LIGHT.surface), 7, 'link on surface (1.11)');
+    // A #tag is a link on the code surface (§8; crossnote's badge shape).
+    atLeast(
+      wcag(LIGHT.link, LIGHT['code-surface']),
+      4.5,
+      'tag on code surface',
+    );
     atLeast(wcag(LIGHT.focus, LIGHT.surface), 3, 'focus ring on surface');
   });
 
@@ -258,6 +264,8 @@ suite('read-aloud low-strain page: the dark tokens (APCA)', () => {
     // D10: no colour that still reads as blue reaches Lc 90 on #181818, so
     // the underline is the affordance and the link is the text colour.
     assert.strictEqual(DARK.link, DARK.text);
+    // A #tag is a link on the code surface (§8; crossnote's badge shape).
+    atLeast(lc(DARK.link, DARK['code-surface']), 75, 'tag on code surface');
     atLeast(wcag(DARK.focus, DARK.surface), 3, 'focus ring on surface');
   });
 

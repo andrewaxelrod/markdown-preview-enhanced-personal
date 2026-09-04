@@ -304,6 +304,23 @@
   border-bottom-right-radius: 0;
 }
 
+/* The characters the box overhangs — the hyphen of "read-only", the full
+ * stop, comma or closing quote after a word, the rest of a word split across
+ * an inline element — are wrapped in this while the word is spoken
+ * (core.wrapWord) and positioned a step above the box, so they are painted
+ * over it instead of vanishing under its overhang. The glyphs are lifted
+ * over the box rather than the box tucked under the glyphs because the
+ * inline paint order has no slot between a pill's background and its text:
+ * an inline stacking context paints its own background after its
+ * negative-z-index descendants, so a ::before at z-index -1 lands under the
+ * pill, and an unpositioned box is painted over by the next line's pill
+ * fragment. No offset, no background: the span moves nothing and shows
+ * nothing of its own. */
+.mpe-ra-word-edge {
+  position: relative;
+  z-index: 1;
+}
+
 @media (forced-colors: active) {
   .mpe-ra-word {
     forced-color-adjust: none;

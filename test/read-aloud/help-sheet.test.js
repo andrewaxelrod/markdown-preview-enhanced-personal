@@ -239,6 +239,32 @@ suite('read-aloud help sheet (04-help-module)', function () {
     await sleep(220);
   }
 
+  /**
+   * Select the `nth` occurrence of `needle` inside the single text node of
+   * `#id` — a few words out of a sentence, the 11 case.
+   */
+  async function selectWords(id, needle, nth) {
+    // The player prepends its play button to the block, so the prose is not
+    // the first child: find the text node that carries the needle.
+    const node = Array.from(doc.getElementById(id).childNodes).find(
+      (child) => child.nodeType === 3 && child.data.includes(needle),
+    );
+    assert.ok(node, `a text node with "${needle}" in #${id}`);
+    let at = -1;
+    for (let i = 0; i <= (nth || 0); i++) {
+      at = node.data.indexOf(needle, at + 1);
+      assert.ok(at >= 0, `"${needle}" occurrence ${i} in #${id}`);
+    }
+    const range = doc.createRange();
+    range.setStart(node, at);
+    range.setEnd(node, at + needle.length);
+    const selection = win.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    doc.dispatchEvent(new win.Event('selectionchange'));
+    await sleep(220);
+  }
+
   function lastMessage(command) {
     return posted.filter((m) => m.command === command).pop();
   }
@@ -342,7 +368,7 @@ suite('read-aloud help sheet (04-help-module)', function () {
 
     // Start the selection read from the floating affordance, which hides
     // itself and drops the resolved selection as it does.
-    click(doc.querySelector('.mpe-ra-float'));
+    click(doc.querySelector('.mpe-ra-float-read'));
     const read = lastMessage('readAloudSynthesize');
     assert.ok(read, 'the selection is being read; logs: ' + logs.join('\n'));
     assert.strictEqual(read.args[3].kind, 'selection');
@@ -414,6 +440,151 @@ suite('read-aloud help sheet (04-help-module)', function () {
     await clearSelection();
   });
 
+  // ------------------------------------------------- 09 §8, §9: the scroll
+
+  test('a scroll does not disable the button', async function () {
+    await selectParagraph('passage');
+    assert.strictEqual(helpButton().disabled, false, 'enabled by the drag');
+
+    // The follow-the-reading scroll (07 §7) writes the container's position
+    // on every frame of a read, and `hideFloat` used to be bound straight to
+    // this event and to drop the resolved selection with the affordance: the
+    // button — and Alt+H, which shares the predicate — went dead within a
+    // frame of any selection made while listening (09 §2.3).
+    win.dispatchEvent(new win.Event('scroll'));
+    await sleep(20);
+
+    assert.strictEqual(
+      helpButton().disabled,
+      false,
+      'the selection is still there, so the button still is',
+    );
+    assert.strictEqual(
+      helpButton().getAttribute('title'),
+      'Explain the selection',
+    );
+    assert.strictEqual(
+      doc.querySelector('.mpe-ra-float').hidden,
+      false,
+      'and the affordance travels with the text instead of vanishing',
+    );
+    await clearSelection();
+  });
+
+  test('a scroll with no selection left takes the affordance away', async function () {
+    await selectParagraph('passage');
+    win.getSelection().removeAllRanges();
+    win.dispatchEvent(new win.Event('scroll'));
+    await sleep(20);
+    assert.strictEqual(doc.querySelector('.mpe-ra-float').hidden, true);
+    assert.strictEqual(helpButton().disabled, true);
+  });
+
+  test('the predicate resolves the live selection, with no selectionchange', function () {
+    // No `selectionchange`, so the 150 ms settle never runs and
+    // `floatSelection` is untouched: the button state comes from the live
+    // selection alone (09 §8).
+    const range = doc.createRange();
+    range.selectNodeContents(doc.getElementById('passage'));
+    const selection = win.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+
+    host({ command: 'readAloudConfig', enabled: true, helpAvailable: true });
+    assert.strictEqual(helpButton().disabled, false);
+    selection.removeAllRanges();
+  });
+
+  test('Alt+H works after a scroll has been through', async function () {
+    await selectParagraph('passage');
+    win.dispatchEvent(new win.Event('scroll'));
+    await sleep(20);
+    host({ command: 'readAloudControl', action: 'help' });
+    assert.strictEqual(sheet().hidden, false, 'the sheet opened');
+    closeSheet();
+    await clearSelection();
+  });
+
+  // ---------------------------------------- 09 §10: Explain on the affordance
+
+  test('the affordance carries Read aloud and Explain', async function () {
+    await selectParagraph('passage');
+    const float = doc.querySelector('.mpe-ra-float');
+    const read = float.querySelector('[data-mpe-ra-action="float"]');
+    const explain = float.querySelector('[data-mpe-ra-action="floatHelp"]');
+    assert.ok(read, 'the read button is still there with its own action');
+    assert.ok(explain, 'and the new help button beside it');
+    assert.strictEqual(explain.hidden, false, 'shown while help is available');
+    assert.strictEqual(
+      explain.getAttribute('title'),
+      'Explain the selection',
+      'the panel button’s wording',
+    );
+
+    click(explain);
+    assert.strictEqual(sheet().hidden, false, 'it opens the sheet');
+    assert.strictEqual(
+      lastHelpRequest().args[2],
+      doc.getElementById('passage').textContent,
+      'with the passage that was selected',
+    );
+    closeSheet();
+    await clearSelection();
+  });
+
+  test('with the sheet open the document selection has no affordance', async function () {
+    // The sheet owns the reading, and the document selection left behind is
+    // the passage being explained: an affordance there would offer to read or
+    // re-explain it across the two scopes, and it would stand over the answer
+    // (09 §10).
+    await selectParagraph('passage');
+    click(helpButton());
+    answerHelp();
+    doc.dispatchEvent(new win.Event('selectionchange'));
+    await sleep(220);
+    assert.strictEqual(doc.querySelector('.mpe-ra-float').hidden, true);
+    closeSheet();
+    await clearSelection();
+  });
+
+  test('Explain is hidden in the web build and for a selection in the sheet', async function () {
+    // The web build cannot spawn a process, so there is no help at all.
+    host({ command: 'readAloudConfig', enabled: true, helpAvailable: false });
+    await selectParagraph('passage');
+    assert.strictEqual(
+      doc.querySelector('.mpe-ra-float-help').hidden,
+      true,
+      'no Explain without an engine',
+    );
+    enableHelp();
+    await selectParagraph('passage');
+    assert.strictEqual(doc.querySelector('.mpe-ra-float-help').hidden, false);
+
+    // 04 D9: a selection inside the sheet is read, not explained — questions
+    // about the explanation go through the sheet's own question box.
+    click(helpButton());
+    answerHelp();
+    const range = doc.createRange();
+    range.selectNodeContents(sheetBody().querySelector('p'));
+    const selection = win.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    doc.dispatchEvent(new win.Event('selectionchange'));
+    await sleep(220);
+    assert.strictEqual(
+      doc.querySelector('.mpe-ra-float').hidden,
+      false,
+      'the sheet still offers Read aloud',
+    );
+    assert.strictEqual(
+      doc.querySelector('.mpe-ra-float-help').hidden,
+      true,
+      'but not Explain',
+    );
+    closeSheet();
+    await clearSelection();
+  });
+
   // ------------------------------------------------- §3.1 what is sent
 
   test('the request carries the title, breadcrumb, neighbours and section', async function () {
@@ -453,6 +624,10 @@ suite('read-aloud help sheet (04-help-module)', function () {
     // Before, the passage and after are their own fields, not repeated here.
     assert.ok(!fields.section.includes('Now the run'));
     assert.ok(!fields.section.includes('Both chairs'));
+    // 11 — the selection is the whole block, so there is nothing around it to
+    // send, and a sentence of fourteen words is a passage, not a term.
+    assert.strictEqual(fields.enclosing, '');
+    assert.strictEqual(fields.mentions, '');
     // A first request carries no follow-up and no previous explanation.
     assert.strictEqual(fields.followUp, undefined);
     assert.strictEqual(fields.previous, undefined);
@@ -797,7 +972,75 @@ suite('read-aloud help sheet (04-help-module)', function () {
     assert.strictEqual(fields.before, '');
     assert.strictEqual(fields.after, '');
     assert.strictEqual(fields.section, '');
+    assert.strictEqual(fields.enclosing, '');
+    assert.strictEqual(fields.mentions, '');
     assert.strictEqual(fields.title, 'Module one: the governed harness');
     assert.strictEqual(fields.breadcrumb.length, 2);
+  });
+
+  // ------------------------------------------- 11: a few words, in context
+
+  test('a few selected words carry their block with the selection marked, and the mentions elsewhere', async function () {
+    boot();
+    await sleep(60);
+    enableHelp({ helpContextMode: 'section' });
+    await selectWords('passage', 'path');
+    click(helpButton());
+    const [, , passage, fields] = lastHelpRequest().args;
+    assert.strictEqual(passage, 'path');
+    // The whole paragraph, with the selected word — the first "path" — in
+    // the brackets; the section keeps the [PASSAGE] marker where the block was.
+    assert.strictEqual(
+      fields.enclosing,
+      'Then the human \u27e6path\u27e7, and it is the same path a human author would walk.',
+    );
+    assert.ok(fields.section.includes('[PASSAGE]'));
+    assert.ok(!fields.section.includes('Then the human path'));
+    // One word is a term: the document's other uses of it, outside the
+    // section (the intro sits above the h2), each under its heading. The
+    // "after" block also says "path" but is already in the request.
+    assert.strictEqual(
+      fields.mentions,
+      'Under "Module one: the governed harness": This module is about the path a change walks.',
+    );
+    closeSheet();
+    await clearSelection();
+
+    // The second "path" of the same sentence is the one marked when it is the
+    // one selected: the live range gives the offset, not a text search.
+    await selectWords('passage', 'path', 1);
+    click(helpButton());
+    const again = lastHelpRequest().args[3];
+    assert.strictEqual(
+      again.enclosing,
+      'Then the human path, and it is the same \u27e6path\u27e7 a human author would walk.',
+    );
+    closeSheet();
+    await clearSelection();
+
+    // A phrase of more than five words gets its block but no mentions.
+    await selectWords('passage', 'it is the same path a human author');
+    click(helpButton());
+    const phrase = lastHelpRequest().args[3];
+    assert.ok(
+      phrase.enclosing.startsWith('Then the human path, and \u27e6it is'),
+    );
+    assert.strictEqual(phrase.mentions, '');
+  });
+
+  test('selection mode still sends the enclosing block, and never the mentions', async function () {
+    boot();
+    await sleep(60);
+    enableHelp({ helpContextMode: 'selection' });
+    await selectWords('passage', 'path');
+    click(helpButton());
+    const fields = lastHelpRequest().args[3];
+    assert.strictEqual(fields.contextMode, 'selection');
+    assert.strictEqual(
+      fields.enclosing,
+      'Then the human \u27e6path\u27e7, and it is the same path a human author would walk.',
+    );
+    assert.strictEqual(fields.mentions, '');
+    assert.strictEqual(fields.section, '');
   });
 });

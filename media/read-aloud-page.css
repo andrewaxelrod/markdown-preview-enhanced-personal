@@ -291,6 +291,20 @@ html[data-mpe-ra-page]
   color: var(--text);
 }
 
+/* Headings, for the same reason and in their own rule (09 §5.1). *Every*
+ * bundled theme colours them with an unscoped `html body h1,…,h6 { color: … }`,
+ * which reaches the help sheet's body as well as the preview; with the page
+ * forcing one scheme and the theme carrying the other, the sheet's titles came
+ * out at 1.2:1 (white on the light panel) or 1.35:1 (black on the dark one).
+ * Kept apart from the preview's own heading rule below, which also resets the
+ * column's padding and border and has nothing to say about the sheet. */
+html[data-mpe-ra-page]
+  body:not([data-presentation-mode])
+  :is(.markdown-preview, .mpe-ra-help-body)
+  :is(h1, h2, h3, h4, h5, h6) {
+  color: var(--text);
+}
+
 /* Prose wraps for the eye (07 §12): fewer orphans and ragged rivers where
  * the engine supports it (Chromium 117+), a no-op before that. */
 html[data-mpe-ra-page]
@@ -423,7 +437,12 @@ html[data-mpe-ra-page]
   background-color: var(--code-surface);
 }
 
-html[data-mpe-ra-page] body:not([data-presentation-mode]) .markdown-preview hr {
+/* The sheet is named here too (09 §5.1): the themes give `hr` a background of
+ * their own, so a rule scoped to the preview left the sheet with the theme's. */
+html[data-mpe-ra-page]
+  body:not([data-presentation-mode])
+  :is(.markdown-preview, .mpe-ra-help-body)
+  hr {
   height: 1px;
   margin: 2em 0;
   border: 0;
@@ -908,14 +927,65 @@ html[data-mpe-ra-page]
   --link: var(--text-far);
 }
 
-html[data-mpe-ra-page] .mpe-ra-help-body {
-  font-family:
+/* --------------------------------------------------------------------------
+ * 7c. The help sheet reads like the page (09 §6, §7)
+ *
+ * The sheet renders the same preview markup the column does and is read by
+ * the same player, so its prose follows the same reader template: the text
+ * size of the slider, the line height derived from it, the heading scale and
+ * rhythm of the canvas, the chosen player font and the measured
+ * 66-character measure. It was given a fixed 14 px in 04, before there was a
+ * template to follow — against the column's 20 px, with a flat heading scale
+ * and 97 characters to the line.
+ *
+ * The size goes on `.mpe-ra-help` rather than on the body so the `em` of
+ * `--mpe-ra-page-measure` resolves against it for the sheet's width. Nothing
+ * in the chrome moves with it: the title, the model chip, the status line,
+ * the buttons, the question box and the × all carry explicit px sizes.
+ * ----------------------------------------------------------------------- */
+
+html[data-mpe-ra-page] body .mpe-ra-help {
+  /* The same expression as the body's (§2), so the two never drift. */
+  font-size: calc(var(--mpe-ra-page-text-size, 20) * 1rem / 16);
+  line-height: var(--mpe-ra-page-line-height, 1.6);
+  width: calc(var(--mpe-ra-page-measure, 33em) + 40px);
+  max-height: 70vh;
+}
+
+html[data-mpe-ra-page] body .mpe-ra-help-body {
+  /* Inherited from the sheet; named so the 14 px of media/read-aloud.css,
+   * which is the page-off size, does not win. */
+  font-size: inherit;
+  line-height: inherit;
+  /* The pill and word padding derive from this (media/read-aloud.css §2b);
+   * with the property unset it ran at the 1.85 fallback (09 §2.2). */
+  --mpe-ra-line-height: var(--mpe-ra-page-line-height, 1.6);
+  --mpe-ra-block-gap: 1.25em;
+  /* The column's measure, in em of the size just set: 66 characters of the
+   * face in use, measured at runtime (07 §6.2). On a pane narrower than the
+   * sheet's own max-width the body shrinks with it. */
+  max-width: var(--mpe-ra-page-measure, 33em);
+  margin-inline: auto;
+  /* The player font when one is chosen, the page's face otherwise. The
+   * fallback sits *inside* the var(), because a `var()` on an undefined
+   * property makes the whole declaration invalid at computed-value time and
+   * the sheet would inherit the panel's UI font instead. */
+  font-family: var(
+    --mpe-ra-font-family,
     'Atkinson Hyperlegible Next',
     system-ui,
     -apple-system,
     'Segoe UI',
     Roboto,
-    sans-serif;
+    sans-serif
+  );
+}
+
+html[data-mpe-ra-page]
+  body
+  .mpe-ra-help-body
+  :is(p, li, dd, dt, blockquote, figcaption) {
+  text-wrap: pretty;
 }
 
 html[data-mpe-ra-page]
@@ -931,7 +1001,7 @@ html[data-mpe-ra-page]
     .mpe-ra-help-btn,
     .mpe-ra-help-model,
     .mpe-ra-help-input,
-    .mpe-ra-float
+    .mpe-ra-float-btn
   ):focus-visible {
   outline-color: var(--focus);
 }

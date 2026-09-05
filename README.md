@@ -255,8 +255,12 @@ Select a passage you did not follow and press the **?** button (or <kbd>⌥H</kb
 pauses where it is, a sheet opens above the panel, and a headless LLM writes an explanation of
 that passage in five parts — what it says, the terms, the passage in plain words, an example,
 and why it matters — written for the ear and about as long as the passage itself, never more
-than two minutes of audio. The answer is rendered through the preview's own markdown engine, so
-it looks like the document it explains, and it is read aloud as soon as it arrives.
+than two minutes of audio. A selection of five words or fewer is a **term** and gets four parts
+instead — what it means here, in the sentence it was taken from; what it means in general; an
+example of it in the document's own setting; and why it is there — and for a term the document
+uses without defining, the model may draw on general knowledge, saying so. The answer is
+rendered through the preview's own markdown engine, so it looks like the document it explains,
+and it is read aloud as soon as it arrives.
 
 **The sheet is a second reading scope.** The same panel drives it: play/pause, ±10 s, speed,
 volume, the progress line and the word-by-word highlight all work there, a click on a word in
@@ -276,8 +280,10 @@ of explanations back up. Answers are cached by content, so a repeat is instant, 
 > help is not. It happens only when you press the help button, <kbd>⌥H</kbd>, a follow-up chip
 > or _Ask_ — never on opening a preview and never on selecting text. How much goes with the
 > passage is `markdown-preview-enhanced.readAloudHelpContext`: `selection` sends the passage,
-> the document title and the heading breadcrumb only; `section` (the default) adds the blocks
-> either side and the rest of the enclosing section; `document` sends the whole source. The
+> the block it was taken from with the selection marked, the document title and the heading
+> breadcrumb only; `section` (the default) adds the blocks either side, the rest of the
+> enclosing section and, for a term, the document's other mentions of it, each under its heading
+> (a glossary row comes with its column names); `document` sends the whole source. The
 > _MPE Read Aloud_ output channel logs character counts, never text.
 
 #### Which engine answers

@@ -666,4 +666,54 @@ suite('read-aloud low-strain page: the preview themes', () => {
     }
     assert.deepStrictEqual(missing, []);
   });
+
+  // 09 §5.1, §13.2 check 7. The test above passed all along with the sheet's
+  // headings white on the light panel at 1.2:1: it asks only that *some* page
+  // rule name the element, and the heading rule named them — for the preview
+  // root. The help sheet renders the same preview markup on the panel's
+  // surface and is reached by the same unscoped theme rules, so every element
+  // a theme colours has to be named for the sheet as well.
+  test('every element a bundled theme colours is coloured in the help sheet too', () => {
+    const themed = new Set();
+    for (const file of fs
+      .readdirSync(THEME_DIR)
+      .filter((name) => name.endsWith('.css'))) {
+      const css = fs.readFileSync(path.join(THEME_DIR, file), 'utf8');
+      for (const rule of rules(css)) {
+        if (!setsColour(rule.declarations)) {
+          continue;
+        }
+        for (const selector of rule.selector.split(',')) {
+          const element = subject(selector.trim());
+          if (TEXT_ELEMENTS.has(element)) {
+            themed.add(element);
+          }
+        }
+      }
+    }
+    assert.ok(
+      ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'].every((element) =>
+        themed.has(element),
+      ),
+      'the themes colour headings directly — the leak of 09 §2.1',
+    );
+
+    const withoutPrint = UNCOMMENTED.replace(
+      /@media print\s*\{[\s\S]*?\n\}/,
+      '',
+    );
+    const sheet = rules(withoutPrint).filter(
+      (rule) =>
+        rule.selector.startsWith('html[data-mpe-ra-page') &&
+        setsColour(rule.declarations) &&
+        names(rule.selector, '.mpe-ra-help-body'),
+    );
+    const missing = [];
+    for (const element of Array.from(themed).sort()) {
+      if (!sheet.some((rule) => names(rule.selector, element))) {
+        missing.push(element);
+      }
+    }
+    assert.deepStrictEqual(missing, []);
+  });
 });

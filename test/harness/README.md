@@ -20,19 +20,21 @@ earlier session once answered on another port — and after a CSS edit re-set ea
 
 ## Query parameters
 
-| Parameter  | Values                               | Seeds                                                |
-| ---------- | ------------------------------------ | ---------------------------------------------------- |
-| `theme`    | `light` `dark` `auto` `off`          | `readAloudGlobalTheme`                               |
-| `size`     | `16`–`28`                            | `readAloudTextSize`                                  |
-| `marker`   | `underline` `box` `off`              | `readAloudWordMarker`                                |
-| `dim`      | `0` `1`                              | `readAloudDimWhileReading`                           |
-| `autohide` | `0` `1`                              | `readAloudPanelAutoHide`                             |
-| `font`     | a player font id                     | `readAloudFont`                                      |
-| `palette`  | `blue` `pink` `red` `green` `orange` | `readAloudHighlightTheme`                            |
-| `speed`    | `0.25`–`4`                           | `readAloudSpeed`                                     |
-| `vscode`   | `light` `dark`                       | the body class `auto` follows                        |
-| `audio`    | `kokoro` `silent`                    | Kokoro over CORS, or a silent WAV of 0.32 s per word |
-| `kokoro`   | a base URL                           | the server (`http://127.0.0.1:8880` by default)      |
+| Parameter   | Values                               | Seeds                                                             |
+| ----------- | ------------------------------------ | ----------------------------------------------------------------- |
+| `theme`     | `light` `dark` `auto` `off`          | `readAloudGlobalTheme`                                            |
+| `size`      | `16`–`28`                            | `readAloudTextSize`                                               |
+| `marker`    | `underline` `box` `off`              | `readAloudWordMarker`                                             |
+| `dim`       | `0` `1`                              | `readAloudDimWhileReading`                                        |
+| `autohide`  | `0` `1`                              | `readAloudPanelAutoHide`                                          |
+| `font`      | a player font id                     | `readAloudFont`                                                   |
+| `palette`   | `blue` `pink` `red` `green` `orange` | `readAloudHighlightTheme`                                         |
+| `speed`     | `0.25`–`4`                           | `readAloudSpeed`                                                  |
+| `vscode`    | `light` `dark`                       | the body class `auto` follows                                     |
+| `audio`     | `kokoro` `silent`                    | Kokoro over CORS, or a silent WAV of 0.32 s per word              |
+| `kokoro`    | a base URL                           | the server (`http://127.0.0.1:8880` by default)                   |
+| `help`      | `0` `1`                              | `helpAvailable`: the panel's `?` and the affordance's _Explain_   |
+| `helpdelay` | ms                                   | how long _Thinking…_ shows before the canned answer (default 400) |
 
 With no `audio` parameter the shim probes `GET /health` for a second and falls back to the
 silent stand-in: the visual behaviours need timing, not speech.
@@ -54,6 +56,13 @@ unlock audio). Then:
 - `window.mpeHarness.events` — every message, chunk, `play` and `ended` with a timestamp, the
   same lines the console shows with the `[harness]` prefix (check H8 reads the block gaps off
   them).
+
+With `help=1` the shim answers `readAloudHelp` with a **canned five-part answer** in the shape
+`src/read-aloud/help-prompt.ts` §14.1 asks for — _What it says_, _Terms_, _In plain words_, _An
+example_, _Why it matters_ — rendered as the preview markup the host's engine would produce, and
+answers `readAloudHelpCancel` by clearing its timer. Ten blocks, so the sheet is a real reading
+scope with real block hand-offs. No CLI is spawned and no model is called: this is for the
+sheet's typography and its reading behaviour (09 §14.2), not for the engine.
 
 `fixture.html` is a rendered document of about sixty blocks in crossnote's markup; `index.html`
 is the webview's skeleton with the head in the order `preview-provider.ts` injects it. Nothing

@@ -47,6 +47,9 @@ export interface HelpCacheKeyParts {
   passage: string;
   after: string;
   section: string;
+  /** 11 — the two fields added with the term shape; either changes the answer. */
+  enclosing: string;
+  mentions: string;
   question: string;
   previous: string;
 }
@@ -65,6 +68,8 @@ export function helpCacheKey(parts: HelpCacheKeyParts): string {
     parts.passage,
     parts.after,
     parts.section,
+    parts.enclosing,
+    parts.mentions,
     parts.question,
     parts.previous,
   ].join(HELP_CACHE_KEY_SEPARATOR);

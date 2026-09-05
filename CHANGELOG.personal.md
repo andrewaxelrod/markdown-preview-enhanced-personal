@@ -448,6 +448,82 @@ off` mid-read dropped the page, its properties and every tier class and kept the
 
 ### Fixed
 
+- **Help never saw the sentence a short selection came from** (`featrues/11-help-fixes/`). For a
+  selection shorter than its block, the request carried the selected words as the passage and
+  put the `[PASSAGE]` marker where the _whole block_ had been, so the sentence the words sat in
+  was the one part of the document the model was not shown. Asked about "the metrics" in a
+  lesson that lists them among the seven parts of a harness, `sonnet` and `opus` both reported,
+  correctly for what they were given, that the phrase did not appear in the lesson. The material
+  now carries an `<enclosing>` block in every context mode — the block (in a table, the row with
+  its column headers) the passage was taken from, with the passage marked between ⟦ and ⟧ at the
+  live selection's own offset, so a repeated word is marked where it was selected; empty when the
+  selection is the whole block — and, in `section` mode for a selection of five words or fewer, a
+  `<mentions>` block: up to six other places in the document that use those words (articles
+  dropped, plural tolerated, whole words only, table rows read with their headers, code and
+  diagrams never), each under the heading it sits beneath, outside the section that is already
+  sent. Such a selection is a **term** and gets its own request, _Explain the term_, with four
+  parts — _What it means here_, _In general_, _An example_ (of the term itself, in the document's
+  setting), _Why it is here_ — a 100/130-word target instead of 80/100 (four parts at eighty
+  words were captions), term variants of _Simpler_, _Deeper_ and _Example_, and one licence the
+  passage shape does not have: a term the document uses without defining may be explained from
+  general knowledge, said as such. The system prompt names the brackets and forbids reading the
+  passage "as a stray fragment"; `HELP_PROMPT_VERSION` is 2, so no cached answer written to the
+  old prompt is served, and the cache key and the _MPE Read Aloud_ log line carry the shape and
+  the two new fields' lengths. Caps: 3,000 characters for the enclosing block, trimmed evenly
+  around ⟦ the way the section is around `[PASSAGE]`, and 2,400 for the mentions (12,000 and
+  4,000 at the message boundary). `help-context.test.js` drives the builder over a render of the
+  report's document: the lesson, the glossary table and the sources list.
+- **Read aloud, the help sheet's titles.** The sheet's section headings were invisible whenever
+  the low-strain page forced one scheme and the preview theme carried the other: every bundled
+  preview theme colours headings with an unscoped `html body h1,…,h6 { color: … }`, and
+  `media/read-aloud-page.css` neutralised it for the preview root and not for
+  `.mpe-ra-help-body`, so an `h2` came out `#fff` on the light panel at **1.19:1** — and `#000`
+  on the dark panel at 1.35:1 in the mirror case. Headings and `hr` now take the page's `--text`
+  in the sheet as well, so they also dim with the tiers around them; with the page off they take
+  the panel's own foreground, which `applyBarScheme` already keeps in step with the surface.
+  Measured after the fix: **11.88:1** on the light page and 12.44:1 on the dark, across
+  `github-light`, `github-dark`, `night`, `solarized-dark` and `vue`. The token test's theme
+  sentinel — which passed all along, because it asked only that _some_ page rule name the
+  element — grew a second pass requiring every element a theme colours to be named for the sheet
+  too.
+- **The help sheet reads like the page.** Its prose was a fixed 14 px against the column's 20 px,
+  with every heading level at `1em`, half the block gap, no list rhythm and 97 characters to the
+  line: 04 gave the sheet a size of its own before there was a reader template to follow. It now
+  takes the text size and derived line height of the slider, the canvas's heading scale
+  (1.6 / 1.3 / 1.2 / 1.1 / 1 / 1 em) and margins, the 1.25 em block gap, 0.2 em list items,
+  `text-wrap: pretty`, the chosen player font — `--mpe-ra-font-family` is published on the sheet
+  as well as on the preview root — and the measured 66-character measure, which puts the sheet at
+  621 px and its answer at 62 characters a line. `--mpe-ra-line-height` is published on the sheet
+  body in both page states, so the pill and word padding is derived from the sheet's real line
+  height instead of falling back to 1.85 against a 1.6 line (the fragments overlapped by half
+  again what they should). The sheet's own chrome keeps its px sizes; `max-height` goes from
+  60 vh to 70 vh to hold the larger type. With the page off the sheet keeps 04's 13/14 px, 680 px
+  and 60 vh — there is no template to follow there — but the same shape and the same pill
+  geometry.
+- **The help button went dead during a read.** `hideFloat` was bound to every window `scroll` and
+  discarded the resolved selection along with the affordance, while `helpPassage` read that
+  discarded value as its only source for a live selection — and the follow-the-reading scroll
+  writes the container's position on every frame, so the `?`, and `Alt+H` with it, was disabled
+  within a frame of any selection made while listening. The predicate now resolves the live
+  selection on demand through `core.resolveSelection`, and a scroll repositions the affordance
+  (one `rAF`, `getClientRects` only, never a re-resolve) instead of forgetting it. Selecting
+  inside the block being read was never the problem and always worked.
+- **Help is reachable with the panel faded.** The selection affordance is now a cluster of two,
+  _Read aloud_ and **Explain**, the second hidden in the web build and for a selection inside the
+  sheet (questions about the explanation go through the sheet's own question box). The panel no
+  longer fades while the affordance is on screen, and a selection wakes it; the next plain click
+  collapses the selection, takes the affordance down and starts the countdown again. While the
+  sheet is open a document selection gets no affordance at all: the sheet owns the reading, and
+  the selection behind it is the passage being explained. Making the affordance a flex container
+  also gave it a `display` declaration, which beats the UA's `[hidden] { display: none }`: the
+  hidden affordance went on rendering over the open sheet until `.mpe-ra-float[hidden]` said so
+  again, and `page-typography.test.js` now asserts that line for all five elements that need it.
+  `test/harness/` answers `readAloudHelp` with a canned five-part answer (`help=1`,
+  `helpdelay=<ms>`) so the sheet can be driven in Chrome without a CLI; validated there on
+  2026-09-04 against five preview themes on both page schemes, checks H1–H14 of
+  `featrues/09-helper-fix/spec.md` §14.3, then in the Extension Development Host over CDP with
+  VS Code's Dark Modern, `previewTheme: github-dark.css` and `readAloudGlobalTheme: light` — the
+  combination the report was made on — driving the real `claude -p` engine (§19.1).
 - Text on the dark blue, green and orange word boxes was 4.0–4.3:1, under the 4.5:1 the
   highlight promised, and the dark pink box 4.44:1 against the page's real text colour
   (`#e6e6e6`; the spec had estimated against `#f2f2f2`); the four boxes are a step darker and the

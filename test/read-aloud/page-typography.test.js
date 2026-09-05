@@ -16,6 +16,11 @@ const PAGE_CSS = fs.readFileSync(
   path.join(__dirname, '..', '..', 'media', 'read-aloud-page.css'),
   'utf8',
 );
+// The sheet's page-off rules live in the player's own stylesheet (09 §6).
+const SHEET_CSS = fs.readFileSync(
+  path.join(__dirname, '..', '..', 'media', 'read-aloud.css'),
+  'utf8',
+);
 const UNCOMMENTED = PAGE_CSS.replace(/\/\*[\s\S]*?\*\//g, '');
 
 suite('read-aloud text size (07 §5): the derivations', () => {
@@ -299,5 +304,170 @@ suite('read-aloud text size (07 §5–§6, §12): the page stylesheet', () => {
       reduced && /mpe-ra-bar-idle/.test(reduced[1]),
       'and the panel fade',
     );
+  });
+});
+
+// The help sheet renders the same preview markup the column does and is read
+// by the same player, so its prose follows the same reader template. It was
+// given a fixed 14 px in 04, before there was a template to follow.
+suite('read-aloud help sheet typography (09 §6, §7)', () => {
+  const FLAT = UNCOMMENTED.replace(/\s+/g, ' ');
+  const SHEET_FLAT = SHEET_CSS.replace(/\/\*[\s\S]*?\*\//g, '').replace(
+    /\s+/g,
+    ' ',
+  );
+
+  function ruleIn(flat, selector) {
+    const escaped = selector
+      .replace(/\s+/g, ' ')
+      .replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const m = new RegExp('(?:^|[}] )' + escaped + ' ?\\{([^}]*)\\}').exec(flat);
+    assert.ok(m, `the stylesheet has a ${selector} rule`);
+    return m[1].trim();
+  }
+
+  test('the sheet takes the size and line height of the slider, by the same expression as the body', () => {
+    const body = ruleIn(
+      FLAT,
+      'html[data-mpe-ra-page] body:not([data-presentation-mode])',
+    );
+    const sheet = ruleIn(FLAT, 'html[data-mpe-ra-page] body .mpe-ra-help');
+    const size = /font-size: (calc\([^;]*\));/.exec(body);
+    const height = /line-height: (var\([^;]*\));/.exec(body);
+    assert.ok(size && height, body);
+    assert.ok(
+      sheet.includes(`font-size: ${size[1]};`),
+      'the same size expression as the column, so the two cannot drift',
+    );
+    assert.ok(sheet.includes(`line-height: ${height[1]};`), sheet);
+  });
+
+  test('the sheet body publishes the line height the pill padding derives from', () => {
+    // Unset, the derivation in media/read-aloud.css ran at its 1.85 fallback
+    // against a 1.6 line and the pill fragments overlapped by half again what
+    // they should (09 §2.2). Wrong with the page off as well as on.
+    const paged = ruleIn(FLAT, 'html[data-mpe-ra-page] body .mpe-ra-help-body');
+    assert.ok(
+      paged.includes(
+        '--mpe-ra-line-height: var(--mpe-ra-page-line-height, 1.6);',
+      ),
+      paged,
+    );
+    const off = ruleIn(SHEET_FLAT, '.mpe-ra-help-body');
+    assert.ok(off.includes('--mpe-ra-line-height: 1.6;'), off);
+  });
+
+  test('the block rhythm is the canvas’s, in both page states', () => {
+    const paged = ruleIn(FLAT, 'html[data-mpe-ra-page] body .mpe-ra-help-body');
+    assert.ok(paged.includes('--mpe-ra-block-gap: 1.25em;'), paged);
+    const off = ruleIn(SHEET_FLAT, '.mpe-ra-help-body');
+    assert.ok(off.includes('--mpe-ra-block-gap: 1.1em;'), off);
+    const blocks = ruleIn(
+      SHEET_FLAT,
+      '.mpe-ra-help-body :is(p, blockquote, ul, ol, dl, table)',
+    );
+    assert.ok(blocks.includes('margin: 0 0 var(--mpe-ra-block-gap);'), blocks);
+    assert.ok(ruleIn(SHEET_FLAT, '.mpe-ra-help-body li').includes('0.2em'));
+    assert.ok(
+      !/\.mpe-ra-help-body :is\(p, ul, ol, blockquote\)/.test(SHEET_FLAT),
+      'the old 0.5em rule is gone',
+    );
+  });
+
+  test('the heading scale is the canvas’s, and the colour is named', () => {
+    const expected = {
+      h1: '1.6em',
+      h2: '1.3em',
+      h3: '1.2em',
+      h4: '1.1em',
+    };
+    for (const [tag, size] of Object.entries(expected)) {
+      assert.ok(
+        ruleIn(SHEET_FLAT, `.mpe-ra-help-body ${tag}`).includes(
+          `font-size: ${size};`,
+        ),
+        tag,
+      );
+    }
+    assert.ok(
+      ruleIn(SHEET_FLAT, '.mpe-ra-help-body :is(h5, h6)').includes(
+        'font-size: 1em;',
+      ),
+    );
+    const shape = ruleIn(
+      SHEET_FLAT,
+      '.mpe-ra-help-body :is(h1, h2, h3, h4, h5, h6)',
+    );
+    assert.ok(shape.includes('margin: 1.6em 0 0.55em;'), shape);
+    // The page-off colour: the sheet's own foreground, which applyBarScheme
+    // keeps in step with the panel surface (09 §5.2).
+    assert.ok(shape.includes('color: inherit;'), shape);
+  });
+
+  test('the answer wraps at the measure, and the sheet is that wide', () => {
+    const sheet = ruleIn(FLAT, 'html[data-mpe-ra-page] body .mpe-ra-help');
+    assert.ok(
+      sheet.includes('width: calc(var(--mpe-ra-page-measure, 33em) + 40px);'),
+      sheet,
+    );
+    assert.ok(sheet.includes('max-height: 70vh;'), sheet);
+    const body = ruleIn(FLAT, 'html[data-mpe-ra-page] body .mpe-ra-help-body');
+    assert.ok(
+      body.includes('max-width: var(--mpe-ra-page-measure, 33em);'),
+      body,
+    );
+    assert.ok(body.includes('margin-inline: auto;'), body);
+    // With the page off there is no template to follow, so the sheet keeps
+    // 04's own 680 px and 60 vh (09 D2); the page rules above override them.
+    const off = ruleIn(SHEET_FLAT, '.mpe-ra-help');
+    assert.ok(off.includes('width: 680px;'), off);
+    assert.ok(off.includes('max-height: 60vh;'), off);
+  });
+
+  test('the player font reaches the sheet, with its fallback inside the var()', () => {
+    const body = ruleIn(FLAT, 'html[data-mpe-ra-page] body .mpe-ra-help-body');
+    // A var() on an undefined property makes the whole declaration invalid at
+    // computed-value time, so the fallback cannot follow the var() in the
+    // list — the sheet would inherit the panel's UI font.
+    assert.ok(
+      /font-family: var\( --mpe-ra-font-family, 'Atkinson Hyperlegible Next',/.test(
+        body,
+      ),
+      body,
+    );
+    assert.ok(
+      !/font-family: var\(--mpe-ra-font-family\),/.test(FLAT),
+      'never a bare var() followed by a fallback list',
+    );
+  });
+
+  test('every element with a `display` still honours [hidden]', () => {
+    // The UA's `[hidden] { display: none }` loses to any author `display`,
+    // so each of these has to say it again. The affordance grew a
+    // `display: flex` when it became a two-button cluster (09 §10) and went
+    // on rendering over the open sheet until this rule was added.
+    for (const selector of [
+      '.mpe-ra-float',
+      '.mpe-ra-float-btn',
+      '.mpe-ra-help',
+      '.mpe-ra-help-btn',
+      '.mpe-ra-help-status',
+    ]) {
+      assert.ok(
+        new RegExp(
+          selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') +
+            '\\[hidden\\] \\{ display: none; \\}',
+        ).test(SHEET_FLAT),
+        `${selector}[hidden] is display: none`,
+      );
+    }
+  });
+
+  test('the sheet’s prose wraps for the eye like the column’s', () => {
+    const prose = ruleIn(
+      FLAT,
+      'html[data-mpe-ra-page] body .mpe-ra-help-body :is(p, li, dd, dt, blockquote, figcaption)',
+    );
+    assert.ok(prose.includes('text-wrap: pretty;'), prose);
   });
 });

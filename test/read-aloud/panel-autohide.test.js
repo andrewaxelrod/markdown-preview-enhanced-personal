@@ -306,4 +306,36 @@ suite('read-aloud panel auto-hide (07 §10)', function () {
       logs.join('\n'),
     );
   });
+
+  // 09 §11: a selection affordance on screen means the reader is about to ask
+  // for something — Read aloud, or Explain, which is the only way to reach
+  // help while the panel is faded. The panel is not taken away underneath it.
+  test('a live selection keeps the panel, and losing it starts the countdown again', async function () {
+    await sleep(IDLE_WAIT_MS);
+    assert.strictEqual(idle(), true, 'faded to start with');
+
+    const range = doc.createRange();
+    range.selectNodeContents(doc.getElementById('p2'));
+    const selection = win.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    doc.dispatchEvent(new win.Event('selectionchange'));
+    await sleep(220);
+
+    assert.strictEqual(
+      doc.querySelector('.mpe-ra-float').hidden,
+      false,
+      'the affordance is up',
+    );
+    assert.strictEqual(idle(), false, 'the selection brought the panel back');
+    await sleep(IDLE_WAIT_MS);
+    assert.strictEqual(idle(), false, 'and it holds while the affordance is');
+
+    // A plain click collapses the selection and takes the affordance down.
+    selection.removeAllRanges();
+    click(doc.getElementById('p1'));
+    assert.strictEqual(doc.querySelector('.mpe-ra-float').hidden, true);
+    await sleep(IDLE_WAIT_MS);
+    assert.strictEqual(idle(), true, 'the countdown runs again');
+  });
 });

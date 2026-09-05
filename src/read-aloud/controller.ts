@@ -40,8 +40,10 @@ import {
   buildFollowUp,
   buildSystemPrompt,
   clampField,
+  ENCLOSING_OPEN,
   followUpFor,
   HELP_CAPS,
+  helpShapeFor,
   normaliseQuestion,
   PASSAGE_MARKER,
   trimAroundPassage,
@@ -692,11 +694,14 @@ export class ReadAloudController implements vscode.Disposable {
     try {
       const fields = await this.buildHelpFields(request, help);
       const words = wordTargetForPassage(request.passage);
+      // 11 — a passage of a few words is a term: its own first-request task
+      // line and its own follow-up texts.
+      const shape = helpShapeFor(request.passage);
       const question = request.question
         ? normaliseQuestion(request.question)
         : '';
       const followUp = request.followUp
-        ? followUpFor(request.followUp, words, question)
+        ? followUpFor(request.followUp, words, question, shape)
         : null;
       const finalWords = followUp ? followUp.words : words;
       const previous = request.previous
@@ -725,6 +730,8 @@ export class ReadAloudController implements vscode.Disposable {
           fields.contextMode === 'document'
             ? (fields.document ?? '')
             : fields.section,
+        enclosing: fields.enclosing ?? '',
+        mentions: fields.mentions ?? '',
         question: followUp ? `${request.followUp}:${question}` : '',
         previous,
       });
@@ -879,6 +886,14 @@ export class ReadAloudController implements vscode.Disposable {
         clampField(request.section, HELP_FIELD_CAPS.section),
         HELP_CAPS.section,
       ),
+      // 11 — the passage's own block, trimmed around its ⟦ marker the way
+      // the section is around [PASSAGE]; the mentions are cut from the front.
+      enclosing: trimAroundPassage(
+        clampField(request.enclosing, HELP_FIELD_CAPS.enclosing),
+        HELP_CAPS.enclosing,
+        ENCLOSING_OPEN,
+      ),
+      mentions: clampField(request.mentions, HELP_CAPS.mentions),
       passage: clampField(request.passage, HELP_CAPS.passage),
       contextMode,
     };
@@ -945,7 +960,10 @@ export class ReadAloudController implements vscode.Disposable {
       `effort=${label.effort}`,
       `context=${help.contextMode}`,
       `follow-up=${request.followUp ?? 'first'}`,
+      `shape=${helpShapeFor(request.passage)}`,
       `passage=${request.passage.length}ch`,
+      `enclosing=${request.enclosing.length}ch`,
+      `mentions=${request.mentions.length}ch`,
       `previous=${request.previous?.length ?? 0}ch`,
       `sent=${promptChars}ch`,
       `cache=${cache}`,

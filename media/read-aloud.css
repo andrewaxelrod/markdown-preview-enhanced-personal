@@ -1306,10 +1306,19 @@
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
-  /* The rendered explanation is preview markup, so it brings its own margins;
-   * only the first and last need flattening against the sheet's padding. */
+  /* The rendered explanation is preview markup, so it brings its own margins
+   * (restated below in the canvas's proportions); only the first and last need
+   * flattening against the sheet's padding. */
   font-size: 14px;
   line-height: 1.6;
+  /* The rhythm of the canvas with the page off (§1), in the sheet's own em.
+   * `--mpe-ra-line-height` matters beyond the rhythm: `.mpe-ra-pill` and
+   * `.mpe-ra-word` derive their vertical padding from it, and with the
+   * property unset the derivation ran at the 1.85 fallback against a 1.6 line
+   * and the pill fragments overlapped by half again what they should
+   * (09 §2.2). Under the page both follow the text-size slider instead. */
+  --mpe-ra-line-height: 1.6;
+  --mpe-ra-block-gap: 1.1em;
 }
 
 .mpe-ra-help-body > :first-child {
@@ -1320,18 +1329,61 @@
   margin-bottom: 0;
 }
 
-.mpe-ra-help-body h1,
-.mpe-ra-help-body h2,
-.mpe-ra-help-body h3,
-.mpe-ra-help-body h4 {
-  margin: 1em 0 0.35em;
+/* The heading scale of the canvas (09 §6.3), in em of the body, so the sheet
+ * reads the same shape as the document with only its size differing. The
+ * colour is `inherit` — the sheet's own `--mpe-ra-panel-fg`, which
+ * `applyBarScheme` keeps in step with the panel surface — because every
+ * bundled preview theme colours headings with an unscoped
+ * `html body h1,…,h6 { color: … }` that reaches in here (09 §5.2). With the
+ * page on, media/read-aloud-page.css is more specific and gives them the
+ * page's `--text` instead, so they dim with the tiers around them. */
+.mpe-ra-help-body :is(h1, h2, h3, h4, h5, h6) {
+  margin: 1.6em 0 0.55em;
   border: 0;
-  font-size: 1em;
+  padding: 0;
+  color: inherit;
   font-weight: 600;
+  line-height: 1.3;
 }
 
-.mpe-ra-help-body :is(p, ul, ol, blockquote) {
-  margin: 0.5em 0;
+.mpe-ra-help-body h1 {
+  font-size: 1.6em;
+}
+
+.mpe-ra-help-body h2 {
+  font-size: 1.3em;
+}
+
+.mpe-ra-help-body h3 {
+  font-size: 1.2em;
+}
+
+.mpe-ra-help-body h4 {
+  font-size: 1.1em;
+}
+
+.mpe-ra-help-body :is(h5, h6) {
+  font-size: 1em;
+}
+
+.mpe-ra-help-body hr {
+  height: 1px;
+  margin: 2em 0;
+  border: 0;
+  background-color: currentcolor;
+  opacity: 0.25;
+}
+
+.mpe-ra-help-body :is(p, blockquote, ul, ol, dl, table) {
+  margin: 0 0 var(--mpe-ra-block-gap);
+}
+
+.mpe-ra-help-body li {
+  margin: 0.2em 0;
+}
+
+.mpe-ra-help-body :is(li > p, li > ul, li > ol, blockquote > p:last-child) {
+  margin-bottom: 0.35em;
 }
 
 .mpe-ra-help-body :is(ul, ol) {
@@ -1453,10 +1505,16 @@
  * 4. Selection affordance and hints (F2)
  * ----------------------------------------------------------------------- */
 
+/* The affordance is a cluster of two (09 §10): _Read aloud_, and _Explain_,
+ * which is the only way to reach help while the panel is faded out or
+ * dismissed. The container keeps the appearance the single button had. */
 .mpe-ra-float {
   position: absolute;
   z-index: 99999;
-  padding: 0.2rem 0.5rem;
+  display: flex;
+  align-items: stretch;
+  gap: 1px;
+  padding: 2px;
   border: 1px solid var(--vscode-editorWidget-border, rgba(128, 128, 128, 0.35));
   border-radius: 4px;
   background: var(--vscode-editorWidget-background, #1f1f1f);
@@ -1464,12 +1522,55 @@
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
   font-family: var(--vscode-font-family, sans-serif);
   font-size: 12px;
+}
+
+/* `display` on the container beats the UA's `[hidden] { display: none }`, so
+ * hiding the affordance has to be said again — the sheet and the sheet's
+ * buttons carry the same line for the same reason. */
+.mpe-ra-float[hidden] {
+  display: none;
+}
+
+.mpe-ra-float-btn {
+  display: flex;
+  align-items: center;
+  padding: 0.2rem 0.5rem;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  font-size: inherit;
+  line-height: 1.4;
+  white-space: nowrap;
   cursor: pointer;
 }
 
-.mpe-ra-float:focus-visible {
+.mpe-ra-float-btn[hidden] {
+  display: none;
+}
+
+.mpe-ra-float-btn:hover {
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.2));
+}
+
+.mpe-ra-float-btn:focus-visible {
   outline: 1px solid var(--vscode-focusBorder, #007fd4);
-  outline-offset: 1px;
+  outline-offset: -1px;
+}
+
+/* A hairline between the two, drawn only when both are there. */
+.mpe-ra-float-read:not([hidden]) + .mpe-ra-float-help:not([hidden]) {
+  border-left: 1px solid
+    var(--vscode-editorWidget-border, rgba(128, 128, 128, 0.35));
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  padding-inline: 0.4rem;
+}
+
+.mpe-ra-float-help svg {
+  width: 14px;
+  height: 14px;
 }
 
 .mpe-ra-hint {

@@ -640,8 +640,50 @@ suite('read-aloud/messages', function () {
         before: 'before',
         after: 'after',
         section: 'section',
+        enclosing: '',
+        mentions: '',
         contextMode: 'section',
       });
+    });
+
+    test('carries the enclosing block and the mentions of 11 through, capped', function () {
+      const caps = messages.HELP_FIELD_CAPS;
+      const parsed = messages.parseHelpArgs(
+        helpArgs({
+          enclosing: 'The harness is ⟦the metrics⟧ and more.',
+          mentions: 'Under "Glossary": metrics, defined',
+        }),
+      );
+      assert.strictEqual(
+        parsed.enclosing,
+        'The harness is ⟦the metrics⟧ and more.',
+      );
+      assert.strictEqual(parsed.mentions, 'Under "Glossary": metrics, defined');
+
+      const long = messages.parseHelpArgs(
+        helpArgs({
+          enclosing: 'E'.repeat(caps.enclosing + 500),
+          mentions: 'M'.repeat(caps.mentions + 500),
+        }),
+      );
+      assert.strictEqual(long.enclosing.length, caps.enclosing);
+      assert.strictEqual(long.mentions.length, caps.mentions);
+      assert.ok(
+        caps.enclosing > 3000,
+        'the message cap must be looser than the 3,000-character prompt cap, so the ⟦ marker survives to the trim',
+      );
+
+      for (const key of ['enclosing', 'mentions']) {
+        for (const value of [42, true, {}, ['a']]) {
+          const override = {};
+          override[key] = value;
+          assert.strictEqual(
+            messages.parseHelpArgs(helpArgs(override)),
+            undefined,
+            `${key}=${String(value)}`,
+          );
+        }
+      }
     });
 
     test('accepts every context mode, and only those three', function () {
@@ -676,6 +718,8 @@ suite('read-aloud/messages', function () {
           before: '',
           after: '',
           section: '',
+          enclosing: '',
+          mentions: '',
           contextMode: 'selection',
         },
       );
@@ -805,6 +849,11 @@ suite('read-aloud/messages', function () {
         // rogue message, and cutting from the front here would throw the
         // [PASSAGE] marker away before help-prompt's trimAroundPassage saw it.
         section: 24000,
+        // Same reasoning for the enclosing block and its ⟦ marker (11); the
+        // mentions are cut from the front by the prompt, so theirs is just
+        // looser than the prompt's 2,400.
+        enclosing: 12000,
+        mentions: 4000,
         question: 500,
         previous: 6000,
       });
@@ -1017,6 +1066,8 @@ suite('read-aloud/messages', function () {
         'before',
         'breadcrumb',
         'contextMode',
+        'enclosing',
+        'mentions',
         'passage',
         'requestId',
         'section',

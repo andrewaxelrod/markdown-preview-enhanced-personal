@@ -144,13 +144,57 @@ const config: ReadAloudConfigMessage & { helpContextMode: string } = {
   wordMarker: normaliseWordMarker(param('marker') ?? PAGE_DEFAULTS.wordMarker),
   dimWhileReading: flag('dim', true),
   panelAutoHide: flag('autohide', true),
-  helpAvailable: false,
+  helpAvailable: flag('help', false),
   helpEngine: 'claude',
   helpModel: 'sonnet',
   helpEffort: 'low',
   helpAutoPlay: true,
   helpContextMode: 'section',
 };
+
+let helpTimer = 0;
+
+/**
+ * The canned help answer (09 helper fix): the five-part shape of
+ * `help-prompt.ts` §14.1, rendered the way the host's markdown engine would
+ * render it, so the sheet holds real preview markup.
+ */
+const HELP_MARKDOWN = [
+  '## What it says',
+  '',
+  'The passage is just one term: "SME," short for Subject Matter Expert, the person who reviews and approves the spec.',
+  '',
+  '## Terms',
+  '',
+  '- **SME**: Subject Matter Expert. Someone with deep knowledge of the business area, such as risk scoring, who checks the spec for accuracy.',
+  '',
+  '## In plain words',
+  '',
+  "An SME is the expert who reviews the spec's content, confirms it matches real business rules, and approves or flags parts of it.",
+  '',
+  '## An example',
+  '',
+  'In the passage, an SME reviewed the acceptance criteria and marked two rows testable, and later approved the whole spec on September second, twenty twenty-six.',
+  '',
+  '## Why it matters',
+  '',
+  "The SME's approval is what moves the spec's state to approved, making it trustworthy enough to build from.",
+].join('\n');
+
+const HELP_HTML = [
+  '<h2>What it says</h2>',
+  '<p>The passage is just one term: &quot;SME,&quot; short for Subject Matter Expert, the person who reviews and approves the spec.</p>',
+  '<h2>Terms</h2>',
+  '<ul>',
+  '<li><strong>SME</strong>: Subject Matter Expert. Someone with deep knowledge of the business area, such as risk scoring, who checks the spec for accuracy.</li>',
+  '</ul>',
+  '<h2>In plain words</h2>',
+  '<p>An SME is the expert who reviews the spec&#39;s content, confirms it matches real business rules, and approves or flags parts of it.</p>',
+  '<h2>An example</h2>',
+  '<p>In the passage, an SME reviewed the acceptance criteria and marked two rows testable, and later approved the whole spec on September second, twenty twenty-six.</p>',
+  '<h2>Why it matters</h2>',
+  '<p>The SME&#39;s approval is what moves the spec&#39;s state to approved, making it trustworthy enough to build from.</p>',
+].join('\n');
 
 function escapeAttribute(value: string): string {
   return value
@@ -634,9 +678,27 @@ function handleMessage(message: { command?: unknown; args?: unknown }): void {
     case 'readAloudHelpChooseModel':
       log(command, 'ignored');
       return;
-    case 'readAloudHelp':
+    case 'readAloudHelp': {
+      // A canned answer in the shape §14.1 asks for, so the sheet's
+      // typography can be measured without a CLI (09 helper fix).
+      const requestId = Array.isArray(args) ? args[1] : undefined;
+      log(command, 'canned answer for ' + String(requestId));
+      helpTimer = window.setTimeout(
+        () => {
+          postToPlayer({
+            command: 'readAloudHelpResult',
+            requestId,
+            markdown: HELP_MARKDOWN,
+            html: HELP_HTML,
+          });
+        },
+        Number(param('helpdelay') ?? 400),
+      );
+      return;
+    }
     case 'readAloudHelpCancel':
-      log(command, 'help is not available in the harness');
+      window.clearTimeout(helpTimer);
+      log(command, 'canned request cancelled');
       return;
     default:
       log('unknown message', command);

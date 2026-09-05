@@ -1185,14 +1185,24 @@
    * - **section**: the eligible blocks from the nearest preceding heading to
    *   the next heading of the same or a higher level, minus before, the
    *   passage and after, with {@link PASSAGE_MARKER} where the passage sits.
+   * - **enclosing** (11 help fixes): the block(s) the passage was taken from —
+   *   in a table, the row with its column headers — with the passage marked
+   *   between {@link ENCLOSING_OPEN} and {@link ENCLOSING_CLOSE}; '' when the
+   *   passage is the whole of them. `passageText` is the passage as resolved
+   *   and `range` the live selection, when there is one, for the exact offset.
+   * - **mentions**: for a passage of {@link HELP_TERM_MAX_WORDS} words or
+   *   fewer, the document's other uses of those words outside this section
+   *   (which is sent already), each under the heading it sits beneath.
    */
-  function helpContext(scope, els) {
+  function helpContext(scope, els, passageText, range) {
     var empty = {
       title: '',
       breadcrumb: [],
       before: '',
       after: '',
       section: '',
+      enclosing: '',
+      mentions: '',
     };
     if (!scope || !els || !els.length) {
       return empty;
@@ -1312,13 +1322,395 @@
     }
     var section = head.concat([PASSAGE_MARKER]).concat(tail).join('\n\n');
 
+    // 11 — the block the passage came from, and the rest of the document's
+    // uses of a short passage. The section's heading and body are skipped by
+    // the mention scan because they travel in the breadcrumb and <section>.
+    var enclosingText = enclosingFor(
+      children,
+      first,
+      last,
+      els,
+      passageText,
+      range,
+    );
+    var mentions = helpMentions(
+      children,
+      enclosing >= 0 ? enclosing : sectionStart,
+      sectionEnd,
+      passageText,
+    );
+
     return {
       title: title,
       breadcrumb: breadcrumb,
       before: before,
       after: after,
       section: section,
+      enclosing: enclosingText,
+      mentions: mentions,
     };
+  }
+
+  /** U+27E6 / U+27E7 — the brackets around the passage inside <enclosing>. */
+  var ENCLOSING_OPEN = '\u27e6';
+  var ENCLOSING_CLOSE = '\u27e7';
+
+  /**
+   * A passage of this many whitespace-separated words or fewer is a *term*
+   * (help-prompt.ts `HELP_TERM_MAX_WORDS`, the same count): it gets the
+   * document's other mentions, and the host gives it the four-part shape.
+   */
+  var HELP_TERM_MAX_WORDS = 5;
+
+  /** Articles and small words dropped from the edges of a term before it is looked up. */
+  var TERM_EDGE_WORDS = {
+    the: 1,
+    a: 1,
+    an: 1,
+    this: 1,
+    that: 1,
+    these: 1,
+    those: 1,
+    its: 1,
+    their: 1,
+    our: 1,
+    your: 1,
+    my: 1,
+    his: 1,
+    her: 1,
+    some: 1,
+    any: 1,
+    each: 1,
+    every: 1,
+    all: 1,
+    both: 1,
+    no: 1,
+    of: 1,
+    in: 1,
+    on: 1,
+    to: 1,
+    for: 1,
+    by: 1,
+    with: 1,
+    as: 1,
+    at: 1,
+    or: 1,
+    and: 1,
+    is: 1,
+    are: 1,
+    was: 1,
+    were: 1,
+    be: 1,
+  };
+
+  /** At most this many mentions, each cut to this many characters. */
+  var MENTION_MAX = 6;
+  var MENTION_SNIPPET_CHARS = 280;
+  var MENTION_HEADING_CHARS = 80;
+
+  function escapeRegExp(text) {
+    return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  function isTableCell(el) {
+    return !!(el && (el.tagName === 'TD' || el.tagName === 'TH'));
+  }
+
+  /**
+   * One table row as a line the model can read: "Header: cell; Header: cell"
+   * when the table's first row is a header row of the same width, else the
+   * cells joined with " | ". A glossary row keeps its column names this way.
+   */
+  function tableRowText(tr) {
+    if (!tr) {
+      return '';
+    }
+    var table = tr.closest ? tr.closest('table') : null;
+    var headRow = table ? table.querySelector('tr') : null;
+    var headers = [];
+    if (headRow && headRow !== tr) {
+      var ths = headRow.querySelectorAll('th');
+      for (var h = 0; h < ths.length; h++) {
+        headers.push(extractText(ths[h]).text);
+      }
+    }
+    var cells = tr.querySelectorAll('th, td');
+    var named = headers.length > 0 && headers.length === cells.length;
+    var parts = [];
+    for (var c = 0; c < cells.length; c++) {
+      var cellText = extractText(cells[c]).text;
+      if (!cellText) {
+        continue;
+      }
+      parts.push(named && headers[c] ? headers[c] + ': ' + cellText : cellText);
+    }
+    return parts.join(named ? '; ' : ' | ');
+  }
+
+  /**
+   * The text of the block(s) `first..last` of `children` — the row, for a
+   * table-cell selection — with the passage marked. The live range gives the
+   * exact offset of the selection in the first block, so the marked words are
+   * the selected ones even when the block repeats them.
+   */
+  function enclosingFor(children, first, last, els, text, range) {
+    var texts = [];
+    var exact = -1;
+    if (els.length === 1 && isTableCell(els[0])) {
+      texts.push(tableRowText(els[0].closest('tr')));
+    } else {
+      for (var s = first; s <= last; s++) {
+        if (!classifyBlock(children[s]).eligible) {
+          continue;
+        }
+        var extracted = extractText(children[s]);
+        if (!extracted.text) {
+          continue;
+        }
+        if (s === first && range && range.startContainer) {
+          try {
+            exact = caretToTextOffset(
+              extracted.map,
+              range.startContainer,
+              range.startOffset,
+            );
+          } catch (error) {
+            exact = -1;
+          }
+        }
+        texts.push(extracted.text);
+      }
+    }
+    return markPassageIn(texts, text, exact);
+  }
+
+  /**
+   * `blockTexts` joined by blank lines with `passage` marked between the
+   * brackets: at `exactStart` when the passage really starts there, else at
+   * its first occurrence, else — a selection over several blocks is clipped
+   * and '\n'-joined, so it is not a substring — in the whitespace-flattened
+   * text. '' when the passage is the whole of the blocks (nothing to add), the
+   * blocks unmarked when the passage cannot be found in them at all.
+   */
+  function markPassageIn(blockTexts, passage, exactStart) {
+    var text = typeof passage === 'string' ? passage.trim() : '';
+    var parts = [];
+    for (var i = 0; i < blockTexts.length; i++) {
+      if (blockTexts[i]) {
+        parts.push(blockTexts[i]);
+      }
+    }
+    var joined = parts.join('\n\n');
+    if (!text || !joined) {
+      return '';
+    }
+    var start = -1;
+    if (typeof exactStart === 'number' && exactStart >= 0) {
+      var at = exactStart;
+      while (at < joined.length && isWhitespaceCode(joined.charCodeAt(at))) {
+        at++;
+      }
+      if (joined.substr(at, text.length) === text) {
+        start = at;
+      }
+    }
+    if (start < 0) {
+      start = joined.indexOf(text);
+    }
+    var end = start + text.length;
+    if (start < 0) {
+      var flat = joined.replace(/\s+/g, ' ');
+      var flatText = text.replace(/\s+/g, ' ');
+      start = flat.indexOf(flatText);
+      if (start < 0) {
+        return joined;
+      }
+      joined = flat;
+      end = start + flatText.length;
+    }
+    if (start === 0 && end >= joined.length) {
+      return '';
+    }
+    return (
+      joined.slice(0, start) +
+      ENCLOSING_OPEN +
+      joined.slice(start, end) +
+      ENCLOSING_CLOSE +
+      joined.slice(end)
+    );
+  }
+
+  /**
+   * The words of a term to look up: lower-cased, punctuation dropped, the
+   * small words of {@link TERM_EDGE_WORDS} taken off both ends ("the metrics"
+   * → ["metrics"]). [] for a passage of more than {@link HELP_TERM_MAX_WORDS}
+   * words, which is a passage and not a term.
+   */
+  function termKey(passage) {
+    var text = typeof passage === 'string' ? passage.trim() : '';
+    if (!text || text.split(/\s+/).length > HELP_TERM_MAX_WORDS) {
+      return [];
+    }
+    var raw = text
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}\s'\u2019-]+/gu, ' ')
+      .split(/\s+/);
+    var words = [];
+    for (var i = 0; i < raw.length; i++) {
+      var word = raw[i].replace(/^['\u2019-]+|['\u2019-]+$/g, '');
+      if (word) {
+        words.push(word);
+      }
+    }
+    while (words.length > 1 && TERM_EDGE_WORDS[words[0]]) {
+      words.shift();
+    }
+    while (words.length > 1 && TERM_EDGE_WORDS[words[words.length - 1]]) {
+      words.pop();
+    }
+    return words;
+  }
+
+  /**
+   * A case-insensitive whole-word pattern for the words of {@link termKey},
+   * any whitespace between them, the last word with or without a plural s
+   * ("metric" finds "metrics", "metrics" finds "metric"). Null for no words.
+   */
+  function termPattern(words) {
+    if (!words || !words.length) {
+      return null;
+    }
+    var parts = [];
+    for (var i = 0; i < words.length; i++) {
+      parts.push(escapeRegExp(words[i]));
+    }
+    var last = words[words.length - 1];
+    parts[parts.length - 1] = /s$/.test(last)
+      ? escapeRegExp(last.slice(0, -1)) + 's?'
+      : escapeRegExp(last) + '(?:e?s)?';
+    try {
+      return new RegExp(
+        '(?<![\\p{L}\\p{N}])' + parts.join('\\s+') + '(?![\\p{L}\\p{N}])',
+        'iu',
+      );
+    } catch (error) {
+      return null;
+    }
+  }
+
+  /**
+   * The lines of one top-level block a mention scan reads: each row of a
+   * table (the one block kind a read skips that still carries prose), each
+   * item of a list (so a sources list yields the one matching entry, not its
+   * neighbours), the extracted text of any other eligible block, nothing for
+   * code, math or diagrams.
+   */
+  function mentionTexts(el) {
+    if (!el || el.nodeType !== ELEMENT_NODE) {
+      return [];
+    }
+    var lines = [];
+    var parts;
+    var i;
+    if (el.tagName === 'TABLE') {
+      parts = el.querySelectorAll('tr');
+      for (i = 0; i < parts.length; i++) {
+        var row = tableRowText(parts[i]);
+        if (row) {
+          lines.push(row);
+        }
+      }
+      return lines;
+    }
+    if (!classifyBlock(el).eligible) {
+      return [];
+    }
+    if (el.tagName === 'UL' || el.tagName === 'OL') {
+      parts = el.querySelectorAll(':scope > li');
+      for (i = 0; i < parts.length; i++) {
+        var item = extractText(parts[i]).text;
+        if (item) {
+          lines.push(item);
+        }
+      }
+      return lines;
+    }
+    var text = extractText(el).text;
+    return text ? [text] : [];
+  }
+
+  /** The nearest heading above `children[index]`, cut for a label, or ''. */
+  function nearestHeadingText(children, index) {
+    for (var b = index - 1; b >= 0; b--) {
+      if (headingLevel(children[b])) {
+        return extractText(children[b]).text.slice(0, MENTION_HEADING_CHARS);
+      }
+    }
+    return '';
+  }
+
+  /**
+   * `text` cut to {@link MENTION_SNIPPET_CHARS} around the match at
+   * `index`, on word boundaries, with an ellipsis on each cut side.
+   */
+  function mentionSnippet(text, index, length) {
+    if (text.length <= MENTION_SNIPPET_CHARS) {
+      return text;
+    }
+    var room = MENTION_SNIPPET_CHARS - length;
+    var start = Math.max(0, index - Math.floor(room / 2));
+    var end = Math.min(text.length, start + MENTION_SNIPPET_CHARS);
+    start = Math.max(0, end - MENTION_SNIPPET_CHARS);
+    if (start > 0) {
+      var firstSpace = text.indexOf(' ', start);
+      if (firstSpace >= 0 && firstSpace < index) {
+        start = firstSpace + 1;
+      }
+    }
+    if (end < text.length) {
+      var lastSpace = text.lastIndexOf(' ', end);
+      if (lastSpace > index + length) {
+        end = lastSpace;
+      }
+    }
+    return (
+      (start > 0 ? '\u2026' : '') +
+      text.slice(start, end) +
+      (end < text.length ? '\u2026' : '')
+    );
+  }
+
+  /**
+   * Up to {@link MENTION_MAX} other places in `children` that use the words
+   * of `passage` (see {@link termKey}), skipping `skipFrom..skipTo` — the
+   * section the request already carries — each as
+   * `Under "Heading": …snippet…`, blank-line separated. '' for a passage
+   * that is not a term, or when nothing else mentions it.
+   */
+  function helpMentions(children, skipFrom, skipTo, passage) {
+    var pattern = termPattern(termKey(passage));
+    if (!pattern) {
+      return '';
+    }
+    var found = [];
+    for (var i = 0; i < children.length && found.length < MENTION_MAX; i++) {
+      if (i >= skipFrom && i < skipTo) {
+        continue;
+      }
+      var lines = mentionTexts(children[i]);
+      for (var t = 0; t < lines.length && found.length < MENTION_MAX; t++) {
+        var match = pattern.exec(lines[t]);
+        if (!match) {
+          continue;
+        }
+        var heading = nearestHeadingText(children, i);
+        found.push(
+          (heading ? 'Under "' + heading + '": ' : '') +
+            mentionSnippet(lines[t], match.index, match[0].length),
+        );
+      }
+    }
+    return found.join('\n\n');
   }
 
   // ---------------------------------------------------------------------------
@@ -2060,6 +2452,13 @@
     resolveSelection: resolveSelection,
     helpContext: helpContext,
     PASSAGE_MARKER: PASSAGE_MARKER,
+    ENCLOSING_OPEN: ENCLOSING_OPEN,
+    ENCLOSING_CLOSE: ENCLOSING_CLOSE,
+    HELP_TERM_MAX_WORDS: HELP_TERM_MAX_WORDS,
+    markPassageIn: markPassageIn,
+    termKey: termKey,
+    termPattern: termPattern,
+    tableRowText: tableRowText,
     caretToTextOffset: caretToTextOffset,
     wordAt: wordAt,
     sliceExtraction: sliceExtraction,

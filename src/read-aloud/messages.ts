@@ -522,6 +522,15 @@ export const HELP_FIELD_CAPS = {
    * `help-prompt.ts` ever saw it.
    */
   section: 24000,
+  /**
+   * 11 help fixes — the block the passage was taken from, with the passage
+   * marked, and the document's other mentions of a short passage. Like
+   * `section`, `enclosing` is four times its prompt cap so the ⟦ marker
+   * survives to the trim in `help-prompt.ts`; `mentions` is cut from the
+   * front there, so its bound is simply looser than the prompt's.
+   */
+  enclosing: 12000,
+  mentions: 4000,
   question: 500,
   previous: 6000,
 } as const;
@@ -553,6 +562,10 @@ export interface HelpRequest {
   before: string;
   after: string;
   section: string;
+  /** The passage's own block(s) with the passage marked, or '' (11). */
+  enclosing: string;
+  /** The document's other uses of a short passage, or '' (11). */
+  mentions: string;
   contextMode: HelpContextMode;
   followUp?: HelpFollowUp;
   question?: string;
@@ -608,11 +621,15 @@ export function parseHelpArgs(args: unknown): HelpRequest | undefined {
   const before = capped(rawFields.before, HELP_FIELD_CAPS.before);
   const after = capped(rawFields.after, HELP_FIELD_CAPS.after);
   const section = capped(rawFields.section, HELP_FIELD_CAPS.section);
+  const enclosing = capped(rawFields.enclosing, HELP_FIELD_CAPS.enclosing);
+  const mentions = capped(rawFields.mentions, HELP_FIELD_CAPS.mentions);
   if (
     title === undefined ||
     before === undefined ||
     after === undefined ||
-    section === undefined
+    section === undefined ||
+    enclosing === undefined ||
+    mentions === undefined
   ) {
     return undefined;
   }
@@ -643,6 +660,8 @@ export function parseHelpArgs(args: unknown): HelpRequest | undefined {
     before,
     after,
     section,
+    enclosing,
+    mentions,
     contextMode: contextMode as HelpContextMode,
   };
 

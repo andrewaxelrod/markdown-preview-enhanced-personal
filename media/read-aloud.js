@@ -302,6 +302,7 @@
   var strip = null;
   var stripFill = null;
   var floatButton = null;
+  var floatParts = null;
   var hintElement = null;
 
   var errorTimer = 0;
@@ -342,6 +343,11 @@
   // root, or the help sheet's body. The help button follows the first only
   // (04-help-module D9).
   var floatScope = null;
+  // The range the affordance points at, kept so a scroll can re-measure it
+  // without re-resolving the selection (09 §9), and the pending frame of that
+  // reposition.
+  var floatRange = null;
+  var floatFrame = 0;
 
   /**
    * The help sheet (04-help-module §4). One request in flight; `context` is
@@ -1803,6 +1809,9 @@
     bar.addEventListener('keydown', onBarKeydown);
 
     applyBarScheme();
+    // The sheet exists now, so a font chosen before the panel was built
+    // reaches it (09 §6.2).
+    applyFontToRoot();
     syncSpeedControls();
     syncVolumeControls();
     syncSheet();
@@ -2000,6 +2009,11 @@
       !bar.hidden &&
       !anyPopoverOpen() &&
       !help.open &&
+      // 09 §11: a selection affordance on screen means the reader is about to
+      // ask for something. The panel is not taken away underneath it; the
+      // next plain click collapses the selection, hides the affordance and
+      // starts the countdown again.
+      !floatVisible() &&
       !pointerOverBar &&
       !keyboardFocusInBar()
     );
@@ -2292,21 +2306,34 @@
     }
   }
 
+  /**
+   * The chosen player font, published on the preview root and — 09 §6.2 — on
+   * the help sheet, which lives in <body> beside the panel and so never saw
+   * the root's copy. Set on the sheet element rather than on <html> so
+   * nothing outside the dialog can pick it up.
+   */
   function applyFontToRoot() {
-    if (!root) {
-      return;
-    }
     var stack = core.playerFontStack(config.font);
-    try {
-      if (stack) {
-        root.style.setProperty('--mpe-ra-font-family', stack);
-      } else {
-        root.style.removeProperty('--mpe-ra-font-family');
+    var sheet = barParts && barParts.help ? barParts.help.root : null;
+    var targets = [root, sheet];
+    for (var i = 0; i < targets.length; i++) {
+      var target = targets[i];
+      if (!target) {
+        continue;
       }
-    } catch (error) {
-      /* cosmetic only */
+      try {
+        if (stack) {
+          target.style.setProperty('--mpe-ra-font-family', stack);
+        } else {
+          target.style.removeProperty('--mpe-ra-font-family');
+        }
+      } catch (error) {
+        /* cosmetic only */
+      }
     }
-    root.classList.toggle('mpe-ra-font', !!stack);
+    if (root) {
+      root.classList.toggle('mpe-ra-font', !!stack);
+    }
   }
 
   /**
@@ -2451,24 +2478,35 @@
   /**
    * §2 — what the help button would explain, or null when nothing can be:
    *
-   * 1. a live preview selection that resolves the way the floating _Read
-   *    aloud_ affordance's does, or
+   * 1. a live preview selection, resolved the way the floating _Read aloud_
+   *    affordance's is, or
    * 2. the passage of a selection read that is playing or paused, remembered
    *    on the job so a collapsed browser selection does not disable the
    *    button mid-read.
    *
    * Both are bounded to the preview root, which is what keeps a selection
    * inside the sheet from being explained (D9).
+   *
+   * The live selection is resolved here and now rather than read off
+   * `floatSelection` (09 §8). That variable is bookkeeping for the
+   * affordance's position, and it used to be cleared by things that say
+   * nothing about whether a selection exists — a scroll above all, and the
+   * follow-the-reading loop scrolls on every frame of a read, so the button
+   * and `Alt+H` with it went dead within a frame of any selection made while
+   * listening.
    */
   function helpPassage() {
-    if (
-      floatSelection &&
-      floatSelection.ok &&
-      floatScope === root &&
-      floatSelection.blocks &&
-      floatSelection.blocks.length
-    ) {
-      return { text: floatSelection.text, els: floatSelection.blocks.slice() };
+    var live = liveSelectionIn(root);
+    if (live) {
+      // The range travels with the passage so the enclosing block can mark
+      // the selected words at their exact offset (11), not a repeat of them.
+      var selection = window.getSelection();
+      return {
+        text: live.text,
+        els: live.blocks.slice(),
+        range:
+          selection && selection.rangeCount ? selection.getRangeAt(0) : null,
+      };
     }
     if (
       record.kind === 'selection' &&
@@ -2485,6 +2523,11 @@
   }
 
   function syncHelpButton() {
+    // The affordance's _Explain_ (09 §10) follows the same availability flag,
+    // which may arrive from the host after the affordance was built.
+    if (floatParts && floatParts.help) {
+      floatParts.help.hidden = !config.helpAvailable || floatScope !== root;
+    }
     if (!barParts || !barParts.helpButton) {
       return;
     }
@@ -2588,8 +2631,10 @@
   /**
    * §3.1 — the material of the *first* request, which every follow-up then
    * reuses byte for byte (§14.3). Which fields are gathered follows
-   * `readAloudHelpContext`: `selection` sends the title, the breadcrumb and
-   * the passage only, so the least text leaves the machine.
+   * `readAloudHelpContext`: `selection` sends the title, the breadcrumb,
+   * the passage and the block it was taken from, so the least text leaves the
+   * machine; `section` and `document` add the document's other mentions of
+   * a short passage (11 help fixes).
    */
   function buildHelpContextFor(passage) {
     var context = {
@@ -2598,17 +2643,30 @@
       before: '',
       after: '',
       section: '',
+      enclosing: '',
+      mentions: '',
       passage: passage.text,
       contextMode: config.helpContextMode,
     };
     try {
-      var built = core.helpContext(root, passage.els);
+      var built = core.helpContext(
+        root,
+        passage.els,
+        passage.text,
+        passage.range || null,
+      );
       context.title = built.title;
       context.breadcrumb = built.breadcrumb;
+      // The block the passage came from goes in every mode: a few words out
+      // of a sentence mean nothing without it, and it is bounded by one block.
+      context.enclosing = built.enclosing;
       if (config.helpContextMode === 'section') {
         context.before = built.before;
         context.after = built.after;
         context.section = built.section;
+      }
+      if (config.helpContextMode !== 'selection') {
+        context.mentions = built.mentions;
       }
     } catch (error) {
       /* the passage on its own is still worth explaining */
@@ -2853,6 +2911,8 @@
       before: help.context.before,
       after: help.context.after,
       section: help.context.section,
+      enclosing: help.context.enclosing,
+      mentions: help.context.mentions,
       contextMode: help.context.contextMode,
     };
     if (followUp) {
@@ -3169,30 +3229,102 @@
     }, HINT_MS);
   }
 
+  /**
+   * The selection affordance (09 §10): a container of the shape the single
+   * button used to have, holding _Read aloud_ and _Explain_. The second is
+   * the only way to reach help while the panel is faded out or dismissed.
+   *
+   * The container keeps the class `mpe-ra-float`, so the `mousedown` guard
+   * that holds the selection open (§14) and every `hideFloat` caller work
+   * unchanged; the read button keeps `data-mpe-ra-action="float"`, so
+   * `handleAction` does too.
+   */
   function ensureFloat() {
     if (floatButton && floatButton.isConnected) {
       return floatButton;
     }
-    floatButton = makeButton('float', 'Read aloud selection', 'mpe-ra-float');
-    floatButton.textContent = 'Read aloud';
+    floatButton = document.createElement('div');
+    floatButton.className = 'mpe-ra-ui mpe-ra-float';
+    var read = makeButton(
+      'float',
+      'Read aloud selection',
+      'mpe-ra-float-btn mpe-ra-float-read',
+    );
+    read.textContent = 'Read aloud';
+    var explain = makeIconButton(
+      'floatHelp',
+      HELP_TOOLTIP,
+      'mpe-ra-float-btn mpe-ra-float-help',
+      'help',
+    );
+    explain.setAttribute('aria-haspopup', 'dialog');
+    explain.hidden = !config.helpAvailable;
+    floatButton.appendChild(read);
+    floatButton.appendChild(explain);
     floatButton.hidden = true;
+    floatParts = { read: read, help: explain };
     document.body.appendChild(floatButton);
     return floatButton;
   }
 
-  function hideFloat() {
+  /**
+   * Take the affordance off screen without forgetting what it pointed at
+   * (09 §9). A scroll moves the affordance, it does not end the selection.
+   */
+  function hideFloatElement() {
     if (floatButton) {
       floatButton.hidden = true;
     }
+  }
+
+  /** The selection is over: hide the affordance and forget it. */
+  function hideFloat() {
+    hideFloatElement();
     floatSelection = null;
     floatScope = null;
+    floatRange = null;
     syncHelpButton();
+    touchPanel();
+  }
+
+  /** Whether the affordance is on screen (09 §11: the panel holds while it is). */
+  function floatVisible() {
+    return !!(floatButton && !floatButton.hidden && floatButton.isConnected);
   }
 
   /** Whether there is still a selection on the page with text in it. */
   function selectionIsLive() {
     var selection = window.getSelection();
     return !!(selection && selection.rangeCount && !selection.isCollapsed);
+  }
+
+  /** The element a range sits in, for `scopeOf`. */
+  function containerElementOf(range) {
+    var node = range.commonAncestorContainer;
+    return node.nodeType === 1 ? node : node.parentElement;
+  }
+
+  /**
+   * The live selection resolved inside `scope`, or null. Used by the help
+   * predicate (§7c) and by the affordance, so both answer the same question
+   * from the same place.
+   */
+  function liveSelectionIn(scope) {
+    if (!config.enabled || !scope) {
+      return null;
+    }
+    var selection = window.getSelection();
+    if (!selection || !selection.rangeCount || selection.isCollapsed) {
+      return null;
+    }
+    var range = selection.getRangeAt(0);
+    if (scopeOf(containerElementOf(range)) !== scope) {
+      return null;
+    }
+    var resolved = core.resolveSelection(selection, scope);
+    return resolved.ok && resolved.blocks && resolved.blocks.length
+      ? resolved
+      : null;
   }
 
   var ZERO_RECT = { top: 0, right: 0, bottom: 0, left: 0, width: 0, height: 0 };
@@ -3249,25 +3381,77 @@
       hideFloat();
       return;
     }
+    // While the sheet is open it owns the reading, and the document selection
+    // it left behind is the passage being explained: offering to read or to
+    // re-explain it there would cross the two scopes, and the affordance
+    // would stand over the answer (09 §10).
+    if (help.open && scope === root) {
+      hideFloat();
+      return;
+    }
     var rect = rectOfRange(range) || ZERO_RECT;
     var resolved = core.resolveSelection(selection, scope);
     var element = ensureFloat();
     element.hidden = false;
+    floatSelection = resolved;
+    floatScope = scope;
+    floatRange = range;
+    positionFloat(rect, scope);
+    // Sets the affordance's _Explain_ visibility from the scope just stored:
+    // a selection inside the sheet is read, not explained (04 D9).
+    syncHelpButton();
+    // A selection is activity: the panel comes back for it, and §11 keeps it
+    // there while the affordance is up.
+    touchPanel();
+  }
+
+  /**
+   * Put the affordance under `rect`. In the preview the button is
+   * `position: absolute` in document coordinates, so it travels with the text
+   * on its own; in the sheet — which is fixed to the viewport — the rect is
+   * already in client coordinates and adding the page scroll would misplace
+   * it.
+   */
+  function positionFloat(rect, scope) {
+    var element = ensureFloat();
     if (scope === root) {
       element.style.position = '';
       element.style.top = rect.bottom + window.scrollY + 6 + 'px';
       element.style.left = rect.left + window.scrollX + 'px';
     } else {
-      // The sheet is fixed to the viewport, so its rects are already in
-      // client coordinates: adding the page scroll would misplace the button.
       element.style.position = 'fixed';
       element.style.top = rect.bottom + 6 + 'px';
       element.style.left = rect.left + 'px';
     }
-    floatSelection = resolved;
-    floatScope = scope;
     floatRect = rect;
-    syncHelpButton();
+  }
+
+  /**
+   * A scroll (09 §9): the affordance moves, the selection is not forgotten.
+   * At most one reposition a frame, and never a re-resolve — walking the range
+   * on every frame of a follow-the-reading scroll is the cost this avoids;
+   * `selectionchange` is where resolving belongs.
+   */
+  function onScrollMoveFloat() {
+    if (!floatSelection || !floatRange || !selectionIsLive()) {
+      if (floatVisible()) {
+        hideFloat();
+      }
+      return;
+    }
+    if (floatFrame) {
+      return;
+    }
+    floatFrame = window.requestAnimationFrame(function () {
+      floatFrame = 0;
+      if (!floatSelection || !floatRange || !selectionIsLive()) {
+        return;
+      }
+      positionFloat(
+        rectOfRange(floatRange) || floatRect || ZERO_RECT,
+        floatScope,
+      );
+    });
   }
 
   // ---------------------------------------------------------------------------
@@ -3990,12 +4174,7 @@
     // A selection inside the help sheet reads bounded to the sheet (§5).
     var scope = null;
     if (selection && selection.rangeCount) {
-      var container = selection.getRangeAt(0).commonAncestorContainer;
-      scope = scopeOf(
-        container && container.nodeType === 1
-          ? container
-          : container.parentElement,
-      );
+      scope = scopeOf(containerElementOf(selection.getRangeAt(0)));
     }
     if (!scope) {
       scope = fallback && floatScope ? floatScope : root;
@@ -5219,6 +5398,13 @@
     }
     if (action === 'float') {
       startSelectionRead(floatSelection);
+      return;
+    }
+    // 09 §10 — the affordance's second button. `openHelp` already pauses the
+    // read, remembers where it was and refuses with the hint when there is
+    // nothing to explain, so there is no second path into the sheet.
+    if (action === 'floatHelp') {
+      openHelp();
     }
   }
 
@@ -5713,6 +5899,9 @@
         var target = event.target;
         if (target && target.nodeType === 1 && target === helpBody()) {
           onContainerScroll(target);
+          // A selection inside the sheet is the one case where a scroll does
+          // move the affordance relative to its text (09 §9).
+          onScrollMoveFloat();
         }
       },
       true,
@@ -5731,7 +5920,11 @@
     );
     window.addEventListener('pointermove', touchPanel, { passive: true });
     window.addEventListener('pointerdown', touchPanel, { passive: true });
-    window.addEventListener('scroll', hideFloat, { passive: true });
+    // 09 §9. This used to be `hideFloat`, which also discarded the resolved
+    // selection — and the follow-the-reading loop scrolls on every frame of a
+    // read, so the help button and `Alt+H` were disabled within a frame of
+    // any selection made while listening.
+    window.addEventListener('scroll', onScrollMoveFloat, { passive: true });
   }
 
   window.addEventListener('message', onHostMessage);

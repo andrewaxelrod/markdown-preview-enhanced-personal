@@ -158,6 +158,40 @@ suite('read-aloud/cache', function () {
     });
   });
 
+  suite('cachedDurationHint (14)', function () {
+    test('the stored hint wins, else the last span end, else nothing', function () {
+      const { cachedDurationHint } = cacheModule;
+      const spans = [
+        { text: 'Hello', charStart: 0, charEnd: 5, start: 0, end: 0.4 },
+        { text: 'world', charStart: 6, charEnd: 11, start: 0.4, end: 0.9 },
+      ];
+      assert.strictEqual(
+        cachedDurationHint(
+          Object.assign(entry('QUJD', spans), { durationHint: 1.3 }),
+        ),
+        1.3,
+      );
+      assert.strictEqual(cachedDurationHint(entry('QUJD', spans)), 0.9);
+      assert.strictEqual(cachedDurationHint(entry('QUJD', null)), undefined);
+      assert.strictEqual(cachedDurationHint(entry('QUJD', [])), undefined);
+      assert.strictEqual(
+        cachedDurationHint(
+          Object.assign(entry('QUJD', spans), { durationHint: NaN }),
+        ),
+        0.9,
+        'a broken stored hint falls back to the spans',
+      );
+    });
+
+    test('an entry with a hint round-trips it', function () {
+      const cache = new cacheModule.ReadAloudCache(dir, 10 * 1024 * 1024);
+      const key = cacheModule.cacheKey(parts({ text: 'With a hint' }));
+      const withHint = Object.assign(entry('QUJD', []), { durationHint: 2.5 });
+      cache.set(key, withHint);
+      assert.deepStrictEqual(cache.get(key), withHint);
+    });
+  });
+
   suite('T-13 LRU eviction and clear', function () {
     test('evicts the oldest entries once the cap is exceeded', function () {
       const fresh = fs.mkdtempSync(path.join(os.tmpdir(), 'mpe-ra-cache-'));

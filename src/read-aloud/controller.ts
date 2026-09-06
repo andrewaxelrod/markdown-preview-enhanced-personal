@@ -2,6 +2,7 @@ import * as path from 'node:path';
 import * as vscode from 'vscode';
 import {
   CACHE_DIR_NAME,
+  cachedDurationHint,
   cacheKey,
   ReadAloudCache,
   type CacheEntry,
@@ -1478,6 +1479,9 @@ export class ReadAloudController implements vscode.Disposable {
       if (cached) {
         audioBase64 = cached.audioBase64;
         spans = cached.spans;
+        // A hit posts a hint like a miss (14): the webview's timeline and
+        // time display need every chunk's length, loaded or not.
+        durationHint = cachedDurationHint(cached);
         this.logAttempt(job, state, chunk, 'hit');
       } else {
         await this.waitForPrefetchWindow(job, job.posted);
@@ -1513,6 +1517,7 @@ export class ReadAloudController implements vscode.Disposable {
           spans,
           mimeType: 'audio/mpeg',
           createdAt: Date.now(),
+          ...(durationHint === undefined ? {} : { durationHint }),
         };
       }
 

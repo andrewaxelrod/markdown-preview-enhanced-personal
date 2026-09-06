@@ -604,7 +604,7 @@
       chunks: [],
       chunkCount: 0,
       current: -1,
-      offsets: [],
+      // Every chunk's word spans, timed on the chunk's own clock (14).
       allSpans: [],
       spanIndex: 0,
       lastSpan: null,
@@ -787,6 +787,27 @@
       return chunk.durationHint;
     }
     return 0;
+  }
+
+  /**
+   * Where chunk `index` starts on the read's own timeline: the lengths of
+   * the chunks before it — the audio's once loaded, else the host's hint,
+   * else nothing. Computed when asked, never stored (14): a length that
+   * arrives later (loadedmetadata, or no hint at all for a cache hit) moves
+   * every chunk after it, and a stored offset would be stale.
+   */
+  function offsetOf(index) {
+    var total = 0;
+    for (var i = 0; i < index && i < record.chunks.length; i++) {
+      total += chunkLength(record.chunks[i]);
+    }
+    return total;
+  }
+
+  /** One past the last of chunk `index`'s spans in record.allSpans. */
+  function spanEndOf(index) {
+    var next = record.chunks[index + 1];
+    return next ? next.spanStart : record.allSpans.length;
   }
 
   // ---------------------------------------------------------------------------
@@ -2462,7 +2483,7 @@
       // During a block gap (07 §11) the finished chunk has handed its
       // element back: the read stands at its end.
       elapsed =
-        record.offsets[record.current] +
+        offsetOf(record.current) +
         (record.gapTimer
           ? chunkLength(playing)
           : playing.slot
@@ -4279,7 +4300,11 @@
       record.allSpans[i]._range = null;
       record.allSpans[i]._rangeMap = null;
     }
-    record.spanIndex = 0;
+    // Back to the top of the chunk being played, never of the read (14):
+    // the next frame walks forward from there to the word being spoken.
+    var playingChunk =
+      record.current >= 0 ? record.chunks[record.current] : null;
+    record.spanIndex = playingChunk ? playingChunk.spanStart : 0;
     record.lastSpan = null;
     if (entry) {
       ensureButton(entry);
@@ -4385,7 +4410,6 @@
     record.chunks = [];
     record.chunkCount = 0;
     record.current = -1;
-    record.offsets = [];
     record.allSpans = [];
     record.spanIndex = 0;
     record.lastSpan = null;
@@ -4846,7 +4870,8 @@
     if (chunk.released) {
       return false;
     }
-    var local = spans[k].start - record.offsets[chunkIndex];
+    // The span is timed on its chunk's clock: the seek position itself.
+    var local = spans[k].start;
     if (!(local >= 0)) {
       local = 0;
     }
@@ -5142,24 +5167,23 @@
     };
 
     record.chunkCount = message.chunkCount;
-    record.offsets[index] =
-      index === 0
-        ? 0
-        : record.offsets[index - 1] + chunkLength(record.chunks[index - 1]);
-
-    var offset = record.offsets[index];
+    // The spans keep the chunk's own clock (14): they are never shifted
+    // onto the read's timeline, because that timeline is only known once
+    // every earlier audio has loaded — and a cache hit used to carry no
+    // hint at all, which put every chunk at zero and let the word cursor
+    // land in another chunk's words after a re-render's rebind.
     if (message.spans && message.spans.length) {
       for (var i = 0; i < message.spans.length; i++) {
         var span = message.spans[i];
-        var shifted = {
+        var copy = {
           text: span.text,
           charStart: span.charStart,
           charEnd: span.charEnd,
-          start: span.start + offset,
-          end: span.end + offset,
+          start: span.start,
+          end: span.end,
         };
-        chunk.spans.push(shifted);
-        record.allSpans.push(shifted);
+        chunk.spans.push(copy);
+        record.allSpans.push(copy);
       }
     }
 
@@ -5409,18 +5433,20 @@
       record.rafId = window.requestAnimationFrame(tick);
       return;
     }
-    var time =
-      record.offsets[record.current] +
-      (chunk.slot ? chunk.slot.el.currentTime : 0);
+    // The chunk's own clock (14): the search stays inside the chunk's
+    // spans, so a cursor reset — a re-render's rebind — can never pick a
+    // word of another chunk, whatever the chunks' lengths are known to be.
+    var time = chunk.slot ? chunk.slot.el.currentTime : 0;
     var spans = record.allSpans;
-    while (
-      record.spanIndex < spans.length &&
-      spans[record.spanIndex].end <= time
-    ) {
+    var last = spanEndOf(record.current);
+    if (record.spanIndex < chunk.spanStart) {
+      record.spanIndex = chunk.spanStart;
+    }
+    while (record.spanIndex < last && spans[record.spanIndex].end <= time) {
       record.spanIndex++;
     }
     var current =
-      record.spanIndex < spans.length && spans[record.spanIndex].start <= time
+      record.spanIndex < last && spans[record.spanIndex].start <= time
         ? spans[record.spanIndex]
         : null;
     if (current !== record.lastSpan) {
@@ -5495,9 +5521,9 @@
         continue;
       }
       if (start === null) {
-        start = record.offsets[i];
+        start = offsetOf(i);
       }
-      end = record.offsets[i] + chunkLength(candidate);
+      end = offsetOf(i) + chunkLength(candidate);
     }
     if (start === null) {
       return null;
@@ -5508,7 +5534,7 @@
       // During a block gap the read stands at the finished chunk's end
       // (07 §11.3): −10 s seeks inside the block, +10 s has nowhere to go.
       here:
-        record.offsets[record.current] +
+        offsetOf(record.current) +
         (record.gapTimer || record.pendingChunk >= 0
           ? chunkLength(chunk)
           : chunk.slot
@@ -5518,16 +5544,21 @@
     };
   }
 
-  /** Move the word highlight to time `time` without touching the audio. */
-  function syncSpansTo(time) {
+  /**
+   * Move the word highlight to `local` seconds into chunk `index` without
+   * touching the audio: the chunk's own clock, inside its own spans (14).
+   */
+  function syncSpansTo(index, local) {
+    var chunk = record.chunks[index];
     var spans = record.allSpans;
-    var index = 0;
-    while (index < spans.length && spans[index].end <= time) {
-      index++;
+    var cursor = chunk ? chunk.spanStart : 0;
+    var last = spanEndOf(index);
+    while (cursor < last && spans[cursor].end <= local) {
+      cursor++;
     }
-    record.spanIndex = index;
+    record.spanIndex = cursor;
     var current =
-      index < spans.length && spans[index].start <= time ? spans[index] : null;
+      cursor < last && spans[cursor].start <= local ? spans[cursor] : null;
     paintSpan(current);
     record.lastSpan = current;
   }
@@ -5554,7 +5585,7 @@
       if (
         candidate.blockIndex === bounds.blockIndex &&
         !candidate.released &&
-        record.offsets[i] <= target
+        offsetOf(i) <= target
       ) {
         index = i;
       }
@@ -5563,7 +5594,7 @@
       return false;
     }
     var chunk = record.chunks[index];
-    var local = target - record.offsets[index];
+    var local = target - offsetOf(index);
     if (!(local >= 0)) {
       local = 0;
     }
@@ -5595,7 +5626,7 @@
     }
     if (wasPaused) {
       record.current = index;
-      syncSpansTo(target);
+      syncSpansTo(index, local);
       showBar('Paused');
       return true;
     }

@@ -558,6 +558,23 @@ off` mid-read dropped the page, its properties and every tier class and kept the
 
 ### Fixed
 
+- **The spoken word was painted in the wrong block after a click into a cached read**
+  (`featrues/14-bug-placement/bug.md`, the screenshot: pills on the numbered list, the marked
+  word in the bullet list above it). The webview shifted every chunk's word
+  spans onto the read's timeline as the chunk arrived, using the lengths of the chunks before
+  it — and a cache hit carried no `durationHint`, so a burst of cached chunks all landed at
+  zero and their spans overlapped in time. That was harmless until a re-render's rebind reset
+  the word cursor to the top of the read: the next frame then walked the overlapping spans
+  from the start and found the _first_ chunk's word for the current time, in a block whose
+  pills had long moved on. With the sidebar TOC open, crossnote's highlight of the current
+  heading is such a re-render, on every scroll. Two changes: every chunk's spans now keep the
+  chunk's own clock and the cursor is confined to the chunk being played (`spanEndOf`,
+  `offsetOf` computed when asked, `syncSpansTo(index, local)`; the rebind puts the cursor at
+  the playing chunk's first span), so the chunks' lengths can no longer misplace a word; and
+  the host posts a `durationHint` for a cache hit too (`cachedDurationHint`: the hint stored
+  with the entry since this change, else the end of its last span), so the time display and
+  the ±10 s bounds of a cached read are right. `test/read-aloud/chunk-timeline.test.js`.
+
 - **Help never saw the sentence a short selection came from** (`featrues/11-help-fixes/`). For a
   selection shorter than its block, the request carried the selected words as the passage and
   put the `[PASSAGE]` marker where the _whole block_ had been, so the sentence the words sat in

@@ -28,6 +28,38 @@ export interface CacheEntry {
   spans: WordSpan[] | null;
   mimeType: 'audio/mpeg';
   createdAt: number;
+  /**
+   * The alignment's audio end in seconds, stored since 14 so a hit can post
+   * the same `durationHint` a miss does; entries written before it have only
+   * their spans (see {@link cachedDurationHint}).
+   */
+  durationHint?: number;
+}
+
+/**
+ * The `durationHint` to post for a cache hit (14): the one stored with the
+ * entry, else the end of its last word span, else nothing. Without it the
+ * webview knew no length for a cached chunk until its audio loaded, which
+ * left the time display short and the timeline of a burst of hits flat.
+ */
+export function cachedDurationHint(entry: CacheEntry): number | undefined {
+  if (
+    typeof entry.durationHint === 'number' &&
+    Number.isFinite(entry.durationHint) &&
+    entry.durationHint > 0
+  ) {
+    return entry.durationHint;
+  }
+  if (!entry.spans || entry.spans.length === 0) {
+    return undefined;
+  }
+  let end = 0;
+  for (const span of entry.spans) {
+    if (Number.isFinite(span.end) && span.end > end) {
+      end = span.end;
+    }
+  }
+  return end > 0 ? end : undefined;
 }
 
 /**

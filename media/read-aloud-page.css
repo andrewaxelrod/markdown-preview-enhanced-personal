@@ -1115,6 +1115,29 @@ html[data-mpe-ra-page] body .mpe-ra-bar-badge.is-warning {
   color: var(--surface);
 }
 
+/* 13 §12.5 — the module marker takes the note tokens of 7d. */
+html[data-mpe-ra-page] body .mpe-ra-classroom-marker {
+  color: var(--mpe-ra-note-ink);
+}
+
+html[data-mpe-ra-page] body .mpe-ra-classroom-marker:hover {
+  color: var(--mpe-ra-note-ink-strong);
+}
+
+html[data-mpe-ra-page] body .mpe-ra-classroom-marker.is-active {
+  color: var(--mpe-ra-note-badge-fg);
+  background: var(--mpe-ra-note-ink-strong);
+}
+
+html[data-mpe-ra-page] body .mpe-ra-classroom-marker.is-stopped {
+  color: var(--warning-text);
+}
+
+html[data-mpe-ra-page] body .mpe-ra-classroom-progress {
+  background: var(--focus);
+  color: var(--surface);
+}
+
 html[data-mpe-ra-page]
   body:not([data-presentation-mode])
   .markdown-preview
@@ -1128,7 +1151,8 @@ html[data-mpe-ra-page]
     .mpe-ra-module,
     .mpe-ra-lever-row,
     .mpe-ra-classroom-link-box,
-    .mpe-ra-classroom-persona-select
+    .mpe-ra-classroom-persona-select,
+    .mpe-ra-classroom-marker
   ):focus-visible {
   outline-color: var(--focus);
 }

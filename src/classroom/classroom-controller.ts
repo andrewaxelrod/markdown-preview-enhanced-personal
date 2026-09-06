@@ -43,7 +43,9 @@ import {
   type ClassroomOpenSourceRequest,
   type ClassroomPrepareRequest,
   type ClassroomProgress,
+  type ClassroomShapeBudgets,
   type HostToWebviewMessage,
+  type ReadAloudClassroomModulesMessage,
   type ReadAloudClassroomPreparedMessage,
 } from '../read-aloud/messages';
 import {
@@ -105,18 +107,19 @@ import {
   type Persona,
 } from './persona';
 import {
+  budgetFor,
   buildPlanCountRetry,
   buildPlanRequest,
   buildSystemPrompt,
-  ceilingFor,
-  chapterBudgetFor,
   CLASSROOM_CAPS,
   CLASSROOM_PROMPT_VERSION,
   LEVELS,
   parsePlan,
+  passageShapeFor,
   PLAN_SHAPE_ERROR,
-  wordTargetFor,
+  type ChapterBudget,
   type FuelDocument,
+  type PassageShape,
 } from './plan-prompt';
 
 /**
@@ -144,6 +147,8 @@ export const NO_MODULES_MESSAGE =
 export const STALE_GRACE_MS = 60000;
 /** §9.7 — how long to wait for the TextDocument to follow the disk. */
 export const DOCUMENT_FOLLOW_MS = 2000;
+/** §11.4 — the Undo window before a deleted module goes to the trash. */
+export const UNDO_WINDOW_MS = 6000;
 
 export interface ClassroomControllerDeps {
   isWebBuild: boolean;
@@ -157,6 +162,8 @@ export interface ClassroomControllerDeps {
   openPreview(sourceUri: vscode.Uri): Promise<void>;
   /** Re-render an open preview from its document (`updateMarkdown`). */
   refreshPreview(sourceUri: vscode.Uri): Promise<void>;
+  /** §11.4 — dispose the preview panel(s) of a file (multi-preview mode). */
+  closePreview(sourceUri: vscode.Uri): Promise<void>;
   isSinglePreviewMode(): boolean;
   resolveWikilink(
     sourceUri: vscode.Uri,
@@ -190,6 +197,8 @@ interface BuildJob {
   documentTitle: string;
   enclosing: string;
   level: 1 | 2 | 3;
+  /** §6.1 — the passage's shape, decided once per build. */
+  shape: PassageShape;
   readerNote: string;
   linked: LinkedFuel[];
   fromContinue: boolean;
@@ -241,6 +250,7 @@ export class ClassroomController implements vscode.Disposable {
     string,
     { moduleId: string; anchor: ParsedModule['passage'] }
   >();
+  private readonly watches = new Map<string, { dispose(): void }>();
   private disposed = false;
 
   constructor(deps: ClassroomControllerDeps) {
@@ -263,7 +273,22 @@ export class ClassroomController implements vscode.Disposable {
       return this.store;
     }
     this.storeRoot = root;
-    this.store = new ModuleStore({ root, log: (line) => readAloudLog(line) });
+    for (const watch of this.watches.values()) {
+      watch.dispose();
+    }
+    this.watches.clear();
+    this.store?.dispose();
+    this.store = new ModuleStore({
+      trash: async (filePath) => {
+        await vscode.workspace.fs.delete(vscode.Uri.file(filePath), {
+          useTrash: true,
+          recursive: false,
+        });
+        return true;
+      },
+      root,
+      log: (line) => readAloudLog(line),
+    });
     return this.store;
   }
 
@@ -449,6 +474,62 @@ export class ClassroomController implements vscode.Disposable {
       await this.post(moduleUri, message);
     }
     return progress;
+  }
+
+  // ------------------------------------------------------------ the list
+
+  /** §12.5 — the document's modules, to every panel showing it. */
+  public async postModules(uri: vscode.Uri): Promise<void> {
+    if (this.deps.isWebBuild || this.disposed) {
+      return;
+    }
+    try {
+      const store = this.getStore();
+      const { key } = this.identityOf(uri);
+      const listing = store.list(key);
+      const deleting = store.deletingIds();
+      const modules = listing.modules
+        .filter((record) => !deleting.includes(record.id))
+        .map((record) => previewSummary(this.staleAdjusted(record)));
+      const message: ReadAloudClassroomModulesMessage = {
+        command: 'readAloudClassroomModules',
+        sourceUri: uri.toString(),
+        modules,
+        deleting: listing.modules
+          .filter((record) => deleting.includes(record.id))
+          .map((record) => record.id),
+        deleteMode: this.deleteMode(),
+      };
+      await this.post(uri, message);
+      readAloudLog(
+        `classroom: modules posted ${modules.length} for ${fileNameOf(uri)}`,
+      );
+    } catch (error) {
+      readAloudLog(
+        `classroom: modules post failed for ${fileNameOf(uri)}: ${String(error)}`,
+      );
+    }
+  }
+
+  /** §11.4 — whether a delete can end in the OS trash: locally, yes. */
+  private deleteMode(): 'trash' | 'permanent' {
+    return vscode.env.remoteName ? 'permanent' : 'trash';
+  }
+
+  /** §11.3 — watch the document's module folder while a preview shows it. */
+  private watchDocument(uri: vscode.Uri): void {
+    const id = uri.toString();
+    if (this.watches.has(id)) {
+      return;
+    }
+    const store = this.getStore();
+    const { key } = this.identityOf(uri);
+    this.watches.set(
+      id,
+      store.watch(key, () => {
+        void this.postModules(uri);
+      }),
+    );
   }
 
   // ----------------------------------------------------------------- links
@@ -644,6 +725,8 @@ export class ClassroomController implements vscode.Disposable {
           effort: label.effort,
         },
         building: job ? (this.lastProgress.get(job.moduleId) ?? null) : null,
+        budgets: this.budgetsFor(persona),
+        shortTerm: settings.shortTerm,
       };
       await this.post(uri, message);
       readAloudLog(
@@ -659,6 +742,32 @@ export class ClassroomController implements vscode.Disposable {
         },
       );
     }
+  }
+
+  /** §6.1 — every level's size for both shapes, the persona's overrides applied. */
+  private budgetsFor(persona: Persona): ClassroomShapeBudgets {
+    const out = {
+      passage: {},
+      term: {},
+    } as ClassroomShapeBudgets;
+    for (const shape of ['passage', 'term'] as const) {
+      for (const level of [1, 2, 3] as const) {
+        const budget = budgetFor(level, shape, persona);
+        out[shape][level] = {
+          chapters: budget.chapters,
+          words: budget.words,
+          minutes: budget.minutes,
+        };
+      }
+    }
+    return out;
+  }
+
+  /** §6.1 — the shape a build takes: a term, unless the setting is off. */
+  private shapeFor(passage: string): PassageShape {
+    return readClassroomSettings().shortTerm
+      ? passageShapeFor(passage)
+      : 'passage';
   }
 
   /** §9.8 — a `writing` module with no build behind it is shown as stopped. */
@@ -821,14 +930,17 @@ export class ClassroomController implements vscode.Disposable {
         ENCLOSING_OPEN,
       ),
       level: request.level,
+      shape: this.shapeFor(passage),
       readerNote: request.readerNote,
       linked,
       fromContinue: false,
     };
     readAloudLog(
-      `classroom: build ${id} level ${request.level} ${persona.id} ${label.engine} · ${label.model} · ${label.effort}, fuel ${source.length} chars (${linked.length} linked)`,
+      `classroom: build ${id} level ${request.level} ${job.shape} ${persona.id} ${label.engine} · ${label.model} · ${label.effort}, fuel ${source.length} chars (${linked.length} linked)`,
     );
+    this.watchDocument(uri);
     this.enqueue(job, record);
+    await this.postModules(uri);
   }
 
   private enqueue(job: BuildJob, record: ParsedModule): void {
@@ -1147,7 +1259,8 @@ export class ClassroomController implements vscode.Disposable {
     module: ParsedModule,
     systemPrompt: string,
   ): Promise<ParsedModule> {
-    const budget = chapterBudgetFor(job.level, job.persona);
+    const chapterBudget = budgetFor(job.level, job.shape, job.persona);
+    const budget = chapterBudget.chapters;
     const request = buildPlanRequest({
       passage: job.passage,
       breadcrumb: job.breadcrumb,
@@ -1155,6 +1268,7 @@ export class ClassroomController implements vscode.Disposable {
       level: job.level,
       readerNote: job.readerNote,
       budget,
+      shape: chapterBudget.shape,
     });
     const started = Date.now();
     const first = await this.callEngine(job, systemPrompt, request, 'plan');
@@ -1194,7 +1308,7 @@ export class ClassroomController implements vscode.Disposable {
     const plan = parsed.plan;
     const chapters: ModuleChapter[] = plan.chapters.map((chapter) => ({
       ...chapter,
-      words: chapter.words || wordTargetFor(chapter.type, job.level),
+      words: chapter.words || chapterBudget.targets[chapter.type],
       status: 'queued',
       actual: null,
       flagged: [],
@@ -1215,7 +1329,7 @@ export class ClassroomController implements vscode.Disposable {
           : current.document,
     }));
     readAloudLog(
-      `classroom: plan ${job.moduleId} in ${Date.now() - started} (${chapters.length} chapters)`,
+      `classroom: plan ${job.moduleId} in ${Date.now() - started} (${chapters.length} chapters, ${chapterBudget.shape})`,
     );
     await this.refresh(job);
     await this.postProgress(next, job, job.sourceUri, job.moduleUri);
@@ -1265,8 +1379,13 @@ export class ClassroomController implements vscode.Disposable {
     await this.postProgress(module, job, job.sourceUri, job.moduleUri);
 
     const previousBridge = index === 0 ? null : bridgeOf(module.body) || null;
-    const target = chapter.words || wordTargetFor(chapter.type, job.level);
-    const ceiling = ceilingFor(chapter.type);
+    const chapterBudget: ChapterBudget = budgetFor(
+      job.level,
+      job.shape,
+      job.persona,
+    );
+    const target = chapter.words || chapterBudget.targets[chapter.type];
+    const ceiling = chapterBudget.ceilings[chapter.type];
     const brief: ChapterBrief = {
       plan,
       chapter,
@@ -1507,6 +1626,7 @@ export class ClassroomController implements vscode.Disposable {
       documentTitle: record.document.title || fileNameOf(sourceUri),
       enclosing: '',
       level: record.level,
+      shape: this.shapeFor(record.passage.exact),
       readerNote: record.readerNote,
       linked,
       fromContinue: true,
@@ -1603,6 +1723,12 @@ export class ClassroomController implements vscode.Disposable {
     if (this.deps.isWebBuild || this.disposed) {
       return;
     }
+    if (readClassroomSettings().enabled && uri.scheme === 'file') {
+      // §12.5 — the document's modules ride behind the handshake, and the
+      // folder is watched while the preview is open.
+      this.watchDocument(uri);
+      void this.postModules(uri);
+    }
     const pending = this.pendingReveal.get(uri.toString());
     if (pending) {
       this.pendingReveal.delete(uri.toString());
@@ -1659,6 +1785,159 @@ export class ClassroomController implements vscode.Disposable {
         ? adjusted.document.headings[adjusted.document.headings.length - 1]
         : '',
     };
+  }
+
+  // ---------------------------------------------------------------- delete
+
+  /**
+   * §11.4 — soft first: a build in the way is cancelled, the module is marked,
+   * the list is re-posted without it, and six seconds later the file goes to
+   * the trash. `fromCommand` shows the information message with Undo when no
+   * preview shows the document; the previews' chip does it otherwise.
+   */
+  public async delete(
+    request: ClassroomModuleRequest,
+    fromCommand: boolean = false,
+  ): Promise<void> {
+    if (this.deps.isWebBuild) {
+      return;
+    }
+    const record = this.recordFor(request.sourceUri, request.moduleId);
+    if (!record) {
+      await this.postError(
+        vscode.Uri.parse(request.sourceUri),
+        'The module file is gone.',
+        { moduleId: request.moduleId },
+      );
+      return;
+    }
+    const sourceUri = this.sourceUriOf(record);
+    const moduleUri = vscode.Uri.file(record.filePath);
+    const job = this.jobFor(record.id);
+    if (job) {
+      await this.cancel({
+        sourceUri: sourceUri.toString(),
+        moduleId: record.id,
+        reason: 'delete',
+      });
+    }
+    const store = this.getStore();
+    const done = store.softDelete(record.key, record.id, UNDO_WINDOW_MS);
+    readAloudLog(`classroom: deleting ${record.id}`);
+    await this.postModules(sourceUri);
+    if (this.deps.hasPreview(moduleUri)) {
+      await this.post(moduleUri, {
+        command: 'readAloudClassroomModules',
+        sourceUri: moduleUri.toString(),
+        modules: [],
+        deleting: [record.id],
+        deleteMode: this.deleteMode(),
+      });
+    }
+    if (fromCommand && !this.deps.hasPreview(sourceUri)) {
+      const label =
+        this.deleteMode() === 'trash'
+          ? 'Module moved to Trash'
+          : 'Module deleted';
+      void vscode.window
+        .showInformationMessage(label, 'Undo')
+        .then((choice) => {
+          if (choice === 'Undo') {
+            void this.undoDelete({
+              sourceUri: sourceUri.toString(),
+              moduleId: record.id,
+            });
+          }
+        });
+    }
+    const outcome = await done;
+    if (outcome === 'trash' || outcome === 'permanent') {
+      readAloudLog(`classroom: deleted ${record.id} (${outcome})`);
+      this.lastProgress.delete(record.id);
+      if (this.deps.hasPreview(moduleUri)) {
+        // The module's own preview has nothing left to show (§11.4).
+        try {
+          if (this.deps.isSinglePreviewMode()) {
+            await this.deps.openPreview(sourceUri);
+          } else {
+            await this.deps.closePreview(moduleUri);
+          }
+        } catch (error) {
+          readAloudLog(
+            `classroom: close module preview failed: ${String(error)}`,
+          );
+        }
+      }
+    }
+    await this.postModules(sourceUri);
+  }
+
+  public async undoDelete(request: ClassroomModuleRequest): Promise<void> {
+    if (this.deps.isWebBuild) {
+      return;
+    }
+    const record = this.recordFor(request.sourceUri, request.moduleId);
+    const store = this.getStore();
+    if (store.undoDelete(request.moduleId)) {
+      readAloudLog(`classroom: undo delete ${request.moduleId}`);
+    }
+    const sourceUri = record
+      ? this.sourceUriOf(record)
+      : vscode.Uri.parse(request.sourceUri);
+    await this.postModules(sourceUri);
+    if (record) {
+      const moduleUri = vscode.Uri.file(record.filePath);
+      if (this.deps.hasPreview(moduleUri)) {
+        await this.post(moduleUri, {
+          command: 'readAloudClassroomModules',
+          sourceUri: moduleUri.toString(),
+          modules: [],
+          deleting: [],
+          deleteMode: this.deleteMode(),
+        });
+      }
+    }
+  }
+
+  /** §13 — _Delete Classroom Module_: the active module preview's, else a quick pick. */
+  public async deleteCommand(activeModuleUri?: vscode.Uri): Promise<void> {
+    if (this.deps.isWebBuild) {
+      void vscode.window.showInformationMessage(CLASSROOM_WEB_BUILD_MESSAGE);
+      return;
+    }
+    const store = this.getStore();
+    if (activeModuleUri) {
+      const active = store.moduleAt(activeModuleUri.fsPath);
+      if (active) {
+        await this.delete(
+          { sourceUri: activeModuleUri.toString(), moduleId: active.id },
+          true,
+        );
+        return;
+      }
+    }
+    const all = store.listAll();
+    if (!all.modules.length) {
+      void vscode.window.showInformationMessage(NO_MODULES_MESSAGE);
+      return;
+    }
+    const picked = await vscode.window.showQuickPick(
+      this.pickItems(all.modules),
+      {
+        placeHolder: 'Delete which classroom module?',
+        matchOnDescription: true,
+        matchOnDetail: true,
+      },
+    );
+    if (picked) {
+      await this.delete(
+        {
+          sourceUri: vscode.Uri.file(picked.record.filePath).toString(),
+          moduleId: picked.record.id,
+        },
+        true,
+      );
+    }
   }
 
   // ------------------------------------------------------ palette commands
@@ -1805,6 +2084,12 @@ export class ClassroomController implements vscode.Disposable {
       running.abort.abort();
       this.running = null;
     }
+    for (const watch of this.watches.values()) {
+      watch.dispose();
+    }
+    this.watches.clear();
+    this.store?.dispose();
+    this.store = null;
   }
 }
 

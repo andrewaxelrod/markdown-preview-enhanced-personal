@@ -253,6 +253,8 @@ export interface ReadAloudConfigMessage {
   notesDecoration: NotesDecoration;
   /** Classroom (13 §14.3): desktop and `classroomEnabled`. */
   classroomAvailable: boolean;
+  /** 13 §12.5 — the module marker in the margin of the passage's block. */
+  classroomMarker: boolean;
   /**
    * 13 §12.2 — present (or null) in the config of a module preview; absent
    * from a broadcast, which leaves the webview's value alone.
@@ -318,7 +320,8 @@ export type HostToWebviewMessage =
   | ReadAloudNoteErrorMessage
   | ReadAloudClassroomPreparedMessage
   | ReadAloudClassroomProgressMessage
-  | ReadAloudClassroomErrorMessage;
+  | ReadAloudClassroomErrorMessage
+  | ReadAloudClassroomModulesMessage;
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -1380,8 +1383,8 @@ export function parseNotesShowAllArgs(args: unknown): string | undefined {
 // ---------------------------------------------------------------------------
 // Classroom (`featrues/13-classroom/spec.md` §14)
 //
-// Seven webview -> host messages, every one parsed here before the classroom
-// controller sees it, and the three host -> webview shapes. The passage and
+// Nine webview -> host messages, every one parsed here before the classroom
+// controller sees it, and the four host -> webview shapes. The passage and
 // the fields take help's caps; the anchor the notes'; the level is 1–3; the
 // linked paths are workspace-relative, short, and never climb.
 // ---------------------------------------------------------------------------
@@ -1466,6 +1469,18 @@ export interface ClassroomProgress {
   hasChapter: boolean;
 }
 
+/** 13 §6.1 — one level's size for one passage shape, for the sheet's size line. */
+export interface ClassroomSizeBudget {
+  chapters: [number, number];
+  words: number;
+  minutes: number;
+}
+
+export type ClassroomShapeBudgets = Record<
+  'passage' | 'term',
+  Record<1 | 2 | 3, ClassroomSizeBudget>
+>;
+
 export interface ReadAloudClassroomPreparedMessage {
   command: 'readAloudClassroomPrepared';
   requestId: string;
@@ -1477,6 +1492,19 @@ export interface ReadAloudClassroomPreparedMessage {
   modules: ModuleSummary[];
   engine: { engine: string; model: string; effort: string };
   building: ClassroomProgress | null;
+  /** 13 §6.1 — the budgets per shape and level, the persona's overrides applied. */
+  budgets: ClassroomShapeBudgets;
+  /** `classroomShortTermModules`: whether a term takes the smaller budget. */
+  shortTerm: boolean;
+}
+
+/** 13 §12.5 — the document's modules, the whole list every time. */
+export interface ReadAloudClassroomModulesMessage {
+  command: 'readAloudClassroomModules';
+  sourceUri: string;
+  modules: ModuleSummary[];
+  deleting: string[];
+  deleteMode: 'trash' | 'permanent';
 }
 
 export interface ReadAloudClassroomProgressMessage extends ClassroomProgress {
@@ -1689,6 +1717,20 @@ export function parseClassroomOpenSourceArgs(
   return parsed
     ? { moduleUri: parsed.sourceUri, moduleId: parsed.moduleId }
     : undefined;
+}
+
+/** `readAloudClassroomDelete` -> `[sourceUri, moduleId]` (either uri, 13 §11.4). */
+export function parseClassroomDeleteArgs(
+  args: unknown,
+): ClassroomModuleRequest | undefined {
+  return parseClassroomModuleArgs(args);
+}
+
+/** `readAloudClassroomUndoDelete` -> `[sourceUri, moduleId]` (either uri). */
+export function parseClassroomUndoDeleteArgs(
+  args: unknown,
+): ClassroomModuleRequest | undefined {
+  return parseClassroomModuleArgs(args);
 }
 
 /** `readAloudClassroomOpenFolder` -> `[sourceUri]`. */

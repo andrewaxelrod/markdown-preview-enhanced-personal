@@ -109,6 +109,8 @@ const SOURCE_URI_GUARDED_COMMANDS: Set<string> = new Set([
   'readAloudClassroomOpen',
   'readAloudClassroomOpenSource',
   'readAloudClassroomOpenFolder',
+  'readAloudClassroomDelete',
+  'readAloudClassroomUndoDelete',
 ]);
 
 /**
@@ -146,6 +148,8 @@ const WEBVIEW_MESSAGE_COMMANDS: Set<string> = new Set([
   'readAloudClassroomContinue',
   'readAloudClassroomOpen',
   'readAloudClassroomOpenFolder',
+  'readAloudClassroomDelete',
+  'readAloudClassroomUndoDelete',
   'readAloudClassroomOpenSource',
   'readAloudClassroomPrepare',
   'readAloudHelp',

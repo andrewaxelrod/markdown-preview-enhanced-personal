@@ -33,6 +33,11 @@ function request(overrides) {
   );
 }
 
+/** A passage of six words: one over the term shape. */
+function words6() {
+  return 'one two three four five six';
+}
+
 suite('classroom/plan-prompt', function () {
   this.timeout(30000);
 
@@ -344,5 +349,89 @@ suite('classroom/plan-prompt', function () {
       'Classroom: short one',
     );
     assert.strictEqual(plan.provisionalTitle(''), 'Classroom');
+  });
+  // ----------------------------------------------------- §6.1 passage shape
+
+  test('budgetFor: a term shrinks levels 1 and 2, level 3 and a passage are §6', function () {
+    assert.strictEqual(plan.passageShapeFor('the metrics'), 'term');
+    assert.strictEqual(plan.passageShapeFor(words6()), 'passage');
+    const term1 = plan.budgetFor(1, 'term');
+    assert.deepStrictEqual(term1.chapters, [2, 2]);
+    assert.strictEqual(term1.shape, 'term');
+    assert.strictEqual(term1.targets.concept, 350);
+    assert.strictEqual(term1.targets.return, 400);
+    assert.strictEqual(term1.targets.framing, 250);
+    assert.strictEqual(term1.ceilings.concept, 500);
+    assert.strictEqual(term1.ceilings.return, 600);
+    assert.deepStrictEqual([term1.words, term1.minutes], [750, 5]);
+    const term2 = plan.budgetFor(2, 'term');
+    assert.deepStrictEqual(term2.chapters, [4, 4]);
+    assert.deepStrictEqual([term2.words, term2.minutes], [1350, 9]);
+    const term3 = plan.budgetFor(3, 'term');
+    assert.deepStrictEqual(term3.chapters, [7, 8]);
+    assert.strictEqual(term3.shape, 'passage', 'level 3 keeps the ladder');
+    assert.strictEqual(term3.targets.concept, 550);
+    const passage1 = plan.budgetFor(1, 'passage');
+    assert.deepStrictEqual(passage1.chapters, [3, 3]);
+    assert.strictEqual(passage1.targets.concept, 450);
+    assert.strictEqual(passage1.ceilings.concept, 700);
+    assert.deepStrictEqual([passage1.words, passage1.minutes], [1500, 10]);
+    assert.deepStrictEqual(
+      plan.budgetFor(2).chapters,
+      [5, 6],
+      'the shape defaults to passage',
+    );
+    // Persona overrides: `levels` for a passage, `termLevels` for a term.
+    const persona = {
+      levels: { 1: { chapters: [3, 4] } },
+      termLevels: { 1: { chapters: [2, 3] } },
+    };
+    assert.deepStrictEqual(
+      plan.budgetFor(1, 'passage', persona).chapters,
+      [3, 4],
+    );
+    assert.deepStrictEqual(plan.budgetFor(1, 'term', persona).chapters, [2, 3]);
+    assert.deepStrictEqual(plan.budgetFor(2, 'term', persona).chapters, [4, 4]);
+    assert.strictEqual(plan.wordTargetFor('concept', 1, 'term'), 350);
+    assert.strictEqual(plan.wordTargetFor('return', 2, 'term'), 400);
+    assert.strictEqual(plan.wordTargetFor('concept', 3, 'term'), 550);
+    assert.strictEqual(plan.ceilingFor('concept', 'term'), 500);
+    assert.strictEqual(plan.ceilingFor('framing', 'term'), 350);
+  });
+
+  test('the plan request for a term carries the term sentence, the smaller budget and the lighter targets', function () {
+    const budget = plan.budgetFor(1, 'term');
+    const text = plan.buildPlanRequest(
+      request({
+        passage: 'the metrics',
+        level: 1,
+        budget: budget.chapters,
+        shape: 'term',
+      }),
+    );
+    assert.ok(
+      text.includes(
+        'The passage is a single term of a few words, not an argument.',
+      ),
+    );
+    assert.ok(text.includes('Plan a module of 2 to 2 chapters'));
+    assert.ok(text.includes('concept 350'));
+    assert.ok(text.includes('return 400'));
+    assert.ok(text.includes('there is no separate introduction'));
+    const full = plan.buildPlanRequest(request({ level: 1, budget: [3, 3] }));
+    assert.ok(!full.includes('a single term'));
+    assert.ok(full.includes('Plan a module of 3 to 3 chapters'));
+    assert.ok(full.includes('concept 450'));
+    // Level 3 with a term: the ladder, the full targets, no term sentence.
+    const lost = plan.buildPlanRequest(
+      request({
+        passage: 'the metrics',
+        level: 3,
+        budget: [7, 8],
+        shape: 'term',
+      }),
+    );
+    assert.ok(!lost.includes('a single term'));
+    assert.ok(lost.includes('concept 550'));
   });
 });

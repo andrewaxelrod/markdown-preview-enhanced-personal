@@ -1790,4 +1790,32 @@ suite('read-aloud/messages', function () {
       assert.strictEqual(messages.isSafeRelativePath('a\u0000b.md'), false);
     });
   });
+  suite('classroom delete parsers (13 §11.4)', function () {
+    const MODULE_ID = '20260905T173010Z-4c2e';
+    test('parseClassroomDeleteArgs and parseClassroomUndoDeleteArgs take either uri and the module id', function () {
+      for (const fn of [
+        'parseClassroomDeleteArgs',
+        'parseClassroomUndoDeleteArgs',
+      ]) {
+        assert.deepStrictEqual(messages[fn]([URI, MODULE_ID]), {
+          sourceUri: URI,
+          moduleId: MODULE_ID,
+        });
+        for (const args of [
+          [URI],
+          [URI, MODULE_ID, 'x'],
+          [URI, 'note-1'],
+          ['', MODULE_ID],
+          [URI, 42],
+          null,
+        ]) {
+          assert.strictEqual(
+            messages[fn](args),
+            undefined,
+            fn + ' ' + JSON.stringify(args),
+          );
+        }
+      }
+    });
+  });
 });

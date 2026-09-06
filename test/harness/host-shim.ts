@@ -41,7 +41,8 @@ import type {
   CaptionedSpeechResponseWire,
 } from '../../src/read-aloud/kokoro-types';
 import planAnswer from '../classroom/fixtures/plan-answer.md';
-import { parsePlan } from '../../src/classroom/plan-prompt';
+import { budgetFor, parsePlan } from '../../src/classroom/plan-prompt';
+import type { ModuleSummary } from '../../src/classroom/module-format';
 import {
   clampSpeed,
   clampTextSize,
@@ -55,6 +56,8 @@ import {
   parseClassroomBuildArgs,
   parseClassroomCancelArgs,
   parseClassroomContinueArgs,
+  parseClassroomDeleteArgs,
+  parseClassroomUndoDeleteArgs,
   parseClassroomOpenArgs,
   parseClassroomOpenFolderArgs,
   parseClassroomOpenSourceArgs,
@@ -192,6 +195,8 @@ const config: ReadAloudConfigMessage & { helpContextMode: string } = {
   // Classroom (13 §18): `classroom=1` answers Prepare and Build with canned
   // messages; `module=1` makes the fixture itself a module preview.
   classroomAvailable: flag('classroom', false),
+  // 13 §12.5 — `classroommarker=0` hides the module markers.
+  classroomMarker: flag('classroommarker', true),
   classroomModule: null,
 };
 
@@ -897,6 +902,121 @@ function startClassroomBuild(
 
 let lastClassroomBuild: ClassroomBuildState | null = null;
 
+// 13 §12.5 — the document's modules, with the anchors the markers hang on.
+const classroomModules = new Map<string, ModuleSummary>();
+const classroomDeleting = new Map<string, number>();
+
+function sizeOf(budget: ReturnType<typeof budgetFor>) {
+  return {
+    chapters: budget.chapters,
+    words: budget.words,
+    minutes: budget.minutes,
+  };
+}
+
+function postClassroomModules(): void {
+  const deleting = Array.from(classroomDeleting.keys());
+  const modules = Array.from(classroomModules.values()).filter(
+    (m) => !deleting.includes(m.id),
+  );
+  postToPlayer({
+    command: 'readAloudClassroomModules',
+    sourceUri: NOTES_SOURCE_URI,
+    modules,
+    deleting,
+    deleteMode: 'trash',
+  });
+  log('classroom', 'modules posted ' + modules.length);
+}
+
+/**
+ * Seed two canned modules once the fixture is in the page: one on the noted
+ * paragraph (so the module marker sits under the note marker) and one on a
+ * block with no note. The anchors are computed from the fixture the way the
+ * webview computes them.
+ */
+function seedClassroomModules(): void {
+  if (!config.classroomAvailable || param('count') === '0') {
+    return;
+  }
+  const core = (window as unknown as { MpeReadAloudCore: any })
+    .MpeReadAloudCore;
+  const target = root();
+  if (!core || !target) {
+    return;
+  }
+  const children = Array.from(target.children);
+  const anchorOn = (el: Element, passage: string) => {
+    const text = core.extractText(el).text as string;
+    const offset = Math.max(0, text.indexOf(passage));
+    return {
+      exact: passage,
+      block: core.blockKey(el, text) as string,
+      line: Number(el.getAttribute('data-source-line') ?? 0) || null,
+      prefix: text.slice(Math.max(0, offset - 64), offset),
+      suffix: text.slice(offset + passage.length, offset + passage.length + 64),
+      offset,
+      blocks: 1,
+    };
+  };
+  const summaryOf = (
+    id: string,
+    title: string,
+    el: Element,
+    passage: string,
+    status: ModuleSummary['status'],
+    done: number,
+  ): ModuleSummary => ({
+    id,
+    title,
+    created: '2026-09-05T17:' + id.slice(11, 13) + ':00Z',
+    status,
+    chapters: 6,
+    done,
+    minutes: Math.round((done * 500) / 150),
+    anchor: anchorOn(el, passage),
+    headings: ['Reading on a screen, without the strain', 'The measure'],
+    passage,
+  });
+  const noted = children.find(
+    (el) =>
+      el.tagName === 'P' &&
+      (el.textContent ?? '').includes('sixty-six is the figure'),
+  );
+  const other = children.find(
+    (el) =>
+      el.tagName === 'P' && (el.textContent ?? '').includes('harness fixture'),
+  );
+  if (noted) {
+    classroomModules.set(
+      '20260905T170000Z-aaaa',
+      summaryOf(
+        '20260905T170000Z-aaaa',
+        'An Earlier Module',
+        noted,
+        'sixty-six is the figure that appears most often',
+        'done',
+        6,
+      ),
+    );
+  }
+  if (other) {
+    classroomModules.set(
+      CLASSROOM_MODULE_ID,
+      summaryOf(
+        CLASSROOM_MODULE_ID,
+        'The Harness Fixture, Explained',
+        other,
+        'This document is the harness fixture for the eye strain revision',
+        param('modulestatus') === 'stopped' ? 'stopped' : 'done',
+        param('modulestatus') === 'stopped' ? 2 : 6,
+      ),
+    );
+  }
+  log('classroom', 'seeded ' + classroomModules.size + ' modules');
+  postClassroomModules();
+}
+
 function handleClassroomMessage(command: string, args: unknown): boolean {
   switch (command) {
     case 'readAloudClassroomPrepare': {
@@ -957,7 +1077,51 @@ function handleClassroomMessage(command: string, args: unknown): boolean {
         building: classroomBuild
           ? classroomProgressOf(classroomBuild, 0)
           : null,
+        // 13 §6.1 — the sizes per shape and level, for the size line.
+        budgets: {
+          passage: {
+            1: sizeOf(budgetFor(1, 'passage')),
+            2: sizeOf(budgetFor(2, 'passage')),
+            3: sizeOf(budgetFor(3, 'passage')),
+          },
+          term: {
+            1: sizeOf(budgetFor(1, 'term')),
+            2: sizeOf(budgetFor(2, 'term')),
+            3: sizeOf(budgetFor(3, 'term')),
+          },
+        },
+        shortTerm: flag('shortterm', true),
       });
+      return true;
+    }
+    case 'readAloudClassroomDelete': {
+      const request = parseClassroomDeleteArgs(args);
+      if (!request || !classroomModules.has(request.moduleId)) {
+        log('dropped readAloudClassroomDelete');
+        return true;
+      }
+      const timer = window.setTimeout(() => {
+        classroomDeleting.delete(request.moduleId);
+        classroomModules.delete(request.moduleId);
+        log('classroom', 'trashed ' + request.moduleId);
+        postClassroomModules();
+      }, 6000);
+      classroomDeleting.set(request.moduleId, timer);
+      log('classroom', 'deleting ' + request.moduleId);
+      postClassroomModules();
+      return true;
+    }
+    case 'readAloudClassroomUndoDelete': {
+      const request = parseClassroomUndoDeleteArgs(args);
+      const timer = request
+        ? classroomDeleting.get(request.moduleId)
+        : undefined;
+      if (request && timer !== undefined) {
+        window.clearTimeout(timer);
+        classroomDeleting.delete(request.moduleId);
+        log('classroom', 'undo delete ' + request.moduleId);
+      }
+      postClassroomModules();
       return true;
     }
     case 'readAloudClassroomBuild': {
@@ -2268,6 +2432,8 @@ function notesChecks(target: HTMLElement | null): Record<string, unknown> {
   config,
   notes: notesStore,
   postNotes,
+  modules: classroomModules,
+  postClassroomModules,
   get scrollIntoViewCalls() {
     return scrollIntoViewCalls;
   },
@@ -2280,9 +2446,11 @@ function notesChecks(target: HTMLElement | null): Record<string, unknown> {
 document.addEventListener('DOMContentLoaded', () => {
   document.body.classList.add(vscodeKind);
   void loadFixture().then(() => {
-    // The player has decorated the fixture by now; the canned notes key on it.
+    // The player has decorated the fixture by now; the canned notes and
+    // modules key on it. Notes first, so a module marker can sit under one.
     window.setTimeout(seedNotes, 100);
     window.setTimeout(seedModule, 150);
+    window.setTimeout(seedClassroomModules, 200);
   });
   void audioMode();
 });

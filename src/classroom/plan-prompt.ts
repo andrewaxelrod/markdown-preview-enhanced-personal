@@ -1,4 +1,4 @@
-import { escapeField } from '../read-aloud/help-prompt';
+import { escapeField, helpShapeFor } from '../read-aloud/help-prompt';
 import type { ClassroomLevel, Persona } from './persona';
 
 /**
@@ -100,6 +100,96 @@ export const LEVELS: Readonly<Record<ClassroomLevel, LevelSpec>> = {
 
 export const DEFAULT_LEVEL: ClassroomLevel = 2;
 
+// ------------------------------------------------------------ passage shape
+
+/** §6.1 — a selection of five words or fewer is a term, as help and notes see it. */
+export type PassageShape = 'passage' | 'term';
+
+export function passageShapeFor(passage: string): PassageShape {
+  return helpShapeFor(passage);
+}
+
+/** §6.1 — the smaller sizes of a term at levels 1 and 2; level 3 is unchanged. */
+export interface TermLevelSpec {
+  chapters: [number, number];
+  conceptWords: number;
+  returnWords: number;
+  words: number;
+  minutes: number;
+}
+
+export const TERM_LEVELS: Readonly<Record<1 | 2, TermLevelSpec>> = {
+  // eslint-disable-next-line @typescript-eslint/naming-convention
+  1: {
+    chapters: [2, 2],
+    conceptWords: 350,
+    returnWords: 400,
+    words: 750,
+    minutes: 5,
+  },
+  // eslint-disable-next-line @typescript-eslint/naming-convention
+  2: {
+    chapters: [4, 4],
+    conceptWords: 350,
+    returnWords: 400,
+    words: 1350,
+    minutes: 9,
+  },
+};
+
+/** §6.1 — everything a build takes from the level and the shape. */
+export interface ChapterBudget {
+  level: ClassroomLevel;
+  shape: PassageShape;
+  chapters: [number, number];
+  targets: Record<ChapterType, number>;
+  ceilings: Record<ChapterType, number>;
+  words: number;
+  minutes: number;
+}
+
+function isTermSized(
+  level: ClassroomLevel,
+  shape: PassageShape,
+): level is 1 | 2 {
+  return shape === 'term' && (level === 1 || level === 2);
+}
+
+/**
+ * §6.1 — the budget for a level and a shape: the persona's override for the
+ * shape when it has one, else the term table at levels 1 and 2, else §6's.
+ */
+export function budgetFor(
+  level: ClassroomLevel,
+  shape: PassageShape = 'passage',
+  persona?: Pick<Persona, 'levels' | 'termLevels'> | null,
+): ChapterBudget {
+  const term = isTermSized(level, shape);
+  const override = term
+    ? persona?.termLevels?.[level]
+    : persona?.levels?.[level];
+  const chapters: [number, number] = override
+    ? [override.chapters[0], override.chapters[1]]
+    : term
+      ? [TERM_LEVELS[level].chapters[0], TERM_LEVELS[level].chapters[1]]
+      : [LEVELS[level].chapters[0], LEVELS[level].chapters[1]];
+  const targets = {} as Record<ChapterType, number>;
+  const ceilings = {} as Record<ChapterType, number>;
+  for (const type of CHAPTER_TYPES) {
+    targets[type] = wordTargetFor(type, level, shape);
+    ceilings[type] = ceilingFor(type, shape);
+  }
+  return {
+    level,
+    shape: term ? 'term' : 'passage',
+    chapters,
+    targets,
+    ceilings,
+    words: term ? TERM_LEVELS[level].words : LEVELS[level].words,
+    minutes: term ? TERM_LEVELS[level].minutes : LEVELS[level].minutes,
+  };
+}
+
 export function isClassroomLevel(value: unknown): value is ClassroomLevel {
   return value === 1 || value === 2 || value === 3;
 }
@@ -116,36 +206,46 @@ export function chapterBudgetFor(
   return [LEVELS[level].chapters[0], LEVELS[level].chapters[1]];
 }
 
-/** §6 — word targets by chapter type; the concept target follows the level. */
+/**
+ * §6 — word targets by chapter type; the concept target follows the level,
+ * and a term at levels 1 and 2 takes the lighter targets of §6.1.
+ */
 export function wordTargetFor(
   type: ChapterType,
   level: ClassroomLevel,
+  shape: PassageShape = 'passage',
 ): number {
+  const term = shape === 'term' && (level === 1 || level === 2);
   switch (type) {
     case 'framing':
       return 250;
     case 'concept':
-      return LEVELS[level].conceptWords;
+      return term
+        ? TERM_LEVELS[level as 1 | 2].conceptWords
+        : LEVELS[level].conceptWords;
     case 'deep-dive':
       return 900;
     case 'return':
     default:
-      return 600;
+      return term ? TERM_LEVELS[level as 1 | 2].returnWords : 600;
   }
 }
 
-/** §6 — the ceilings the checks enforce (§9.5). */
-export function ceilingFor(type: ChapterType): number {
+/** §6 — the ceilings the checks enforce (§9.5); a term's concept and return are lower (§6.1). */
+export function ceilingFor(
+  type: ChapterType,
+  shape: PassageShape = 'passage',
+): number {
   switch (type) {
     case 'framing':
       return 350;
     case 'concept':
-      return 700;
+      return shape === 'term' ? 500 : 700;
     case 'deep-dive':
       return 1400;
     case 'return':
     default:
-      return 900;
+      return shape === 'term' ? 600 : 900;
   }
 }
 
@@ -219,6 +319,8 @@ export interface PlanRequestInput {
   readerNote: string;
   /** The chapter budget, `[min, max]`, already resolved for the persona. */
   budget: [number, number];
+  /** §6.1 — a term takes the lighter word targets and a sentence of its own. */
+  shape?: PassageShape;
 }
 
 /** The plan skeleton the request asks for and `serializePlan` writes. */
@@ -250,11 +352,20 @@ and selected this passage because they did not understand it:`,
     `How lost the reader says they are: level ${input.level} of 3, "${level.row}".` +
       (note ? ` In their own words: "${escapeField(note)}"` : ''),
   );
-  const shape: string[] = [
+  const passageShape: PassageShape = input.shape ?? 'passage';
+  const term =
+    passageShape === 'term' && (input.level === 1 || input.level === 2);
+  const shape: string[] = [];
+  if (term) {
+    shape.push(
+      'The passage is a single term of a few words, not an argument. Build only what the term needs to be understood where it stands; keep to the smaller budget below.',
+    );
+  }
+  shape.push(
     `Plan a module of ${min} to ${max} chapters that teaches this reader every concept the passage
 depends on, in dependency order, so that when the module ends they can read the passage
 again and follow it.`,
-  ];
+  );
   if (input.level === 1) {
     shape.push(
       'The first chapter is a concept chapter whose pickup carries the framing; there is no separate introduction.',
@@ -270,7 +381,7 @@ again and follow it.`,
     );
   }
   shape.push(
-    `The last chapter returns to the passage and walks it sentence by sentence. Every other chapter answers exactly one question. Word targets: framing ${wordTargetFor('framing', input.level)}, concept ${wordTargetFor('concept', input.level)}, deep-dive ${wordTargetFor('deep-dive', input.level)}, return ${wordTargetFor('return', input.level)}.`,
+    `The last chapter returns to the passage and walks it sentence by sentence. Every other chapter answers exactly one question. Word targets: framing ${wordTargetFor('framing', input.level, passageShape)}, concept ${wordTargetFor('concept', input.level, passageShape)}, deep-dive ${wordTargetFor('deep-dive', input.level, passageShape)}, return ${wordTargetFor('return', input.level, passageShape)}.`,
   );
   lines.push(shape.join(' '));
   lines.push(`Return only this skeleton, nothing else:\n\n${PLAN_SKELETON}`);

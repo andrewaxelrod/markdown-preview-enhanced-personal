@@ -314,4 +314,123 @@ suite('classroom/module-store', function () {
       ],
     );
   });
+  // ------------------------------------------------ §11.3–§11.4 watch, delete
+
+  function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  function fakeWatch() {
+    const watchers = [];
+    const watch = (dir, listener) => {
+      const entry = { dir, listener, closed: false };
+      watchers.push(entry);
+      return {
+        close() {
+          entry.closed = true;
+        },
+      };
+    };
+    return { watch, watchers };
+  }
+
+  test('softDelete leaves the file for the window, then trashes it through the callback; undo keeps it', async function () {
+    const trashed = [];
+    const s = new store.ModuleStore({
+      root,
+      log: () => {},
+      trash: async (filePath) => {
+        trashed.push(filePath);
+        fs.renameSync(filePath, filePath + '.trashed');
+        return true;
+      },
+    });
+    const a = await s.create(KEY, moduleOf('20260905T173010Z-0001'));
+    const b = await s.create(KEY, moduleOf('20260905T173011Z-0002'));
+    const done = s.softDelete(KEY, a.id, 40);
+    assert.strictEqual(s.isDeleting(a.id), true);
+    assert.deepStrictEqual(s.deletingIds(), [a.id]);
+    assert.ok(fs.existsSync(a.filePath), 'still there for Undo');
+    assert.strictEqual(await done, 'trash');
+    assert.deepStrictEqual(trashed, [a.filePath]);
+    assert.ok(!fs.existsSync(a.filePath));
+    assert.strictEqual(s.isDeleting(a.id), false);
+    const undo = s.softDelete(KEY, b.id, 200);
+    assert.strictEqual(s.undoDelete(b.id), true);
+    assert.strictEqual(await undo, 'undone');
+    await sleep(250);
+    assert.ok(fs.existsSync(b.filePath));
+    assert.strictEqual(trashed.length, 1);
+    assert.strictEqual(s.undoDelete(b.id), false);
+  });
+
+  test('no trash callback, or a refused one, deletes permanently; deleteNow skips the window', async function () {
+    const logs = [];
+    const s = new store.ModuleStore({
+      root,
+      log: (line) => logs.push(line),
+      trash: async () => {
+        throw new Error('EPERM: no trash here');
+      },
+    });
+    const a = await s.create(KEY, moduleOf('20260905T173010Z-0001'));
+    assert.strictEqual(await s.softDelete(KEY, a.id, 10), 'permanent');
+    assert.ok(!fs.existsSync(a.filePath));
+    assert.ok(logs.some((line) => line.includes('trash refused')));
+    const bare = new store.ModuleStore({ root, log: () => {} });
+    const b = await bare.create(KEY, moduleOf('20260905T173011Z-0002'));
+    assert.strictEqual(await bare.deleteNow(KEY, b.id), 'permanent');
+    assert.ok(!fs.existsSync(b.filePath));
+    assert.strictEqual(await bare.deleteNow(KEY, b.id), 'missing');
+  });
+
+  test("the watcher debounces external changes and ignores the store's own writes and deletes", async function () {
+    const fake = fakeWatch();
+    const s = new store.ModuleStore({
+      root,
+      log: () => {},
+      watch: fake.watch,
+      trash: async (filePath) => {
+        fs.rmSync(filePath);
+        return true;
+      },
+    });
+    const changes = [];
+    const handle = s.watch(KEY, () => changes.push(1));
+    assert.strictEqual(fake.watchers.length, 0, 'nothing to watch yet');
+    const a = await s.create(KEY, moduleOf('20260905T173010Z-0001'));
+    assert.strictEqual(fake.watchers.length, 1, 'attached on the first write');
+    assert.strictEqual(fake.watchers[0].dir, s.documentDir(KEY));
+    await s.update(KEY, a.id, (m) => ({ ...m, status: 'done' }));
+    fake.watchers[0].listener('change', path.basename(a.filePath));
+    await sleep(store.WATCH_DEBOUNCE_MS + 50);
+    assert.strictEqual(changes.length, 0, 'own write not reported');
+    fake.watchers[0].listener('change', '20260905T180000Z-aaaa-other.md');
+    fake.watchers[0].listener('rename', '20260905T180000Z-aaaa-other.md');
+    fake.watchers[0].listener('change', '20260905T180000Z-bbbb.md');
+    await sleep(store.WATCH_DEBOUNCE_MS / 2);
+    assert.strictEqual(changes.length, 0, 'inside the debounce');
+    await sleep(store.WATCH_DEBOUNCE_MS);
+    assert.strictEqual(changes.length, 1, 'one callback for three events');
+    await s.softDelete(KEY, a.id, 10);
+    fake.watchers[0].listener('rename', path.basename(a.filePath));
+    await sleep(store.WATCH_DEBOUNCE_MS + 50);
+    assert.strictEqual(changes.length, 1, 'the delete is our own');
+    handle.dispose();
+    assert.strictEqual(fake.watchers[0].closed, true);
+    const refusing = new store.ModuleStore({
+      root,
+      log: (line) => changes.push(line),
+      watch: () => {
+        throw new Error('ENOSPC');
+      },
+    });
+    fs.mkdirSync(refusing.documentDir(KEY), { recursive: true });
+    refusing.watch(KEY, () => {}).dispose();
+    assert.ok(
+      changes.some(
+        (c) => typeof c === 'string' && c.startsWith('classroom: watch failed'),
+      ),
+    );
+  });
 });

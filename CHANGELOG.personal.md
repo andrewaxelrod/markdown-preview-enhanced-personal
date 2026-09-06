@@ -471,10 +471,27 @@ off` mid-read dropped the page, its properties and every tier class and kept the
   effort are the help settings. Desktop only. Classroom sends the whole document and the
   ticked linked files to the engine, on Build only, and copies document text outside the
   repository; both are said in the settings' descriptions.
+  - **A small item gets a small module** (13 §6.1, D22): a selection of five words or fewer
+    is a term, by the predicate Help and Notes use, and takes two chapters at the first lever
+    row and four at the second, with concept and return chapters of 350 and 400 words; the
+    third row is unchanged. A size line under the lever says what the checked row buys
+    (_2 chapters · about 5 minutes_) before Build. `classroomShortTermModules` restores the
+    full budgets; a persona may set `termLevels`.
+  - **Modules in the margin, deletable** (13 §12.5, §11.4, D23–D24): every module is kept
+    against its passage like a note and shows as a mortarboard marker in the right margin of
+    its block, re-anchored on every render with the notes' anchoring, stacked under a note
+    marker when both are there, with a count badge for several and a `3/6` badge while a
+    build runs; a click opens the module, or the Classroom sheet with that block's rows first.
+    Modules can be deleted from the sheet's rows, the Module sheet and _Delete Classroom
+    Module_: a running build is cancelled, six seconds of _Module moved to Trash · Undo_, then
+    the file goes to the OS trash. The module store gains the notes store's watcher and soft
+    delete; `classroomMarker` turns the markers off.
   - Messages: webview → host `readAloudClassroomPrepare`, `readAloudClassroomBuild`,
     `readAloudClassroomCancel`, `readAloudClassroomContinue`, `readAloudClassroomOpen`,
-    `readAloudClassroomOpenSource`, `readAloudClassroomOpenFolder`; host → webview
-    `readAloudClassroomPrepared`, `readAloudClassroomProgress`, `readAloudClassroomError`,
+    `readAloudClassroomOpenSource`, `readAloudClassroomOpenFolder`,
+    `readAloudClassroomDelete`, `readAloudClassroomUndoDelete`; host → webview
+    `readAloudClassroomPrepared` (with the budgets per shape), `readAloudClassroomProgress`,
+    `readAloudClassroomError`, `readAloudClassroomModules`,
     `readAloudControl` actions `classroom`, `classroomModule`, `revealAnchor`;
     `readAloudConfig` carries `classroomAvailable` and, in a module preview,
     `classroomModule`. Every payload is validated in `messages.ts` first.

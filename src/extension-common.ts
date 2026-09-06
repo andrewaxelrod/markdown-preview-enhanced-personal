@@ -18,6 +18,8 @@ import {
   parseClassroomBuildArgs,
   parseClassroomCancelArgs,
   parseClassroomContinueArgs,
+  parseClassroomDeleteArgs,
+  parseClassroomUndoDeleteArgs,
   parseClassroomOpenArgs,
   parseClassroomOpenFolderArgs,
   parseClassroomOpenSourceArgs,
@@ -228,6 +230,17 @@ export async function initExtensionCommon(context: vscode.ExtensionContext) {
     refreshPreview: async (uri) => {
       const previewProvider = await getPreviewContentProvider(uri);
       previewProvider.updateMarkdown(uri);
+    },
+    // 13 §11.4 — a deleted module's own preview has nothing left to show.
+    closePreview: async (uri) => {
+      for (const provider of getAllPreviewProviders()) {
+        const panels = provider.getPreviews(uri);
+        if (panels) {
+          for (const panel of panels) {
+            panel.dispose();
+          }
+        }
+      }
     },
     isSinglePreviewMode: () => getPreviewMode() === PreviewMode.SinglePreview,
     resolveWikilink: (sourceUri, target) =>
@@ -2409,6 +2422,34 @@ export async function initExtensionCommon(context: vscode.ExtensionContext) {
       'markdown-preview-enhanced.classroom.cancel',
       async () => {
         await classroom.cancelCommand();
+      },
+    ),
+    vscode.commands.registerCommand(
+      'markdown-preview-enhanced.classroom.delete',
+      async () => {
+        await classroom.deleteCommand(activeModuleUri());
+      },
+    ),
+    vscode.commands.registerCommand(
+      '_crossnote.readAloudClassroomDelete',
+      async (...args: unknown[]) => {
+        const request = parseClassroomDeleteArgs(args);
+        if (!request) {
+          readAloudLog('dropped invalid readAloudClassroomDelete message');
+          return;
+        }
+        await classroom.delete(request);
+      },
+    ),
+    vscode.commands.registerCommand(
+      '_crossnote.readAloudClassroomUndoDelete',
+      async (...args: unknown[]) => {
+        const request = parseClassroomUndoDeleteArgs(args);
+        if (!request) {
+          readAloudLog('dropped invalid readAloudClassroomUndoDelete message');
+          return;
+        }
+        await classroom.undoDelete(request);
       },
     ),
     vscode.commands.registerCommand(

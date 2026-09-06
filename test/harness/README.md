@@ -20,31 +20,33 @@ earlier session once answered on another port — and after a CSS edit re-set ea
 
 ## Query parameters
 
-| Parameter        | Values                               | Seeds                                                                                                       |
-| ---------------- | ------------------------------------ | ----------------------------------------------------------------------------------------------------------- |
-| `theme`          | `light` `dark` `auto` `off`          | `readAloudGlobalTheme`                                                                                      |
-| `size`           | `16`–`28`                            | `readAloudTextSize`                                                                                         |
-| `marker`         | `underline` `box` `off`              | `readAloudWordMarker`                                                                                       |
-| `dim`            | `0` `1`                              | `readAloudDimWhileReading`                                                                                  |
-| `autohide`       | `0` `1`                              | `readAloudPanelAutoHide`                                                                                    |
-| `font`           | a player font id                     | `readAloudFont`                                                                                             |
-| `palette`        | `blue` `pink` `red` `green` `orange` | `readAloudHighlightTheme`                                                                                   |
-| `speed`          | `0.25`–`4`                           | `readAloudSpeed`                                                                                            |
-| `vscode`         | `light` `dark`                       | the body class `auto` follows                                                                               |
-| `audio`          | `kokoro` `silent`                    | Kokoro over CORS, or a silent WAV of 0.32 s per word                                                        |
-| `kokoro`         | a base URL                           | the server (`http://127.0.0.1:8880` by default)                                                             |
-| `help`           | `0` `1`                              | `helpAvailable`: the panel's `?` and the affordance's _Explain_                                             |
-| `helpdelay`      | ms                                   | how long _Thinking…_ shows before the canned answer (default 400)                                           |
-| `notes`          | `0` `1`                              | `notesAvailable`: the cluster's _Note_, the markers, the Notes button and both sheets (12 §18)              |
-| `notesdelay`     | ms                                   | how long the pending sheet shows before the canned note fills in (default 1500)                             |
-| `count`          | `0`                                  | with `notes=1`, seed no canned notes                                                                        |
-| `decoration`     | `marker-and-mark` `marker` `none`    | `notesDecoration`                                                                                           |
-| `generate`       | `0` `1`                              | `notesGenerate`: off saves the capture and writes no sections                                               |
-| `classroom`      | `0` `1`                              | `classroomAvailable`: the cluster's _Classroom_, the Classroom sheet, canned Prepare and Build (13 §18)     |
-| `classroomdelay` | ms                                   | how long each canned build step takes (default 800)                                                         |
-| `classroomfail`  | a chapter number                     | with `classroom=1`, that chapter fails with a canned reason; Continue resumes there                         |
-| `module`         | `0` `1`                              | the fixture is a module preview: a canned `classroomModule` in the config, the bar button, the Module sheet |
-| `modulestatus`   | `writing` `done` `stopped` `failed`  | with `module=1`, the module's state (default `writing`)                                                     |
+| Parameter         | Values                               | Seeds                                                                                                       |
+| ----------------- | ------------------------------------ | ----------------------------------------------------------------------------------------------------------- |
+| `theme`           | `light` `dark` `auto` `off`          | `readAloudGlobalTheme`                                                                                      |
+| `size`            | `16`–`28`                            | `readAloudTextSize`                                                                                         |
+| `marker`          | `underline` `box` `off`              | `readAloudWordMarker`                                                                                       |
+| `dim`             | `0` `1`                              | `readAloudDimWhileReading`                                                                                  |
+| `autohide`        | `0` `1`                              | `readAloudPanelAutoHide`                                                                                    |
+| `font`            | a player font id                     | `readAloudFont`                                                                                             |
+| `palette`         | `blue` `pink` `red` `green` `orange` | `readAloudHighlightTheme`                                                                                   |
+| `speed`           | `0.25`–`4`                           | `readAloudSpeed`                                                                                            |
+| `vscode`          | `light` `dark`                       | the body class `auto` follows                                                                               |
+| `audio`           | `kokoro` `silent`                    | Kokoro over CORS, or a silent WAV of 0.32 s per word                                                        |
+| `kokoro`          | a base URL                           | the server (`http://127.0.0.1:8880` by default)                                                             |
+| `help`            | `0` `1`                              | `helpAvailable`: the panel's `?` and the affordance's _Explain_                                             |
+| `helpdelay`       | ms                                   | how long _Thinking…_ shows before the canned answer (default 400)                                           |
+| `notes`           | `0` `1`                              | `notesAvailable`: the cluster's _Note_, the markers, the Notes button and both sheets (12 §18)              |
+| `notesdelay`      | ms                                   | how long the pending sheet shows before the canned note fills in (default 1500)                             |
+| `count`           | `0`                                  | with `notes=1`, seed no canned notes                                                                        |
+| `decoration`      | `marker-and-mark` `marker` `none`    | `notesDecoration`                                                                                           |
+| `generate`        | `0` `1`                              | `notesGenerate`: off saves the capture and writes no sections                                               |
+| `classroommarker` | `0` `1`                              | `classroomMarker`: the module markers in the margin (13 §12.5)                                              |
+| `shortterm`       | `0` `1`                              | `classroomShortTermModules`: the smaller budgets for a term (13 §6.1)                                       |
+| `classroom`       | `0` `1`                              | `classroomAvailable`: the cluster's _Classroom_, the Classroom sheet, canned Prepare and Build (13 §18)     |
+| `classroomdelay`  | ms                                   | how long each canned build step takes (default 800)                                                         |
+| `classroomfail`   | a chapter number                     | with `classroom=1`, that chapter fails with a canned reason; Continue resumes there                         |
+| `module`          | `0` `1`                              | the fixture is a module preview: a canned `classroomModule` in the config, the bar button, the Module sheet |
+| `modulestatus`    | `writing` `done` `stopped` `failed`  | with `module=1`, the module's state (default `writing`)                                                     |
 
 With no `audio` parameter the shim probes `GET /health` for a second and falls back to the
 silent stand-in: the visual behaviours need timing, not speech.
@@ -104,6 +106,12 @@ document re-render is picked up by a `MutationObserver` and decorated on the nex
 frame, and Chromium never delivers a frame to a hidden tab. A synchronous pass — every
 `readAloudNotes`, which `window.mpeHarness.postNotes()` triggers — runs regardless, so the
 anchoring itself can be checked in a background tab; the frame-scheduled redraw cannot.
+
+With `classroom=1` the shim also seeds **two canned modules** (13 §12.5): one on the noted
+paragraph, so its mortarboard marker sits 1.6em under the note marker, and one on a paragraph
+with no note; `readAloudClassroomDelete` starts a six-second window and `UndoDelete` cancels
+it, both echoed as `readAloudClassroomModules`. `Prepared` carries the §6.1 budgets per shape
+and level, so the size line under the lever can be read at every row.
 
 `fixture.html` is a rendered document of about sixty blocks in crossnote's markup; `index.html`
 is the webview's skeleton with the head in the order `preview-provider.ts` injects it. Nothing

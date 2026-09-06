@@ -393,6 +393,8 @@ of the chapter budgets, then the persona's own notes as the body) and an optiona
 Max, which is how the built-in guide is edited without a rebuild. `classroomPersona` names the
 instructor in force and `classroomAudience` the audience line; the sheet writes both.
 
+A five-word selection gets a **small module** (two chapters at the first lever row, four at the second); the size line under the lever says what a row buys, and `markdown-preview-enhanced.classroomShortTermModules` restores the full budgets. Every module shows as a **mortarboard marker** in the right margin of the paragraph it was built from, under a note marker when both are there; a click opens it, and the marker, the sheet's rows, the Module sheet and _Delete Classroom Module_ can **delete** it, with six seconds of Undo before the file goes to the OS trash (`classroomMarker` hides the markers).
+
 ### What exactly is sent
 
 The text comes from the rendered preview, so markdown syntax is already gone, and before the

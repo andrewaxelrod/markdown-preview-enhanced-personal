@@ -143,6 +143,10 @@
     { level: 3, row: 'Lost: half of these terms mean nothing to me' },
   ];
   var CLASSROOM_DEFAULT_LEVEL = 2;
+  // 13 §12.5, §11.4 — the module marker and the delete chip.
+  var CLASSROOM_MARKER_BELOW_NOTE = '1.6em';
+  var CLASSROOM_DELETE_TRASH_CHIP = 'Module moved to Trash';
+  var CLASSROOM_DELETE_PERMANENT_CHIP = 'Module deleted';
   var NOTE_MARKER_LINE_TAGS = {
     LI: true,
     TR: true,
@@ -319,6 +323,7 @@
     // Classroom (13 §14.3): the cluster button and the sheets; and, in a
     // module's own preview, what the module is.
     classroomAvailable: false,
+    classroomMarker: true,
     classroomModule: null,
   };
   try {
@@ -538,6 +543,20 @@
     moduleOpener: null,
     moduleProgress: null,
     flashTimer: 0,
+    // 13 §12.5 — the document's modules as the host last posted them, the
+    // result of the last anchoring pass per module, the markers by block.
+    modules: {
+      list: [],
+      byId: Object.create(null),
+      results: Object.create(null),
+      markers: new Map(),
+      markerResults: new Map(),
+      anyFound: false,
+      deleting: [],
+      deleteMode: 'trash',
+    },
+    // The block a marker click opened the sheet for: its modules come first.
+    markerBlockIds: null,
   };
   var pendingClick = null;
   var mediaPool = null;
@@ -4164,6 +4183,7 @@
       marked[j].classList.remove('mpe-ra-block');
     }
     clearNoteDecorations();
+    clearModuleMarkers();
     removeThemeAttributes();
     if (root) {
       root.classList.remove(CLICK_CLASS);
@@ -6205,36 +6225,55 @@
     if (anchorPassBusy || !root) {
       return;
     }
-    if (!config.enabled || !config.notesAvailable) {
-      clearNoteDecorations();
-      return;
-    }
     anchorPassBusy = true;
     try {
-      var started =
-        typeof performance !== 'undefined' && performance.now
-          ? performance.now()
-          : Date.now();
-      var results = notes.list.length ? core.anchorNotes(root, notes.list) : [];
-      notes.results = Object.create(null);
-      for (var i = 0; i < results.length; i++) {
-        notes.results[results[i].noteId] = results[i];
+      if (!config.enabled || !config.notesAvailable) {
+        clearNoteDecorations();
+      } else {
+        var started =
+          typeof performance !== 'undefined' && performance.now
+            ? performance.now()
+            : Date.now();
+        var results = notes.list.length
+          ? core.anchorNotes(root, notes.list)
+          : [];
+        notes.results = Object.create(null);
+        for (var i = 0; i < results.length; i++) {
+          notes.results[results[i].noteId] = results[i];
+        }
+        mutateSilently(function () {
+          drawMarkers(results);
+        });
+        syncNoteHighlight();
+        notes.lastPassMs =
+          (typeof performance !== 'undefined' && performance.now
+            ? performance.now()
+            : Date.now()) - started;
+        // For the harness's `checks()` (12 §18 C9); harmless anywhere else.
+        window.mpeReadAloudNotesPassMs = notes.lastPassMs;
+        reportAnchors(results);
       }
-      mutateSilently(function () {
-        drawMarkers(results);
-      });
-      syncNoteHighlight();
-      notes.lastPassMs =
-        (typeof performance !== 'undefined' && performance.now
-          ? performance.now()
-          : Date.now()) - started;
-      // For the harness's `checks()` (12 §18 C9); harmless anywhere else.
-      window.mpeReadAloudNotesPassMs = notes.lastPassMs;
-      reportAnchors(results);
+      // The module markers ride the same pass (13 §12.5), after the notes'
+      // so a module marker can sit under a note marker on the same block.
+      moduleMarkersPass();
     } catch (error) {
       /* an anchoring failure must never break the preview */
     }
     anchorPassBusy = false;
+  }
+
+  /** The gutter is on while a note or a module marker is anchored (13 §12.5). */
+  function gutterWanted() {
+    return (
+      (notes.anyFound && config.notesDecoration !== 'none') ||
+      classroom.modules.anyFound
+    );
+  }
+
+  function syncGutter() {
+    if (root) {
+      root.classList.toggle('mpe-ra-notes-gutter', gutterWanted());
+    }
   }
 
   /** §10.1 — one marker per noted block, in the right margin. */
@@ -6342,9 +6381,7 @@
       notes.markerResults.set(el, first);
       positionMarker(marker, first);
     });
-    if (root) {
-      root.classList.toggle('mpe-ra-notes-gutter', show && anyFound);
-    }
+    syncGutter();
   }
 
   /** The innermost block the passage starts in: the item, the row, the p. */
@@ -6451,9 +6488,7 @@
     notes.markers.clear();
     notes.markerResults.clear();
     notes.anyFound = false;
-    if (root) {
-      root.classList.remove('mpe-ra-notes-gutter');
-    }
+    syncGutter();
     if (highlightSupported()) {
       try {
         window.CSS.highlights.delete(NOTE_HIGHLIGHT_NAME);
@@ -6647,15 +6682,18 @@
   }
 
   /** A chip above the bar for `ms`; with `undoId` it carries Undo (§7.7). */
-  function showNoteChip(text, ms, undoId) {
+  function showNoteChip(text, ms, undoId, kind) {
     ensureBar();
     var chip = barParts.noteChip;
     chip.text.textContent = text;
     chip.undo.hidden = !undoId;
     if (undoId) {
       chip.undo.setAttribute('data-mpe-ra-note', undoId);
+      // 13 §11.4 — the same chip undoes a module's delete.
+      chip.undo.setAttribute('data-mpe-ra-kind', kind || 'note');
     } else {
       chip.undo.removeAttribute('data-mpe-ra-note');
+      chip.undo.removeAttribute('data-mpe-ra-kind');
     }
     notes.chipNoteId = undoId || null;
     chip.root.hidden = false;
@@ -7612,7 +7650,12 @@
       return true;
     }
     if (action === 'noteUndo') {
-      undoDelete(element ? element.getAttribute('data-mpe-ra-note') : null);
+      var undoId = element ? element.getAttribute('data-mpe-ra-note') : null;
+      if (element && element.getAttribute('data-mpe-ra-kind') === 'module') {
+        undoModuleDelete(undoId);
+      } else {
+        undoDelete(undoId);
+      }
       return true;
     }
     if (action === 'noteRegenerate') {
@@ -7874,6 +7917,9 @@
     if (typeof message.classroomAvailable === 'boolean') {
       config.classroomAvailable = message.classroomAvailable;
     }
+    if (typeof message.classroomMarker === 'boolean') {
+      config.classroomMarker = message.classroomMarker;
+    }
     // A broadcast leaves the field out; a module preview's own config carries
     // an object, or null for any other document.
     if (message.classroomModule === null) {
@@ -8059,7 +8105,14 @@
     modules.appendChild(modulesTitle);
     modules.appendChild(moduleRows);
 
+    // 13 §6.1 — the size line: what the checked row buys for this passage.
+    var size = document.createElement('p');
+    size.className = 'mpe-ra-classroom-size';
+    size.setAttribute('role', 'status');
+    size.hidden = true;
+
     form.appendChild(lever);
+    form.appendChild(size);
     form.appendChild(
       makeField('In your own words', note, 'mpe-ra-classroom-note-field'),
     );
@@ -8152,6 +8205,7 @@
       form: form,
       lever: lever,
       rows: rows,
+      size: size,
       note: note,
       persona: persona,
       audience: audience,
@@ -8238,10 +8292,17 @@
       'Open module folder',
       'mpe-ra-help-action mpe-ra-module-folder',
     );
+    // 13 §11.4 — no dialog: the chip's Undo is the safety.
+    var remove = makeHelpButton(
+      'moduleDelete',
+      'Delete module',
+      'mpe-ra-help-action mpe-ra-module-delete',
+    );
     footer.appendChild(cont);
     footer.appendChild(cancel);
     footer.appendChild(source);
     footer.appendChild(folder);
+    footer.appendChild(remove);
 
     sheet.appendChild(head);
     sheet.appendChild(from);
@@ -8261,6 +8322,7 @@
       cancel: cancel,
       source: source,
       folder: folder,
+      remove: remove,
     };
   }
 
@@ -8586,13 +8648,25 @@
       }
     }
 
-    // Modules for this document.
-    var modules =
-      prepared && Array.isArray(prepared.modules) ? prepared.modules : [];
+    // 13 §6.1 — the size line under the lever.
+    renderClassroomSize(sheet);
+
+    // Modules for this document: the host's live list when it has posted one
+    // (13 §12.5), else what Prepared carried; a marker's block first.
+    var modules = classroomModuleRows();
     sheet.modules.hidden = modules.length === 0;
     var modulesKey = modules
       .map(function (m) {
-        return m.id + ':' + m.status + ':' + m.done;
+        var result = classroom.modules.results[m.id];
+        return (
+          m.id +
+          ':' +
+          m.status +
+          ':' +
+          m.done +
+          ':' +
+          (result ? (result.found ? 'a' : 'o') : '?')
+        );
       })
       .join('|');
     if (sheet.moduleRows.getAttribute('data-key') !== modulesKey) {
@@ -8602,6 +8676,7 @@
         var row = document.createElement('div');
         row.className = 'mpe-ra-classroom-module-row';
         row.setAttribute('role', 'listitem');
+        row.setAttribute('data-mpe-ra-module', summary.id);
         var titleText = document.createElement('span');
         titleText.className = 'mpe-ra-classroom-module-title';
         titleText.textContent = summary.title || 'Module';
@@ -8619,20 +8694,93 @@
         var badge = document.createElement('span');
         badge.className = 'mpe-ra-notes-badge mpe-ra-classroom-status';
         badge.textContent = summary.status;
+        row.appendChild(titleText);
+        row.appendChild(meta);
+        row.appendChild(badge);
+        var result = classroom.modules.results[summary.id];
+        if (result && !result.found) {
+          var orphan = document.createElement('span');
+          orphan.className = 'mpe-ra-notes-badge mpe-ra-classroom-orphan';
+          orphan.textContent = 'Not in this version';
+          row.appendChild(orphan);
+        }
         var openButton = makeHelpButton(
           'classroomOpenModule',
           'Open',
           'mpe-ra-help-action mpe-ra-classroom-open-module',
         );
         openButton.setAttribute('data-mpe-ra-module', summary.id);
-        row.appendChild(titleText);
-        row.appendChild(meta);
-        row.appendChild(badge);
+        var deleteButton = makeHelpButton(
+          'classroomDeleteModule',
+          'Delete',
+          'mpe-ra-help-action mpe-ra-classroom-delete-module',
+        );
+        deleteButton.setAttribute('data-mpe-ra-module', summary.id);
         row.appendChild(openButton);
+        row.appendChild(deleteButton);
         sheet.moduleRows.appendChild(row);
       }
       sheet.moduleRows.setAttribute('data-key', modulesKey);
     }
+  }
+
+  /** The sheet's module rows: the live list, else Prepared's; a marker's block first. */
+  function classroomModuleRows() {
+    var prepared = classroom.prepared;
+    var source = classroom.modules.list.length
+      ? classroom.modules.list
+      : prepared && Array.isArray(prepared.modules)
+        ? prepared.modules
+        : [];
+    var deleting = classroom.modules.deleting;
+    var rows = [];
+    for (var i = 0; i < source.length; i++) {
+      if (source[i] && deleting.indexOf(source[i].id) < 0) {
+        rows.push(source[i]);
+      }
+    }
+    var first = classroom.markerBlockIds;
+    if (first && first.length) {
+      rows.sort(function (a, b) {
+        var ia = first.indexOf(a.id) < 0 ? 1 : 0;
+        var ib = first.indexOf(b.id) < 0 ? 1 : 0;
+        return ia - ib;
+      });
+    }
+    return rows;
+  }
+
+  /** 13 §6.1 — the passage's shape as the sheet sees it: a term or a passage. */
+  function classroomShape() {
+    var prepared = classroom.prepared;
+    if (prepared && prepared.shortTerm === false) {
+      return 'passage';
+    }
+    var text = classroom.passage ? String(classroom.passage.text || '') : '';
+    var words = text.trim().split(/\s+/).filter(Boolean).length;
+    return words > 0 && words <= core.HELP_TERM_MAX_WORDS ? 'term' : 'passage';
+  }
+
+  /** 13 §6.1 — _5 or 6 chapters · about 20 minutes_, from the row and the shape. */
+  function renderClassroomSize(sheet) {
+    var prepared = classroom.prepared;
+    var budgets = prepared && prepared.budgets ? prepared.budgets : null;
+    var shape = classroomShape();
+    var budget =
+      budgets && budgets[shape] ? budgets[shape][classroom.level] : null;
+    if (!budget || !Array.isArray(budget.chapters)) {
+      sheet.size.hidden = true;
+      return;
+    }
+    var min = budget.chapters[0];
+    var max = budget.chapters[1];
+    var chapters =
+      min === max
+        ? min + ' chapter' + (min === 1 ? '' : 's')
+        : min + ' or ' + max + ' chapters';
+    sheet.size.textContent =
+      chapters + ' · about ' + budget.minutes + ' minutes';
+    sheet.size.hidden = false;
   }
 
   function renderClassroomCard(sheet) {
@@ -8889,6 +9037,7 @@
     classroom.unticked = Object.create(null);
     classroom.message = '';
     classroom.opener = opener || null;
+    classroom.markerBlockIds = null;
     classroom.requestId = nextRequestId();
     barParts.classroom.root.hidden = false;
     barParts.classroom.persona.removeAttribute('data-key');
@@ -8935,6 +9084,8 @@
     if (barParts && barParts.classroom) {
       barParts.classroom.root.hidden = true;
     }
+    classroom.markerBlockIds = null;
+    syncModuleMarkerStates();
     syncHelpButton();
     armPanelIdle();
     if (reason !== 'help' && reason !== 'note' && reason !== 'notes list') {
@@ -9182,6 +9333,12 @@
       linked: Array.isArray(message.linked) ? message.linked : [],
       modules: Array.isArray(message.modules) ? message.modules : [],
       engine: message.engine || null,
+      // 13 §6.1 — the sizes per shape and level, for the size line.
+      budgets:
+        message.budgets && typeof message.budgets === 'object'
+          ? message.budgets
+          : null,
+      shortTerm: message.shortTerm !== false,
     };
     if (!classroom.personaId && message.persona && message.persona.id) {
       classroom.personaId = message.persona.id;
@@ -9214,6 +9371,7 @@
       sourceUri &&
       message.documentUri === sourceUri;
     if (mine) {
+      noteModuleProgress(message);
       var tracking =
         classroom.moduleId === message.moduleId ||
         (classroom.state === 'building' && classroom.moduleId === null);
@@ -9456,7 +9614,432 @@
       post('readAloudClassroomOpenFolder', [sourceUri]);
       return true;
     }
+    // 13 §12.5 — the marker: one module opens, several open the sheet.
+    if (action === 'classroomMarker') {
+      var block = element ? element.parentElement : null;
+      var ids = moduleIdsOnBlock(block);
+      if (ids.length === 1) {
+        post('readAloudClassroomOpen', [sourceUri, ids[0]]);
+      } else if (ids.length > 1) {
+        openClassroomForBlock(block, ids, element);
+      }
+      return true;
+    }
+    // 13 §11.4 — Delete from a sheet row or the Module sheet.
+    if (action === 'classroomDeleteModule') {
+      deleteModule(element ? element.getAttribute('data-mpe-ra-module') : null);
+      return true;
+    }
+    if (action === 'moduleDelete') {
+      if (config.classroomModule) {
+        deleteModule(config.classroomModule.id);
+      }
+      return true;
+    }
     return false;
+  }
+
+  // ------------------------------------------------- the module marker
+
+  /** 13 §12.5 — the host's list of this document's modules. */
+  function onClassroomModules(message) {
+    if (
+      typeof message.sourceUri === 'string' &&
+      sourceUri &&
+      message.sourceUri !== sourceUri
+    ) {
+      return;
+    }
+    var previousDeleting = classroom.modules.deleting.slice();
+    var list = Array.isArray(message.modules) ? message.modules : [];
+    classroom.modules.list = [];
+    classroom.modules.byId = Object.create(null);
+    for (var i = 0; i < list.length; i++) {
+      var summary = list[i];
+      if (
+        !summary ||
+        typeof summary !== 'object' ||
+        typeof summary.id !== 'string' ||
+        !summary.anchor ||
+        typeof summary.anchor !== 'object'
+      ) {
+        continue;
+      }
+      if (!Array.isArray(summary.headings)) {
+        summary.headings = [];
+      }
+      classroom.modules.list.push(summary);
+      classroom.modules.byId[summary.id] = summary;
+    }
+    classroom.modules.deleting = Array.isArray(message.deleting)
+      ? message.deleting.filter(function (id) {
+          return typeof id === 'string';
+        })
+      : [];
+    if (message.deleteMode === 'permanent' || message.deleteMode === 'trash') {
+      classroom.modules.deleteMode = message.deleteMode;
+    }
+    // A delete that started elsewhere shows the Undo chip here too.
+    for (var d = 0; d < classroom.modules.deleting.length; d++) {
+      var id = classroom.modules.deleting[d];
+      if (previousDeleting.indexOf(id) < 0 && notes.chipNoteId !== id) {
+        showNoteChip(deleteModuleChipText(), NOTE_UNDO_MS, id, 'module');
+      }
+    }
+    if (
+      notes.chipNoteId &&
+      barParts &&
+      barParts.noteChip &&
+      barParts.noteChip.undo.getAttribute('data-mpe-ra-kind') === 'module' &&
+      classroom.modules.deleting.indexOf(notes.chipNoteId) < 0
+    ) {
+      hideNoteChip();
+    }
+    if (barParts && barParts.classroom) {
+      barParts.classroom.moduleRows.removeAttribute('data-key');
+    }
+    anchorPass();
+    syncClassroomSheet();
+  }
+
+  function deleteModuleChipText() {
+    return classroom.modules.deleteMode === 'permanent'
+      ? CLASSROOM_DELETE_PERMANENT_CHIP
+      : CLASSROOM_DELETE_TRASH_CHIP;
+  }
+
+  /** The list as `core.anchorNotes` wants it: id, anchor, headings. */
+  function modulesAsAnchorNotes() {
+    var out = [];
+    for (var i = 0; i < classroom.modules.list.length; i++) {
+      var summary = classroom.modules.list[i];
+      if (classroom.modules.deleting.indexOf(summary.id) >= 0) {
+        continue;
+      }
+      out.push({
+        id: summary.id,
+        created: summary.created,
+        headings: summary.headings,
+        passage: summary.anchor.exact,
+        anchor: summary.anchor,
+        context: { enclosing: '', before: '', after: '' },
+      });
+    }
+    return out;
+  }
+
+  /** 13 §12.5 — anchor every module and draw its marker, inside `anchorPass`. */
+  function moduleMarkersPass() {
+    var show =
+      config.enabled && config.classroomAvailable && config.classroomMarker;
+    var wanted = show ? modulesAsAnchorNotes() : [];
+    if (!wanted.length) {
+      classroom.modules.results = Object.create(null);
+      clearModuleMarkers();
+      return;
+    }
+    var results = core.anchorNotes(root, wanted);
+    classroom.modules.results = Object.create(null);
+    for (var i = 0; i < results.length; i++) {
+      classroom.modules.results[results[i].noteId] = results[i];
+    }
+    mutateSilently(function () {
+      drawModuleMarkers(results);
+    });
+  }
+
+  function moduleStateOf(summary) {
+    var status = summary && summary.status ? summary.status : 'done';
+    if (status === 'writing' || status === 'planning' || status === 'queued') {
+      return 'writing';
+    }
+    if (status === 'stopped' || status === 'failed') {
+      return 'stopped';
+    }
+    return 'done';
+  }
+
+  /** One marker per module-bearing block, under a note marker when both are there. */
+  function drawModuleMarkers(results) {
+    var groups = new Map();
+    var anyFound = false;
+    for (var i = 0; i < results.length; i++) {
+      var result = results[i];
+      if (!result.found || !result.el) {
+        continue;
+      }
+      anyFound = true;
+      var list = groups.get(result.el);
+      if (!list) {
+        list = [];
+        groups.set(result.el, list);
+      }
+      list.push(result);
+    }
+    classroom.modules.anyFound = anyFound;
+    classroom.modules.markers.forEach(function (marker, el) {
+      if (!groups.has(el) || !el.isConnected) {
+        if (marker.parentNode) {
+          marker.parentNode.removeChild(marker);
+        }
+        classroom.modules.markers.delete(el);
+        classroom.modules.markerResults.delete(el);
+      }
+    });
+    groups.forEach(function (list, el) {
+      // Newest first: the marker names and opens the latest module.
+      list.sort(function (a, b) {
+        var ca = classroom.modules.byId[a.noteId]
+          ? classroom.modules.byId[a.noteId].created
+          : '';
+        var cb = classroom.modules.byId[b.noteId]
+          ? classroom.modules.byId[b.noteId].created
+          : '';
+        return ca < cb ? 1 : ca > cb ? -1 : 0;
+      });
+      var first = list[0];
+      var marker = classroom.modules.markers.get(el);
+      if (!marker || marker.parentNode !== el) {
+        marker = null;
+        for (var c = 0; c < el.children.length; c++) {
+          var child = el.children[c];
+          if (
+            child.classList &&
+            child.classList.contains('mpe-ra-classroom-marker')
+          ) {
+            marker = child;
+            break;
+          }
+        }
+        if (!marker) {
+          marker = document.createElement('button');
+          marker.type = 'button';
+          marker.className = 'mpe-ra-ui mpe-ra-classroom-marker';
+          marker.setAttribute('data-mpe-ra-action', 'classroomMarker');
+          marker.innerHTML = ICONS.classroom;
+          el.appendChild(marker);
+        }
+        classroom.modules.markers.set(el, marker);
+      }
+      el.classList.add('mpe-ra-block');
+      marker.setAttribute('data-mpe-ra-module', first.noteId);
+      marker.setAttribute(
+        'data-mpe-ra-modules',
+        list
+          .map(function (r) {
+            return r.noteId;
+          })
+          .join(' '),
+      );
+      classroom.modules.markerResults.set(el, first);
+      syncModuleMarker(marker, list);
+      positionMarker(marker, first);
+      // Under a note marker on the same block (13 §12.5).
+      var noteMarker = notes.markers.get(el);
+      if (noteMarker && noteMarker.parentNode === el) {
+        marker.classList.add('is-below-note');
+        var base = noteMarker.style.top || '0.1em';
+        marker.setAttribute('data-mpe-ra-below', base);
+        try {
+          marker.style.top =
+            'calc(' + base + ' + ' + CLASSROOM_MARKER_BELOW_NOTE + ')';
+        } catch (error) {
+          /* an engine that refuses calc() keeps the class's own offset */
+        }
+      } else {
+        marker.classList.remove('is-below-note');
+        marker.removeAttribute('data-mpe-ra-below');
+      }
+    });
+    syncGutter();
+  }
+
+  /** The tooltip, the count badge and the state classes of one marker. */
+  function syncModuleMarker(marker, list) {
+    var first = classroom.modules.byId[list[0].noteId];
+    var title = first && first.title ? first.title : 'Classroom module';
+    var count = list.length;
+    var tip = count > 1 ? title + ' · ' + count + ' modules' : title;
+    marker.setAttribute('title', tip);
+    marker.setAttribute('aria-label', tip);
+    var countBadge = marker.querySelector('.mpe-ra-classroom-count');
+    if (count > 1) {
+      if (!countBadge) {
+        countBadge = document.createElement('span');
+        countBadge.className = 'mpe-ra-classroom-count';
+        countBadge.setAttribute('aria-hidden', 'true');
+        marker.appendChild(countBadge);
+      }
+      if (countBadge.textContent !== String(count)) {
+        countBadge.textContent = String(count);
+      }
+    } else if (countBadge) {
+      marker.removeChild(countBadge);
+    }
+    var writing = null;
+    var stopped = false;
+    for (var i = 0; i < list.length; i++) {
+      var summary = classroom.modules.byId[list[i].noteId];
+      var state = moduleStateOf(summary);
+      if (state === 'writing' && !writing) {
+        writing = summary;
+      }
+      if (state === 'stopped') {
+        stopped = true;
+      }
+    }
+    var progressBadge = marker.querySelector('.mpe-ra-classroom-progress');
+    if (writing) {
+      if (!progressBadge) {
+        progressBadge = document.createElement('span');
+        progressBadge.className = 'mpe-ra-classroom-progress';
+        progressBadge.setAttribute('aria-hidden', 'true');
+        marker.appendChild(progressBadge);
+      }
+      var text =
+        (typeof writing.writing === 'number' && writing.writing
+          ? writing.writing
+          : writing.done || 0) +
+        '/' +
+        (writing.chapters || 0);
+      if (progressBadge.textContent !== text) {
+        progressBadge.textContent = text;
+      }
+    } else if (progressBadge) {
+      marker.removeChild(progressBadge);
+    }
+    marker.classList.toggle('is-writing', !!writing);
+    marker.classList.toggle('is-stopped', stopped && !writing);
+    var active =
+      classroom.open &&
+      !!classroom.markerBlockIds &&
+      classroom.markerBlockIds.indexOf(list[0].noteId) >= 0;
+    marker.classList.toggle('is-active', active);
+  }
+
+  /** A progress message moves a module's marker badge (13 §12.5). */
+  function noteModuleProgress(message) {
+    var summary = classroom.modules.byId[message.moduleId];
+    if (!summary) {
+      return;
+    }
+    summary.status = message.status || summary.status;
+    if (typeof message.of === 'number' && message.of) {
+      summary.chapters = message.of;
+    }
+    if (Array.isArray(message.chapters)) {
+      summary.done = doneCount(message.chapters);
+    }
+    summary.writing = typeof message.chapter === 'number' ? message.chapter : 0;
+    syncModuleMarkerStates();
+  }
+
+  function syncModuleMarkerStates() {
+    classroom.modules.markers.forEach(function (marker) {
+      var ids = (marker.getAttribute('data-mpe-ra-modules') || '')
+        .split(' ')
+        .filter(Boolean);
+      var list = [];
+      for (var i = 0; i < ids.length; i++) {
+        var result = classroom.modules.results[ids[i]];
+        if (result) {
+          list.push(result);
+        }
+      }
+      if (list.length) {
+        mutateSilently(function () {
+          syncModuleMarker(marker, list);
+        });
+      }
+    });
+  }
+
+  function clearModuleMarkers() {
+    classroom.modules.markers.forEach(function (marker) {
+      if (marker.parentNode) {
+        marker.parentNode.removeChild(marker);
+      }
+    });
+    classroom.modules.markers.clear();
+    classroom.modules.markerResults.clear();
+    classroom.modules.anyFound = false;
+    syncGutter();
+  }
+
+  /** The ids of the modules anchored on `el`, newest first. */
+  function moduleIdsOnBlock(el) {
+    var ids = [];
+    if (!el) {
+      return ids;
+    }
+    var marker = classroom.modules.markers.get(el);
+    if (!marker) {
+      return ids;
+    }
+    return (marker.getAttribute('data-mpe-ra-modules') || '')
+      .split(' ')
+      .filter(Boolean);
+  }
+
+  /** 13 §12.5 — several modules on one block: the sheet, that block's rows first. */
+  function openClassroomForBlock(el, ids, opener) {
+    var newest = classroom.modules.byId[ids[0]];
+    if (!newest || !el) {
+      return;
+    }
+    var passage = { text: newest.anchor.exact || newest.passage, els: [el] };
+    var context;
+    try {
+      context = buildHelpContextFor(passage);
+    } catch (error) {
+      context = null;
+    }
+    if (!context) {
+      return;
+    }
+    openClassroom(
+      {
+        text: passage.text,
+        els: [el],
+        context: context,
+        anchor: newest.anchor,
+      },
+      '',
+      opener,
+    );
+    if (classroom.open) {
+      classroom.markerBlockIds = ids.slice();
+      if (barParts && barParts.classroom) {
+        barParts.classroom.moduleRows.removeAttribute('data-key');
+      }
+      syncClassroomSheet();
+      syncModuleMarkerStates();
+    }
+  }
+
+  /** 13 §11.4 — post the delete and show the chip with Undo at once. */
+  function deleteModule(id) {
+    if (!id) {
+      return;
+    }
+    post('readAloudClassroomDelete', [sourceUri, id]);
+    if (classroom.modules.deleting.indexOf(id) < 0) {
+      classroom.modules.deleting = classroom.modules.deleting.concat([id]);
+    }
+    showNoteChip(deleteModuleChipText(), NOTE_UNDO_MS, id, 'module');
+    if (barParts && barParts.classroom) {
+      barParts.classroom.moduleRows.removeAttribute('data-key');
+    }
+    anchorPass();
+    syncClassroomSheet();
+  }
+
+  function undoModuleDelete(id) {
+    if (!id) {
+      return;
+    }
+    post('readAloudClassroomUndoDelete', [sourceUri, id]);
+    hideNoteChip();
   }
 
   // ---------------------------------------------------------------------------
@@ -9546,6 +10129,9 @@
 
   function applyConfig(message) {
     var wasEnabled = config.enabled;
+    // 13 §12.5 — read before any apply* below, so a change re-runs the pass.
+    var markerBefore = config.classroomMarker;
+    var classroomBefore = config.classroomAvailable;
     if (typeof message.enabled === 'boolean') {
       config.enabled = message.enabled;
     }
@@ -9648,7 +10234,9 @@
     applyTiers();
     if (
       decorationBefore !== config.notesDecoration ||
-      notesBefore !== config.notesAvailable
+      notesBefore !== config.notesAvailable ||
+      markerBefore !== config.classroomMarker ||
+      classroomBefore !== config.classroomAvailable
     ) {
       anchorPass();
     }
@@ -9747,6 +10335,9 @@
         return;
       case 'readAloudClassroomError':
         onClassroomError(message);
+        return;
+      case 'readAloudClassroomModules':
+        onClassroomModules(message);
         return;
       case 'readAloudAudio':
         if (matchesRecord(message)) {
@@ -9939,7 +10530,7 @@
     if (core.playerFontStack(config.font)) {
       wanted.push('mpe-ra-font');
     }
-    var gutter = notes.anyFound && config.notesDecoration !== 'none';
+    var gutter = gutterWanted();
     if (gutter) {
       wanted.push('mpe-ra-notes-gutter');
     }

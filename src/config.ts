@@ -85,7 +85,9 @@ type VSCodeMPEConfigKey =
   | 'classroomPersona'
   | 'classroomAudience'
   | 'classroomFollowLinks'
-  | 'classroomAutoOpen';
+  | 'classroomAutoOpen'
+  | 'classroomShortTermModules'
+  | 'classroomMarker';
 
 type ConfigKey = keyof NotebookConfig | VSCodeMPEConfigKey;
 

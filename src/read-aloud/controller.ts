@@ -1076,6 +1076,8 @@ export class ReadAloudController implements vscode.Disposable {
       notesDecoration: settings.notes.decoration,
       // Classroom (13 §14.3): the same reasons.
       classroomAvailable: !this.deps.isWebBuild && settings.classroom.enabled,
+      // 13 §12.5 — the module marker, live like the other switches.
+      classroomMarker: settings.classroom.marker,
     };
     // A module preview learns what it shows (13 §12.2). A broadcast (no
     // `sourceUri`) leaves the field out, so the webview keeps its value.

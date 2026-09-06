@@ -2531,6 +2531,114 @@ html {
   white-space: nowrap;
 }
 
+/* 13 §6.1 — the size line under the lever. */
+.mpe-ra-classroom-size {
+  margin: -4px 0 0;
+  font-size: 12px;
+  line-height: 1.4;
+  opacity: 0.75;
+}
+
+.mpe-ra-classroom-size[hidden] {
+  display: none;
+}
+
+/* 13 §12.5 — the module marker: the note marker's box in the right margin,
+ * the mortarboard glyph, the note tokens for ink and badge, so it dims with
+ * the tiers and passes the same contrast. Under a note marker on the same
+ * block it sits 1.6em lower (`is-below-note`, the top set inline). */
+.mpe-ra-classroom-marker {
+  position: absolute;
+  top: 0.1em;
+  right: -1.9em;
+  z-index: 2;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5em;
+  height: 1.5em;
+  min-width: 24px;
+  min-height: 24px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--mpe-ra-note-ink);
+  font-size: inherit;
+  line-height: 1;
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.mpe-ra-classroom-marker svg {
+  width: 1em;
+  height: 1em;
+  min-width: 16px;
+  min-height: 16px;
+}
+
+.mpe-ra-classroom-marker:hover {
+  color: var(--mpe-ra-note-ink-strong);
+  background: var(--mpe-ra-note-hover-surface);
+}
+
+.mpe-ra-classroom-marker:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, #007fd4);
+  outline-offset: 1px;
+}
+
+.mpe-ra-classroom-marker.is-active {
+  color: var(--mpe-ra-note-badge-fg);
+  background: var(--mpe-ra-note-ink-strong);
+}
+
+.mpe-ra-classroom-marker.is-stopped {
+  color: var(--mpe-ra-classroom-warning);
+}
+
+/* Under a note marker on the same line box; the inline `top` refines it. */
+.mpe-ra-classroom-marker.is-below-note {
+  top: 1.7em;
+}
+
+.mpe-ra-classroom-count,
+.mpe-ra-classroom-progress {
+  position: absolute;
+  right: -0.3em;
+  box-sizing: border-box;
+  min-width: 1.4em;
+  padding: 0 0.3em;
+  border-radius: 999px;
+  background: var(--mpe-ra-note-badge-bg);
+  color: var(--mpe-ra-note-badge-fg);
+  font-family: var(--vscode-font-family, sans-serif);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.5;
+  text-align: center;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.mpe-ra-classroom-count {
+  top: -0.3em;
+}
+
+/* The writing badge (`3/6`) sits at the foot, the count at the head. */
+.mpe-ra-classroom-progress {
+  bottom: -0.3em;
+  font-size: 9px;
+  background: var(--mpe-ra-accent);
+  color: var(--mpe-ra-accent-fg);
+}
+
+.mpe-ra-classroom-orphan {
+  flex: none;
+}
+
 /* The progress card (§5.4) and the Module sheet's rows (§12.2). */
 .mpe-ra-classroom-card {
   display: flex;
@@ -2894,6 +3002,7 @@ html {
 @media print {
   .mpe-ra-btn,
   .mpe-ra-note-marker,
+  .mpe-ra-classroom-marker,
   .mpe-ra-bar,
   .mpe-ra-float,
   .mpe-ra-hint {

@@ -151,6 +151,12 @@ export interface ModuleSummary {
   chapters: number;
   done: number;
   minutes: number;
+  /** 13 §12.5 — the passage anchor the module was built from, for the marker. */
+  anchor: ModulePassage;
+  /** The document's heading path above the passage. */
+  headings: string[];
+  /** The first 160 characters of the exact passage, for tooltips and rows. */
+  passage: string;
 }
 
 // ----------------------------------------------------------------- helpers
@@ -825,5 +831,8 @@ export function previewSummary(module: ParsedModule): ModuleSummary {
     chapters: planned,
     done: module.chapters.filter((chapter) => chapter.status === 'done').length,
     minutes: minutesOf(module),
+    anchor: { ...module.passage },
+    headings: module.document.headings.slice(),
+    passage: module.passage.exact.replace(/\s+/g, ' ').trim().slice(0, 160),
   };
 }

@@ -178,4 +178,19 @@ suite('classroom/persona', function () {
       tagline: 'A patient practitioner who explains the machinery one on one',
     });
   });
+  test('termLevels parses like levels and refuses the same shapes (13 §6.1)', function () {
+    const ok = persona.parsePersona(
+      '---\nid: t\nname: T\nversion: 1\ntermLevels:\n  1: { chapters: [2, 3] }\n---\nBody.\n',
+    );
+    assert.ok(!persona.isPersonaParseError(ok), JSON.stringify(ok));
+    assert.deepStrictEqual(ok.termLevels, { 1: { chapters: [2, 3] } });
+    assert.deepStrictEqual(ok.levels, {});
+    const bad = persona.parsePersona(
+      '---\nid: t\nname: T\nversion: 1\ntermLevels:\n  1: { chapters: [1, 3] }\n---\nBody.\n',
+    );
+    assert.ok(persona.isPersonaParseError(bad));
+    assert.match(bad.error, /^termLevels\.1\.chapters/);
+    const max = persona.BUILT_IN_PERSONAS[0];
+    assert.deepStrictEqual(max.termLevels, {}, 'Max has no term override');
+  });
 });

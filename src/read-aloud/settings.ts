@@ -98,6 +98,9 @@ export const READ_ALOUD_SETTING_KEYS = [
   'classroomAudience',
   'classroomFollowLinks',
   'classroomAutoOpen',
+  // 13 §6.1 and §12.5: the term budgets and the module marker.
+  'classroomShortTermModules',
+  'classroomMarker',
 ] as const;
 
 export type ReadAloudSettingKey = (typeof READ_ALOUD_SETTING_KEYS)[number];
@@ -136,7 +139,7 @@ export interface ReadAloudNotesSettings {
   decoration: NotesDecoration;
 }
 
-/** 13 §14.1 — the six classroom settings. */
+/** 13 §14.1 — the eight classroom settings. */
 export interface ReadAloudClassroomSettings {
   enabled: boolean;
   /** The root, `~` expanded; '' means `<globalConfigPath>/classroom` (§11.1). */
@@ -147,6 +150,10 @@ export interface ReadAloudClassroomSettings {
   audience: string;
   followLinks: boolean;
   autoOpen: boolean;
+  /** 13 §6.1 — a term-shaped passage takes the smaller budgets. */
+  shortTerm: boolean;
+  /** 13 §12.5 — the module marker in the source document. */
+  marker: boolean;
 }
 
 export const CLASSROOM_PERSONA_SETTING_RE = /^[a-z0-9][a-z0-9-]{0,39}$/;
@@ -336,6 +343,8 @@ export function readClassroomSettings(): ReadAloudClassroomSettings {
   const audienceRaw = getMPEConfig<string>('classroomAudience');
   const followRaw = getMPEConfig<boolean>('classroomFollowLinks');
   const autoOpenRaw = getMPEConfig<boolean>('classroomAutoOpen');
+  const shortTermRaw = getMPEConfig<boolean>('classroomShortTermModules');
+  const markerRaw = getMPEConfig<boolean>('classroomMarker');
   let directory = '';
   if (typeof directoryRaw === 'string' && directoryRaw.trim()) {
     const expanded = directoryRaw.trim().replace(/^~(?=$|[\\/])/, os.homedir());
@@ -368,6 +377,8 @@ export function readClassroomSettings(): ReadAloudClassroomSettings {
         : '',
     followLinks: typeof followRaw === 'boolean' ? followRaw : true,
     autoOpen: typeof autoOpenRaw === 'boolean' ? autoOpenRaw : true,
+    shortTerm: typeof shortTermRaw === 'boolean' ? shortTermRaw : true,
+    marker: typeof markerRaw === 'boolean' ? markerRaw : true,
   };
 }
 

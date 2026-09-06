@@ -36,6 +36,8 @@ export interface Persona {
   audience: string;
   version: number;
   levels: Partial<Record<ClassroomLevel, PersonaLevelOverride>>;
+  /** §6.1 — the same overrides for a term-shaped passage. */
+  termLevels: Partial<Record<ClassroomLevel, PersonaLevelOverride>>;
   /** The body of `persona.md`: the PERSONA section, verbatim. */
   body: string;
   /** The body of `specimen.md`, or '' when the package has none. */
@@ -91,22 +93,23 @@ function splitFrontMatter(text: string): { yaml: string; body: string } | null {
 
 function parseLevels(
   value: unknown,
+  name: string = 'levels',
 ): Partial<Record<ClassroomLevel, PersonaLevelOverride>> | string {
   if (value === undefined || value === null) {
     return {};
   }
   if (!isPlainObject(value)) {
-    return 'levels is not a mapping';
+    return `${name} is not a mapping`;
   }
   const out: Partial<Record<ClassroomLevel, PersonaLevelOverride>> = {};
   for (const key of Object.keys(value)) {
     const level = Number(key);
     if (level !== 1 && level !== 2 && level !== 3) {
-      return `levels has an unknown level ${JSON.stringify(key)}`;
+      return `${name} has an unknown level ${JSON.stringify(key)}`;
     }
     const entry = value[key];
     if (!isPlainObject(entry) || !Array.isArray(entry.chapters)) {
-      return `levels.${key} needs a chapters pair`;
+      return `${name}.${key} needs a chapters pair`;
     }
     const [min, max] = entry.chapters as unknown[];
     if (
@@ -118,7 +121,7 @@ function parseLevels(
       max > PERSONA_LEVEL_CHAPTERS_MAX ||
       min > max
     ) {
-      return `levels.${key}.chapters must be [min, max] with 2 ≤ min ≤ max ≤ 10`;
+      return `${name}.${key}.chapters must be [min, max] with 2 ≤ min ≤ max ≤ 10`;
     }
     out[level as ClassroomLevel] = { chapters: [min, max] };
   }
@@ -185,6 +188,10 @@ export function parsePersona(
   if (typeof levels === 'string') {
     return { error: levels };
   }
+  const termLevels = parseLevels(front.termLevels, 'termLevels');
+  if (typeof termLevels === 'string') {
+    return { error: termLevels };
+  }
   if (!split.body) {
     return { error: 'persona.md has no body' };
   }
@@ -195,6 +202,7 @@ export function parsePersona(
     audience,
     version,
     levels,
+    termLevels,
     body: split.body,
     specimen:
       typeof specimen === 'string'

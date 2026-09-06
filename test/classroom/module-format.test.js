@@ -349,7 +349,8 @@ suite('classroom/module-format', function () {
   test('previewSummary: title, counts and minutes from the actual word counts', function () {
     const m = planned();
     m.body = format.replaceTitle(m.body, m.plan.title);
-    assert.deepStrictEqual(format.previewSummary(m), {
+    const { anchor, headings, passage, ...summary } = format.previewSummary(m);
+    assert.deepStrictEqual(summary, {
       id: '20260905T173010Z-4c2e',
       title: 'Approvals, Gates, and Borrowed Keys',
       created: '2026-09-05T17:30:10Z',
@@ -358,6 +359,13 @@ suite('classroom/module-format', function () {
       done: 2,
       minutes: 7,
     });
+    // 13 §12.5 — the marker's anchor, the heading path and the passage's head.
+    assert.deepStrictEqual(anchor, m.passage);
+    assert.deepStrictEqual(headings, m.document.headings);
+    assert.strictEqual(
+      passage,
+      m.passage.exact.replace(/\s+/g, ' ').trim().slice(0, 160),
+    );
     assert.strictEqual(
       format.titleOf(module()),
       'Classroom: Then the human path, and it…',

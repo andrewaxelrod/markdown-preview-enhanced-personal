@@ -90,6 +90,25 @@ const SOURCE_URI_GUARDED_COMMANDS: Set<string> = new Set([
   'readAloudPlaying',
   'readAloudHelp',
   'readAloudHelpCancel',
+  // Notes (12 §14.2): every one carries the document's `sourceUri` first.
+  'readAloudNoteCreate',
+  'readAloudNoteUpdate',
+  'readAloudNoteDelete',
+  'readAloudNoteUndoDelete',
+  'readAloudNoteRegenerate',
+  'readAloudNoteReattach',
+  'readAloudNoteOpen',
+  'readAloudNoteCopy',
+  'readAloudNoteAnchors',
+  'readAloudNotesShowAll',
+  // Classroom (13 §14.2): the document's or the module's own `sourceUri` first.
+  'readAloudClassroomPrepare',
+  'readAloudClassroomBuild',
+  'readAloudClassroomCancel',
+  'readAloudClassroomContinue',
+  'readAloudClassroomOpen',
+  'readAloudClassroomOpenSource',
+  'readAloudClassroomOpenFolder',
 ]);
 
 /**
@@ -122,9 +141,26 @@ const WEBVIEW_MESSAGE_COMMANDS: Set<string> = new Set([
   'pasteImageFile',
   'princeExport',
   'readAloudCancel',
+  'readAloudClassroomBuild',
+  'readAloudClassroomCancel',
+  'readAloudClassroomContinue',
+  'readAloudClassroomOpen',
+  'readAloudClassroomOpenFolder',
+  'readAloudClassroomOpenSource',
+  'readAloudClassroomPrepare',
   'readAloudHelp',
   'readAloudHelpCancel',
   'readAloudHelpChooseModel',
+  'readAloudNoteAnchors',
+  'readAloudNoteCopy',
+  'readAloudNoteCreate',
+  'readAloudNoteDelete',
+  'readAloudNoteOpen',
+  'readAloudNoteReattach',
+  'readAloudNoteRegenerate',
+  'readAloudNoteUndoDelete',
+  'readAloudNoteUpdate',
+  'readAloudNotesShowAll',
   'readAloudOpenSetup',
   'readAloudPlaying',
   'readAloudResetPage',
@@ -303,6 +339,16 @@ export class PreviewProvider {
 
   private static singlePreviewPanel: vscode.WebviewPanel | null;
   private static singlePreviewPanelSourceUriTarget: Uri | null;
+
+  /** Whether the single preview panel exists and shows `sourceUri` (notes, 12 §13.1). */
+  public static isSinglePreviewShowing(sourceUri: Uri): boolean {
+    return (
+      !!PreviewProvider.singlePreviewPanel &&
+      !!PreviewProvider.singlePreviewPanelSourceUriTarget &&
+      PreviewProvider.singlePreviewPanelSourceUriTarget.toString() ===
+        sourceUri.toString()
+    );
+  }
   public static notebooksManager: NotebooksManager | null = null;
 
   /**
@@ -810,7 +856,7 @@ export class PreviewProvider {
           ),
         );
         const readAloudConfig = escapeHtmlAttribute(
-          JSON.stringify(readAloud.buildInitialConfig()),
+          JSON.stringify(readAloud.buildInitialConfig(sourceUri)),
         );
         head += `<link rel="stylesheet" href="${readAloudCssUri}"><link rel="preload" as="font" type="font/woff2" crossorigin href="${readAloudFontUri}"><link rel="stylesheet" href="${readAloudPageCssUri}"><script src="${readAloudCoreUri}"></script><script src="${readAloudJsUri}" data-config="${readAloudConfig}"></script>`;
       }
@@ -982,6 +1028,11 @@ export class PreviewProvider {
   /**
    * Returns true if the single preview is currently locked.
    */
+  /** The document the single preview panel shows, or null (13 §13). */
+  public singlePreviewTarget(): Uri | null {
+    return PreviewProvider.singlePreviewPanelSourceUriTarget ?? null;
+  }
+
   public isSinglePreviewLocked(): boolean {
     return PreviewProvider.singlePreviewLocked;
   }

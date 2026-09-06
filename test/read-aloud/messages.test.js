@@ -1134,4 +1134,660 @@ suite('read-aloud/messages', function () {
       }
     });
   });
+  // ---------------------------------------------------------- notes (12 §14.2)
+
+  suite('notes parsers (12 §14.2)', function () {
+    const NOTE_ID = '20260905T154210Z-7f3a';
+    const anchor = (overrides) =>
+      Object.assign(
+        {
+          block: 'b3f9a1c2',
+          line: 76,
+          exact: 'the eligible block before the first selected block',
+          prefix: '| Before | ',
+          suffix: ', extracted',
+          offset: 11,
+          blocks: 1,
+        },
+        overrides || {},
+      );
+    const fields = (overrides) =>
+      Object.assign(
+        {
+          title: 'T',
+          breadcrumb: ['A', 'B'],
+          before: 'b',
+          after: 'a',
+          section: 's [PASSAGE]',
+          enclosing: '⟦x⟧ y',
+          mentions: '',
+          contextMode: 'section',
+        },
+        overrides || {},
+      );
+    const createArgs = (overrides) => {
+      const o = Object.assign(
+        {
+          sourceUri: URI,
+          requestId: REQUEST_ID,
+          passage: 'the eligible block before the first selected block',
+          fields: fields(),
+          anchor: anchor(),
+          options: { source: 'selection' },
+        },
+        overrides || {},
+      );
+      return [
+        o.sourceUri,
+        o.requestId,
+        o.passage,
+        o.fields,
+        o.anchor,
+        o.options,
+      ];
+    };
+
+    test('parseNoteCreateArgs accepts a selection capture', function () {
+      const request = messages.parseNoteCreateArgs(createArgs());
+      assert.ok(request);
+      assert.strictEqual(request.source, 'selection');
+      assert.strictEqual(request.explanation, undefined);
+      assert.deepStrictEqual(request.anchor, anchor());
+      assert.deepStrictEqual(request.fields, fields());
+    });
+
+    test('parseNoteCreateArgs accepts Save as note with the explanation', function () {
+      const request = messages.parseNoteCreateArgs(
+        createArgs({
+          options: { source: 'help', explanation: '### What it says\nX.' },
+        }),
+      );
+      assert.strictEqual(request.source, 'help');
+      assert.strictEqual(request.explanation, '### What it says\nX.');
+    });
+
+    test('parseNoteCreateArgs refusals', function () {
+      const bad = [
+        createArgs().slice(0, 5),
+        createArgs({ sourceUri: '' }),
+        createArgs({ requestId: 'bad id' }),
+        createArgs({ passage: '   ' }),
+        createArgs({ passage: 42 }),
+        createArgs({ fields: null }),
+        createArgs({ fields: fields({ contextMode: 'everything' }) }),
+        createArgs({ fields: fields({ breadcrumb: 'A > B' }) }),
+        createArgs({ anchor: null }),
+        createArgs({ anchor: anchor({ block: 'x1' }) }),
+        createArgs({ anchor: anchor({ block: 'b' + 'f'.repeat(9) }) }),
+        createArgs({ anchor: anchor({ line: -1 }) }),
+        createArgs({ anchor: anchor({ line: 1.5 }) }),
+        createArgs({ anchor: anchor({ exact: 'x'.repeat(6001) }) }),
+        createArgs({ anchor: anchor({ prefix: 'x'.repeat(65) }) }),
+        createArgs({ anchor: anchor({ suffix: 'x'.repeat(65) }) }),
+        createArgs({ anchor: anchor({ offset: -1 }) }),
+        createArgs({ anchor: anchor({ blocks: 0 }) }),
+        createArgs({ anchor: anchor({ blocks: 51 }) }),
+        createArgs({ options: { source: 'clipboard' } }),
+        createArgs({ options: { source: 'help' } }),
+        createArgs({ options: { source: 'help', explanation: '  ' } }),
+        createArgs({ options: { source: 'selection', explanation: 'stray' } }),
+        'nope',
+        null,
+      ];
+      for (const args of bad) {
+        assert.strictEqual(
+          messages.parseNoteCreateArgs(args),
+          undefined,
+          JSON.stringify(args).slice(0, 120),
+        );
+      }
+    });
+
+    test('parseNoteAnchor: line may be null or absent, blocks defaults to 1, CRLF normalised', function () {
+      assert.strictEqual(
+        messages.parseNoteAnchor(anchor({ line: null })).line,
+        null,
+      );
+      const bare = messages.parseNoteAnchor({
+        block: 'b1',
+        exact: 'a\r\nb',
+        offset: 0,
+      });
+      assert.deepStrictEqual(bare, {
+        block: 'b1',
+        line: null,
+        exact: 'a\nb',
+        prefix: '',
+        suffix: '',
+        offset: 0,
+        blocks: 1,
+      });
+    });
+
+    test('parseNoteUpdateArgs: title, myNote, tags, each capped and normalised', function () {
+      const request = messages.parseNoteUpdateArgs([
+        URI,
+        NOTE_ID,
+        {
+          title: '  A   title ',
+          myNote: 'line\r\ntwo',
+          tags: ['Help', 'two words', '!!!', 'help'],
+        },
+      ]);
+      assert.deepStrictEqual(request, {
+        sourceUri: URI,
+        noteId: NOTE_ID,
+        title: 'A title',
+        myNote: 'line\ntwo',
+        tags: ['help', 'two-words'],
+      });
+      assert.strictEqual(
+        messages.parseNoteUpdateArgs([URI, NOTE_ID, { title: 'x'.repeat(200) }])
+          .title.length,
+        120,
+      );
+      assert.strictEqual(
+        messages.parseNoteUpdateArgs([
+          URI,
+          NOTE_ID,
+          { myNote: 'x'.repeat(30000) },
+        ]).myNote.length,
+        20000,
+      );
+      assert.strictEqual(
+        messages.parseNoteUpdateArgs([
+          URI,
+          NOTE_ID,
+          { tags: Array.from({ length: 20 }, (_, i) => 't' + i) },
+        ]).tags.length,
+        12,
+      );
+      assert.strictEqual(
+        messages.parseNoteUpdateArgs([URI, NOTE_ID, { tags: ['x'.repeat(40)] }])
+          .tags[0].length,
+        32,
+      );
+    });
+
+    test('parseNoteUpdateArgs refusals', function () {
+      const bad = [
+        [URI, NOTE_ID],
+        [URI, NOTE_ID, {}],
+        [URI, NOTE_ID, { title: '   ' }],
+        [URI, NOTE_ID, { title: 42 }],
+        [URI, NOTE_ID, { myNote: 42 }],
+        [URI, NOTE_ID, { tags: 'help' }],
+        [URI, NOTE_ID, { tags: [42] }],
+        [URI, 'note-1', { title: 'x' }],
+        ['', NOTE_ID, { title: 'x' }],
+        [URI, NOTE_ID, null],
+      ];
+      for (const args of bad) {
+        assert.strictEqual(
+          messages.parseNoteUpdateArgs(args),
+          undefined,
+          JSON.stringify(args),
+        );
+      }
+    });
+
+    test('the id-only messages: delete, undo, copy', function () {
+      for (const fn of [
+        'parseNoteDeleteArgs',
+        'parseNoteUndoDeleteArgs',
+        'parseNoteCopyArgs',
+      ]) {
+        assert.deepStrictEqual(messages[fn]([URI, NOTE_ID]), {
+          sourceUri: URI,
+          noteId: NOTE_ID,
+        });
+        for (const args of [
+          [URI],
+          [URI, NOTE_ID, 'x'],
+          [URI, 'x'],
+          ['', NOTE_ID],
+          [URI, 42],
+          null,
+        ]) {
+          assert.strictEqual(
+            messages[fn](args),
+            undefined,
+            fn + ' ' + JSON.stringify(args),
+          );
+        }
+      }
+    });
+
+    test('parseNoteRegenerateArgs: fields or null', function () {
+      assert.deepStrictEqual(
+        messages.parseNoteRegenerateArgs([URI, NOTE_ID, null]),
+        {
+          sourceUri: URI,
+          noteId: NOTE_ID,
+          fields: null,
+        },
+      );
+      assert.deepStrictEqual(
+        messages.parseNoteRegenerateArgs([URI, NOTE_ID, fields()]).fields,
+        fields(),
+      );
+      for (const args of [
+        [URI, NOTE_ID],
+        [URI, NOTE_ID, 'fields'],
+        [URI, NOTE_ID, fields({ contextMode: 'x' })],
+        [URI, 'bad', null],
+      ]) {
+        assert.strictEqual(
+          messages.parseNoteRegenerateArgs(args),
+          undefined,
+          JSON.stringify(args),
+        );
+      }
+    });
+
+    test('parseNoteReattachArgs: anchor and breadcrumb', function () {
+      const request = messages.parseNoteReattachArgs([
+        URI,
+        NOTE_ID,
+        anchor(),
+        ['A', 'B'],
+      ]);
+      assert.deepStrictEqual(request.anchor, anchor());
+      assert.deepStrictEqual(request.breadcrumb, ['A', 'B']);
+      assert.deepStrictEqual(
+        messages.parseNoteReattachArgs([URI, NOTE_ID, anchor(), null])
+          .breadcrumb,
+        [],
+      );
+      assert.strictEqual(
+        messages.parseNoteReattachArgs([
+          URI,
+          NOTE_ID,
+          anchor(),
+          ['A', 'B', 'C', 'D', 'E', 'F', 'G'],
+        ]).breadcrumb.length,
+        6,
+      );
+      for (const args of [
+        [URI, NOTE_ID, anchor()],
+        [URI, NOTE_ID, anchor({ block: 'nope' }), []],
+        [URI, NOTE_ID, anchor(), 'A'],
+        [URI, NOTE_ID, anchor(), [1]],
+      ]) {
+        assert.strictEqual(
+          messages.parseNoteReattachArgs(args),
+          undefined,
+          JSON.stringify(args),
+        );
+      }
+    });
+
+    test('parseNoteOpenArgs: editor or file', function () {
+      assert.deepStrictEqual(
+        messages.parseNoteOpenArgs([URI, NOTE_ID, 'editor']),
+        {
+          sourceUri: URI,
+          noteId: NOTE_ID,
+          target: 'editor',
+        },
+      );
+      assert.strictEqual(
+        messages.parseNoteOpenArgs([URI, NOTE_ID, 'file']).target,
+        'file',
+      );
+      for (const args of [
+        [URI, NOTE_ID],
+        [URI, NOTE_ID, 'browser'],
+        [URI, 'x', 'editor'],
+      ]) {
+        assert.strictEqual(
+          messages.parseNoteOpenArgs(args),
+          undefined,
+          JSON.stringify(args),
+        );
+      }
+    });
+
+    test('parseNoteAnchorsArgs: at most 500 distinct reports', function () {
+      const request = messages.parseNoteAnchorsArgs([
+        URI,
+        [
+          { noteId: NOTE_ID, found: true, block: 'b1', line: 3 },
+          { noteId: '20260905T154211Z-0001', found: false },
+          {
+            noteId: '20260905T154212Z-0002',
+            found: true,
+            block: 'b2',
+            line: null,
+          },
+        ],
+      ]);
+      assert.strictEqual(request.anchors.length, 3);
+      assert.deepStrictEqual(request.anchors[0], {
+        noteId: NOTE_ID,
+        found: true,
+        block: 'b1',
+        line: 3,
+      });
+      assert.deepStrictEqual(request.anchors[1], {
+        noteId: '20260905T154211Z-0001',
+        found: false,
+      });
+      assert.strictEqual(request.anchors[2].line, null);
+      assert.deepStrictEqual(
+        messages.parseNoteAnchorsArgs([URI, []]).anchors,
+        [],
+      );
+      const many = Array.from({ length: 501 }, (_, i) => ({
+        noteId: '20260905T154210Z-' + (i + 0x1000).toString(16).slice(-4),
+        found: true,
+      }));
+      assert.strictEqual(
+        messages.parseNoteAnchorsArgs([URI, many]),
+        undefined,
+        'over the cap',
+      );
+      for (const args of [
+        [URI],
+        [URI, 'x'],
+        [URI, [{ noteId: 'x', found: true }]],
+        [URI, [{ noteId: NOTE_ID }]],
+        [URI, [{ noteId: NOTE_ID, found: 'yes' }]],
+        [URI, [{ noteId: NOTE_ID, found: true, block: 'zz' }]],
+        [URI, [{ noteId: NOTE_ID, found: true, line: -2 }]],
+        [
+          URI,
+          [
+            { noteId: NOTE_ID, found: true },
+            { noteId: NOTE_ID, found: false },
+          ],
+        ],
+      ]) {
+        assert.strictEqual(
+          messages.parseNoteAnchorsArgs(args),
+          undefined,
+          JSON.stringify(args),
+        );
+      }
+    });
+
+    test('parseNotesShowAllArgs', function () {
+      assert.strictEqual(messages.parseNotesShowAllArgs([URI]), URI);
+      for (const args of [[], [URI, 'x'], [''], [42], null]) {
+        assert.strictEqual(messages.parseNotesShowAllArgs(args), undefined);
+      }
+    });
+
+    test('kind note is accepted by parseSynthesizeArgs; anything else is not', function () {
+      assert.strictEqual(
+        messages.parseSynthesizeArgs(
+          synthesizeArgs({ options: { kind: 'note' } }),
+        ).options.kind,
+        'note',
+      );
+      assert.strictEqual(
+        messages.parseSynthesizeArgs(
+          synthesizeArgs({ options: { kind: 'sheet' } }),
+        ),
+        undefined,
+      );
+    });
+
+    test('normaliseNotesDecoration', function () {
+      assert.strictEqual(messages.normaliseNotesDecoration('marker'), 'marker');
+      assert.strictEqual(messages.normaliseNotesDecoration('none'), 'none');
+      assert.strictEqual(
+        messages.normaliseNotesDecoration('glow'),
+        'marker-and-mark',
+      );
+      assert.strictEqual(
+        messages.normaliseNotesDecoration(undefined),
+        'marker-and-mark',
+      );
+    });
+  });
+
+  suite('classroom parsers (13 §14.2)', function () {
+    const MODULE_ID = '20260905T173010Z-4c2e';
+    const anchor = () => ({
+      block: 'b3f9a1c2',
+      line: 393,
+      exact: 'Then the human path',
+      prefix: '',
+      suffix: '',
+      offset: 0,
+      blocks: 1,
+    });
+    const fields = (overrides) =>
+      Object.assign(
+        {
+          title: 'T',
+          breadcrumb: ['A'],
+          before: '',
+          after: '',
+          section: '',
+          enclosing: 'x ⟦Then the human path⟧ y',
+          mentions: '',
+          contextMode: 'document',
+        },
+        overrides || {},
+      );
+    const options = (overrides) =>
+      Object.assign(
+        {
+          level: 2,
+          readerNote: 'I do not get it',
+          persona: 'max',
+          audience: 'a reader',
+          linked: ['featrues/04-help-module.md'],
+          headingId: 'the-governed-path',
+        },
+        overrides || {},
+      );
+    const buildArgs = (opts, fieldOverrides) => [
+      URI,
+      REQUEST_ID,
+      'Then the human path',
+      fields(fieldOverrides),
+      anchor(),
+      options(opts),
+    ];
+
+    test('parseClassroomPrepareArgs takes the uri, the request id and the fields', function () {
+      const request = messages.parseClassroomPrepareArgs([
+        URI,
+        REQUEST_ID,
+        fields(),
+      ]);
+      assert.ok(request);
+      assert.strictEqual(request.sourceUri, URI);
+      assert.strictEqual(request.requestId, REQUEST_ID);
+      assert.strictEqual(request.fields.contextMode, 'document');
+      assert.strictEqual(
+        messages.parseClassroomPrepareArgs([URI, REQUEST_ID]),
+        undefined,
+      );
+      assert.strictEqual(
+        messages.parseClassroomPrepareArgs([URI, 'bad id!', fields()]),
+        undefined,
+      );
+      assert.strictEqual(
+        messages.parseClassroomPrepareArgs([
+          URI,
+          REQUEST_ID,
+          fields({ contextMode: 'odd' }),
+        ]),
+        undefined,
+      );
+      assert.strictEqual(
+        messages.parseClassroomPrepareArgs(['', REQUEST_ID, fields()]),
+        undefined,
+      );
+    });
+
+    test('parseClassroomBuildArgs accepts the whole payload and normalises the free text', function () {
+      const request = messages.parseClassroomBuildArgs(
+        buildArgs({
+          readerNote: '  two   lines\nhere ',
+          audience: ' the  audience ',
+        }),
+      );
+      assert.ok(request);
+      assert.strictEqual(request.passage, 'Then the human path');
+      assert.strictEqual(request.level, 2);
+      assert.strictEqual(request.readerNote, 'two lines here');
+      assert.strictEqual(request.audience, 'the audience');
+      assert.strictEqual(request.persona, 'max');
+      assert.deepStrictEqual(request.linked, ['featrues/04-help-module.md']);
+      assert.strictEqual(request.headingId, 'the-governed-path');
+      assert.deepStrictEqual(request.anchor, anchor());
+      const bare = messages.parseClassroomBuildArgs(
+        buildArgs({
+          readerNote: '',
+          audience: '',
+          linked: [],
+          headingId: null,
+        }),
+      );
+      assert.ok(bare, 'empty strings and null are allowed');
+      assert.strictEqual(bare.readerNote, '');
+      assert.strictEqual(bare.headingId, null);
+      const noLinked = messages.parseClassroomBuildArgs(
+        buildArgs({ linked: undefined }),
+      );
+      assert.ok(noLinked);
+      assert.deepStrictEqual(noLinked.linked, []);
+    });
+
+    test('parseClassroomBuildArgs refuses every bad field', function () {
+      const bad = [
+        ['wrong length', buildArgs().slice(0, 5)],
+        [
+          'empty passage',
+          [URI, REQUEST_ID, '   ', fields(), anchor(), options()],
+        ],
+        ['level 0', buildArgs({ level: 0 })],
+        ['level 4', buildArgs({ level: 4 })],
+        ['level as string', buildArgs({ level: '2' })],
+        ['bad persona', buildArgs({ persona: 'Max!' })],
+        ['persona too long', buildArgs({ persona: 'a'.repeat(41) })],
+        ['readerNote not a string', buildArgs({ readerNote: 5 })],
+        [
+          'five linked',
+          buildArgs({ linked: ['a.md', 'b.md', 'c.md', 'd.md', 'e.md'] }),
+        ],
+        ['linked climbs', buildArgs({ linked: ['../secrets.md'] })],
+        ['linked absolute', buildArgs({ linked: ['/etc/passwd.md'] })],
+        ['linked drive', buildArgs({ linked: ['C:\\x.md'] })],
+        ['linked scheme', buildArgs({ linked: ['file:///x.md'] })],
+        ['linked too long', buildArgs({ linked: ['a/'.repeat(201) + 'x.md'] })],
+        ['linked not strings', buildArgs({ linked: [1] })],
+        ['headingId with whitespace', buildArgs({ headingId: 'a b' })],
+        ['headingId too long', buildArgs({ headingId: 'x'.repeat(201) })],
+        [
+          'bad anchor',
+          [URI, REQUEST_ID, 'p', fields(), { block: 'nope' }, options()],
+        ],
+        [
+          'bad fields',
+          [URI, REQUEST_ID, 'p', { contextMode: 'odd' }, anchor(), options()],
+        ],
+        [
+          'options not an object',
+          [URI, REQUEST_ID, 'p', fields(), anchor(), 'x'],
+        ],
+      ];
+      for (const [label, args] of bad) {
+        assert.strictEqual(
+          messages.parseClassroomBuildArgs(args),
+          undefined,
+          label,
+        );
+      }
+      const capped = messages.parseClassroomBuildArgs(
+        buildArgs({ readerNote: 'n'.repeat(600), audience: 'a'.repeat(400) }),
+      );
+      assert.strictEqual(
+        capped.readerNote.length,
+        500,
+        'the note is capped, not refused',
+      );
+      assert.strictEqual(capped.audience.length, 300);
+    });
+
+    test('cancel, continue, open, openSource and openFolder', function () {
+      const cancel = messages.parseClassroomCancelArgs([
+        URI,
+        MODULE_ID,
+        'sheet\nline',
+      ]);
+      assert.deepStrictEqual(cancel, {
+        sourceUri: URI,
+        moduleId: MODULE_ID,
+        reason: 'sheet line',
+      });
+      assert.deepStrictEqual(
+        messages.parseClassroomCancelArgs([URI, MODULE_ID]),
+        {
+          sourceUri: URI,
+          moduleId: MODULE_ID,
+          reason: '',
+        },
+      );
+      assert.strictEqual(
+        messages.parseClassroomCancelArgs([URI, 'nope', 'x']),
+        undefined,
+      );
+      assert.strictEqual(
+        messages.parseClassroomCancelArgs([URI, MODULE_ID, 5]),
+        undefined,
+      );
+      assert.deepStrictEqual(
+        messages.parseClassroomContinueArgs([URI, MODULE_ID]),
+        {
+          sourceUri: URI,
+          moduleId: MODULE_ID,
+        },
+      );
+      assert.strictEqual(messages.parseClassroomContinueArgs([URI]), undefined);
+      assert.deepStrictEqual(
+        messages.parseClassroomOpenArgs([URI, MODULE_ID]),
+        {
+          sourceUri: URI,
+          moduleId: MODULE_ID,
+        },
+      );
+      assert.deepStrictEqual(
+        messages.parseClassroomOpenSourceArgs(['file:///m.md', MODULE_ID]),
+        {
+          moduleUri: 'file:///m.md',
+          moduleId: MODULE_ID,
+        },
+      );
+      assert.strictEqual(
+        messages.parseClassroomOpenSourceArgs(['', MODULE_ID]),
+        undefined,
+      );
+      assert.strictEqual(messages.parseClassroomOpenFolderArgs([URI]), URI);
+      assert.strictEqual(messages.parseClassroomOpenFolderArgs([]), undefined);
+      assert.strictEqual(
+        messages.parseClassroomOpenFolderArgs([URI, 'x']),
+        undefined,
+      );
+    });
+
+    test('isSafeRelativePath', function () {
+      assert.strictEqual(messages.isSafeRelativePath('docs/a b.md'), true);
+      assert.strictEqual(messages.isSafeRelativePath('a/../b.md'), false);
+      assert.strictEqual(messages.isSafeRelativePath('..'), false);
+      assert.strictEqual(messages.isSafeRelativePath('/abs.md'), false);
+      assert.strictEqual(
+        messages.isSafeRelativePath('\\\\server\\share.md'),
+        false,
+      );
+      assert.strictEqual(messages.isSafeRelativePath('https://x/y.md'), false);
+      assert.strictEqual(messages.isSafeRelativePath(''), false);
+      assert.strictEqual(messages.isSafeRelativePath('a\u0000b.md'), false);
+    });
+  });
 });

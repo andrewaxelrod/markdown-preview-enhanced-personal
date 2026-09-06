@@ -214,7 +214,7 @@ suite('read-aloud control panel (F3)', function () {
     }
   });
 
-  test('the panel is on screen from the start with the eight controls in order', function () {
+  test('the panel is on screen from the start with the nine controls in order', function () {
     assert.ok(bar(), 'the panel exists; logs: ' + logs.join('\n'));
     assert.strictEqual(bar().hidden, false, 'and is visible while idle');
     // The panel's own row; the popovers, the theme settings sheet and the
@@ -230,8 +230,10 @@ suite('read-aloud control panel (F3)', function () {
     const strip = doc.querySelector('.mpe-ra-strip');
     assert.ok(strip && strip.parentElement === doc.body);
     assert.strictEqual(strip.hidden, true);
-    // 04-help-module §2: help sits between the speed and the ×, so the × is
-    // still the last control.
+    // 04-help-module §2: help sits between the speed and the ×; 12-notes §12:
+    // the Notes button between help and the ×; 13-classroom §12.2: the module
+    // preview's Classroom button between notes and the ×, so the × is still
+    // the last.
     assert.deepStrictEqual(order, [
       'volume',
       'theme',
@@ -240,11 +242,16 @@ suite('read-aloud control panel (F3)', function () {
       'forward10',
       'speed',
       'help',
+      'notes',
+      'classroomModule',
       'close',
     ]);
-    // With no `helpAvailable` in the config — the web build, and this fixture
-    // — the button is not on screen at all.
+    // With no `helpAvailable`, `notesAvailable` or `classroomModule` in the
+    // config — the web build, and this fixture — none of the three is on
+    // screen at all.
     assert.strictEqual(button('help').hidden, true);
+    assert.strictEqual(button('notes').hidden, true);
+    assert.strictEqual(button('classroom').hidden, true);
     assert.strictEqual(button('speed').textContent, '1×');
     assert.strictEqual(button('back10').disabled, true, 'nothing to skip yet');
     assert.strictEqual(button('forward10').disabled, true);

@@ -1014,6 +1014,126 @@ html[data-mpe-ra-page]
 }
 
 /* --------------------------------------------------------------------------
+ * 7d. Notes on the page (12 §10.3, §11.1)
+ *
+ * Neutral ink from the page's text colour, so nothing clashes with the five
+ * highlight palettes, the amber mark, the slate links or the blue selection.
+ * The tokens are set on every block, not once on the root: a dimmed block
+ * redefines `--text` (7b above), and a `color-mix()` evaluated there follows
+ * the tier's ink where one evaluated on the root would not. The badge text
+ * is the surface on the text colour, 4.5:1 or better on both pages. The two
+ * note sheets take the help sheet's size and measure (7c); the Note sheet's
+ * body carries `.mpe-ra-help-body` too, so 7c's body rules already reach it.
+ * ----------------------------------------------------------------------- */
+
+html[data-mpe-ra-page]
+  body:not([data-presentation-mode])
+  .markdown-preview[data-for='preview'],
+html[data-mpe-ra-page]
+  body:not([data-presentation-mode])
+  .markdown-preview
+  .mpe-ra-block {
+  --mpe-ra-note-ink: color-mix(in srgb, var(--text) 55%, transparent);
+  --mpe-ra-note-ink-strong: var(--text);
+  --mpe-ra-note-hover-surface: color-mix(in srgb, var(--text) 8%, transparent);
+  --mpe-ra-note-badge-bg: var(--text);
+  --mpe-ra-note-badge-fg: var(--surface);
+}
+
+html[data-mpe-ra-page] body .mpe-ra-note-marker {
+  color: var(--mpe-ra-note-ink);
+}
+
+html[data-mpe-ra-page] body .mpe-ra-note-marker:hover {
+  color: var(--mpe-ra-note-ink-strong);
+}
+
+html[data-mpe-ra-page] body .mpe-ra-note-marker.is-active {
+  color: var(--mpe-ra-note-badge-fg);
+  background: var(--mpe-ra-note-ink-strong);
+}
+
+html[data-mpe-ra-page] body :is(.mpe-ra-note, .mpe-ra-notes-list) {
+  font-size: calc(var(--mpe-ra-page-text-size, 20) * 1rem / 16);
+  line-height: var(--mpe-ra-page-line-height, 1.6);
+  width: calc(var(--mpe-ra-page-measure, 33em) + 40px);
+  max-height: 70vh;
+  --mpe-ra-panel-track: var(--rule);
+  transition:
+    color 150ms ease,
+    background-color 150ms ease;
+}
+
+html[data-mpe-ra-page] body:not([data-presentation-mode]) .mpe-ra-note-body > blockquote {
+  border-left-color: var(--rule);
+}
+
+html[data-mpe-ra-page]
+  :is(
+    .mpe-ra-note,
+    .mpe-ra-notes-list,
+    .mpe-ra-note-marker,
+    .mpe-ra-note-textarea,
+    .mpe-ra-note-tag-input,
+    .mpe-ra-note-tag-remove,
+    .mpe-ra-note-context-toggle,
+    .mpe-ra-notes-row,
+    .mpe-ra-note-undo
+  ):focus-visible {
+  outline-color: var(--focus);
+}
+
+/* --------------------------------------------------------------------------
+ * 7e. Classroom on the page (13 §5.2, §12.2, §18 C7–C8)
+ *
+ * The two sheets take the help sheet's size and measure (7c); the lever
+ * ring is the page's focus colour, the warning badge the warning pair, both
+ * measured against the surface. The chrome inside keeps its px sizes.
+ * ----------------------------------------------------------------------- */
+
+html[data-mpe-ra-page]
+  body:not([data-presentation-mode])
+  .markdown-preview[data-for='preview'],
+html[data-mpe-ra-page] {
+  --mpe-ra-lever-ring: var(--focus);
+  --mpe-ra-classroom-warning: var(--warning-text);
+}
+
+html[data-mpe-ra-page] body :is(.mpe-ra-classroom, .mpe-ra-module) {
+  font-size: calc(var(--mpe-ra-page-text-size, 20) * 1rem / 16);
+  line-height: var(--mpe-ra-page-line-height, 1.6);
+  width: calc(var(--mpe-ra-page-measure, 33em) + 40px);
+  max-height: 70vh;
+  --mpe-ra-panel-track: var(--rule);
+  transition:
+    color 150ms ease,
+    background-color 150ms ease;
+}
+
+html[data-mpe-ra-page] body .mpe-ra-bar-badge.is-warning {
+  background: var(--warning-text);
+  color: var(--surface);
+}
+
+html[data-mpe-ra-page]
+  body:not([data-presentation-mode])
+  .markdown-preview
+  .mpe-ra-flash {
+  outline-color: var(--focus);
+}
+
+html[data-mpe-ra-page]
+  :is(
+    .mpe-ra-classroom,
+    .mpe-ra-module,
+    .mpe-ra-lever-row,
+    .mpe-ra-classroom-link-box,
+    .mpe-ra-classroom-persona-select
+  ):focus-visible {
+  outline-color: var(--focus);
+}
+
+/* --------------------------------------------------------------------------
  * 8. Transitions (requirement 3.5)
  *
  * Colour and background only, 150 ms, on the surfaces that repaint when the

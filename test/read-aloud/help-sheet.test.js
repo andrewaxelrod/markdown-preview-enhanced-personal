@@ -1043,4 +1043,161 @@ suite('read-aloud help sheet (04-help-module)', function () {
     assert.strictEqual(fields.mentions, '');
     assert.strictEqual(fields.section, '');
   });
+  // ------------------------------------------------- 12 §5.4 Save as note
+
+  suite('Save as note (12-notes §5.4)', function () {
+    function saveButton() {
+      return action('helpSaveNote');
+    }
+
+    test('the chip appears only with an answer and only when notes are available', async function () {
+      boot();
+      await sleep(60);
+      enableHelp({ notesAvailable: false });
+      await selectParagraph('passage');
+      click(helpButton());
+      assert.ok(saveButton(), 'the button is built');
+      assert.strictEqual(saveButton().hidden, true, 'hidden while Thinking…');
+      answerHelp();
+      assert.strictEqual(saveButton().hidden, true, 'and without notes');
+      enableHelp({ notesAvailable: true });
+      assert.strictEqual(saveButton().hidden, false);
+      assert.strictEqual(saveButton().disabled, false);
+      assert.strictEqual(saveButton().textContent, 'Save as note');
+      closeSheet();
+    });
+
+    test('saving posts the answer on screen with source help and the anchor of the passage, and keeps help open', async function () {
+      boot();
+      await sleep(60);
+      enableHelp({ notesAvailable: true });
+      await selectWords('passage', 'the same path a human author would walk');
+      click(helpButton());
+      const request = answerHelp();
+      click(saveButton());
+      const create = lastMessage('readAloudNoteCreate');
+      assert.ok(create, 'a note create was posted');
+      const [uri, requestId, passage, fields, anchor, options] = create.args;
+      assert.strictEqual(uri, 'file:///doc.md');
+      assert.match(requestId, /^ra-/);
+      assert.strictEqual(
+        passage,
+        request.args[2],
+        'the passage behind the sheet',
+      );
+      assert.strictEqual(fields.contextMode, request.args[3].contextMode);
+      assert.strictEqual(
+        fields.enclosing,
+        request.args[3].enclosing,
+        'the same material',
+      );
+      assert.strictEqual(
+        anchor.exact,
+        'the same path a human author would walk',
+      );
+      assert.match(anchor.block, /^b[0-9a-f]{1,8}$/);
+      assert.deepStrictEqual(JSON.parse(JSON.stringify(options)), {
+        source: 'help',
+        explanation: ANSWER_MARKDOWN,
+      });
+      assert.strictEqual(sheet().hidden, false, 'help stays open');
+      assert.strictEqual(saveButton().disabled, true);
+      assert.strictEqual(saveButton().textContent, 'Saved');
+      assert.ok(saveButton().querySelector('svg'), 'with a check');
+      assert.strictEqual(
+        doc.querySelector('.mpe-ra-note').hidden,
+        true,
+        'no Note sheet opens',
+      );
+      assert.strictEqual(
+        doc.querySelector('.mpe-ra-note-chip-text').textContent,
+        'Saved as note',
+      );
+      // A second click does nothing.
+      click(saveButton());
+      assert.strictEqual(
+        posted.filter((m) => m.command === 'readAloudNoteCreate').length,
+        1,
+      );
+      closeSheet();
+    });
+
+    test('a follow-up answer re-enables it for the new answer', async function () {
+      boot();
+      await sleep(60);
+      enableHelp({ notesAvailable: true });
+      await selectParagraph('passage');
+      click(helpButton());
+      answerHelp();
+      click(saveButton());
+      assert.strictEqual(saveButton().disabled, true);
+      click(action('helpSimpler'));
+      assert.strictEqual(
+        saveButton().hidden,
+        true,
+        'hidden while the follow-up is written',
+      );
+      answerHelp({ markdown: 'Simpler words.', html: '<p>Simpler words.</p>' });
+      assert.strictEqual(saveButton().hidden, false);
+      assert.strictEqual(saveButton().disabled, false);
+      assert.strictEqual(saveButton().textContent, 'Save as note');
+      click(saveButton());
+      assert.strictEqual(
+        lastMessage('readAloudNoteCreate').args[5].explanation,
+        'Simpler words.',
+      );
+      closeSheet();
+    });
+  });
+
+  // ---------------------------------------------- 13 §5.5 Teach me this
+
+  suite('Teach me this (13-classroom §5.5)', function () {
+    function teachButton() {
+      return action('helpTeach');
+    }
+
+    test('the chip is built, hidden until an answer and without classroomAvailable', async function () {
+      boot();
+      await sleep(60);
+      enableHelp({ classroomAvailable: false });
+      await selectParagraph('passage');
+      click(helpButton());
+      assert.ok(teachButton(), 'the button is built');
+      assert.strictEqual(teachButton().hidden, true, 'hidden while Thinking…');
+      answerHelp();
+      assert.strictEqual(teachButton().hidden, true, 'and without classroom');
+      enableHelp({ classroomAvailable: true });
+      assert.strictEqual(teachButton().hidden, false);
+      assert.strictEqual(teachButton().textContent, 'Teach me this');
+      closeSheet();
+    });
+
+    test("clicking it closes Help and opens the Classroom sheet with Help's passage", async function () {
+      boot();
+      await sleep(60);
+      enableHelp({ classroomAvailable: true });
+      await selectWords('passage', 'the same path a human author would walk');
+      click(helpButton());
+      const request = answerHelp();
+      click(teachButton());
+      assert.strictEqual(sheet().hidden, true, 'help closed');
+      const classroom = doc.querySelector('.mpe-ra-classroom');
+      assert.ok(classroom && !classroom.hidden, 'classroom open');
+      const prepare = posted
+        .filter((m) => m.command === 'readAloudClassroomPrepare')
+        .pop();
+      assert.ok(prepare, 'a prepare was posted');
+      assert.strictEqual(prepare.args[2].contextMode, 'document');
+      assert.strictEqual(
+        prepare.args[2].enclosing,
+        request.args[3].enclosing,
+        "help's material",
+      );
+      assert.strictEqual(
+        doc.querySelector('.mpe-ra-classroom-quote').textContent,
+        'the same path a human author would walk',
+      );
+    });
+  });
 });

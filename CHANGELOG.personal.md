@@ -394,6 +394,99 @@ off` mid-read dropped the page, its properties and every tier class and kept the
     effect uses to keep it the same size on screen while the text zooms. The preview also gets
     bottom padding while the panel is up, so it never covers the last lines.
 
+- **Notes** (`featrues/12-notes/spec.md`, brief in `ui-brief.md`): a **Note** button on the
+  selection cluster (`Alt+N`) that keeps a passage for later. The click writes a markdown
+  file at once — the exact words, the block they sit in with the passage marked between ⟦
+  and ⟧, the block before and after, the heading path, the document's title, path and git
+  commit, and an anchor — and then asks the help engine, with help's own material, for a
+  title, a two-sentence summary, why the passage matters, its terms and a few tags, written
+  for the eye (`src/notes/note-prompt.ts`, §21). A five-word selection gets the term shape
+  (_What it means here_, _In general_). **Save as note** on the Help sheet keeps the
+  explanation on screen as a note with no second engine call. Notes show as a quiet marker
+  in the **right margin** of their block (count badge, title tooltip) and a dotted mark under
+  the words through the CSS Custom Highlight API — no DOM, so extraction and the offset map
+  never see it — both dimming with the tiers and the mark stepping aside for the block being
+  read. A marker or the words open the **Note sheet** (the help sheet's shape and the reader
+  template): passage, generated sections, an editable _My note_ that saves as you type,
+  editable tags, collapsed context, Regenerate, Open in editor, Copy as markdown, Delete
+  with a six-second Undo before the file goes to the OS trash, a pager in reading order, and
+  Play, which reads the sheet as a bounded `kind: 'note'` read and pauses a document read
+  with Resume. A **Notes** button on the bar (`Alt+Shift+N`) lists the document's notes in
+  reading order, orphans last; a **Notes** view in the Explorer lists every document's notes
+  with counts, dates and tags, opens them in the preview, and _Search notes_ is a quick
+  pick across all of them. Notes **re-anchor on every render**: by the block's content key,
+  then by the exact passage with its prefix and suffix, then by a fuzzy match of the
+  enclosing block; a note that cannot be found is **orphaned** — kept, badged _Not in this
+  version_, its saved context shown, _Re-attach to selection_ offered — never dropped and
+  never written into the document. **Storage** is one `.md` per note with YAML front matter
+  under `~/.crossnote/notes/<workspace>/<relative path>/` (`notesDirectory`, machine scope,
+  to move it): hand-editable, greppable, sync-friendly, no index, atomic writes, hand edits
+  preserved on rewrite. Settings `notesEnabled`, `notesDirectory`, `notesGenerate`,
+  `notesDecoration`; the engine, model and effort are the help settings. Desktop only. Notes
+  copy document text outside the repository, said in the setting's description.
+  - Messages: webview → host `readAloudNoteCreate`, `readAloudNoteUpdate`,
+    `readAloudNoteDelete`, `readAloudNoteUndoDelete`, `readAloudNoteRegenerate`,
+    `readAloudNoteReattach`, `readAloudNoteOpen`, `readAloudNoteCopy`,
+    `readAloudNoteAnchors`, `readAloudNotesShowAll`; host → webview `readAloudNotes`,
+    `readAloudNoteError`, `readAloudControl` actions `note`, `notesList`, `showNote`;
+    `readAloudConfig` carries `notesAvailable` and `notesDecoration`. Every payload is
+    validated in `messages.ts` first.
+  - Files: `src/notes/{note-format,notes-store,note-prompt,notes-controller,notes-tree}.ts`,
+    the notes layer of `media/read-aloud.js`, `noteAnchorFor` and `anchorNotes` in
+    `media/read-aloud-core.js`, §3e of `media/read-aloud.css`, the note tokens in
+    `media/read-aloud-page.css`, the view and commands in `package.json`; dependency
+    `yaml@2.9.0`; suites `test/notes/{note-format,notes-store,note-prompt}.test.js`,
+    `test/read-aloud/{note-anchor,notes-sheet}.test.js` and new cases in `messages.test.js`
+    and `help-sheet.test.js`; `notes=1` in `test/harness/`.
+
+- **Classroom** (`featrues/13-classroom/spec.md`, recommendation and measurements beside
+  it): a **Classroom** button on the selection cluster (`Alt+C`) and **Teach me this** on the
+  Help sheet, for the passage the explanation was not enough for. A sheet asks how lost the
+  reader is, in three rows with an optional sentence in their own words, shows the
+  instructor (**Max**, a patient practitioner whose voice and chapter structure come from an
+  authoring guide shipped as a persona package), the audience line, the engine label and
+  exactly which files will be sent, and **Build** has the help engine write a teaching
+  **module** the way the guide says a course is written: one call for the plan, then one
+  call per chapter in course order, each briefed with the previous chapter's closing bridge,
+  the next chapter's question, the promises due and the running examples, each checked
+  mechanically (no em dashes, tables, links, code or emoji; the pickup echoes the bridge;
+  the length fits the chapter type) with one retry, and appended to a markdown file under
+  `~/.crossnote/classroom/modules/<workspace>/<relative path>/` (`classroomDirectory`,
+  machine scope). The module opens **beside** the source document as soon as its first
+  chapter is on disk and is a document like any other from then on: read aloud, followed,
+  dimmed, explained, noted. It opens by quoting the passage with a link back to its source
+  line and closes with a chapter that walks the passage sentence by sentence. In a module's
+  preview a bar button (`Alt+Shift+C`) opens the **Module sheet** with progress, the chapter
+  list, Cancel, **Continue** for a stopped or failed build, and _Open the source passage_,
+  which reveals the passage in the source preview through its anchor. The fuel is the whole
+  document with the passage marked (120,000 characters) plus up to four linked workspace
+  markdown files (`classroomFollowLinks`), all named and untickable before Build. Every call
+  of a build runs from one working directory so the persona-and-fuel prefix is cached: a
+  six-chapter module at `claude · sonnet` measured at about two minutes and thirty cents.
+  _Open Classroom Module_ lists every module across documents. Personas are folders
+  (`persona.md`, optional `specimen.md`); user personas under
+  `~/.crossnote/classroom/personas/<id>/` are listed beside the built-in one and may replace
+  it. Settings `classroomEnabled`, `classroomDirectory`, `classroomPersona`,
+  `classroomAudience`, `classroomFollowLinks`, `classroomAutoOpen`; the engine, model and
+  effort are the help settings. Desktop only. Classroom sends the whole document and the
+  ticked linked files to the engine, on Build only, and copies document text outside the
+  repository; both are said in the settings' descriptions.
+  - Messages: webview → host `readAloudClassroomPrepare`, `readAloudClassroomBuild`,
+    `readAloudClassroomCancel`, `readAloudClassroomContinue`, `readAloudClassroomOpen`,
+    `readAloudClassroomOpenSource`, `readAloudClassroomOpenFolder`; host → webview
+    `readAloudClassroomPrepared`, `readAloudClassroomProgress`, `readAloudClassroomError`,
+    `readAloudControl` actions `classroom`, `classroomModule`, `revealAnchor`;
+    `readAloudConfig` carries `classroomAvailable` and, in a module preview,
+    `classroomModule`. Every payload is validated in `messages.ts` first.
+    `runHelpEngine` takes an optional `cwd` and reports the CLI's cache reads.
+  - Files: `src/classroom/{persona,plan-prompt,chapter-prompt,ledger,checks,module-format,module-store,links,classroom-controller}.ts`,
+    `src/classroom/personas/max/`, `src/read-aloud/git-info.ts` (lifted from the notes
+    controller), the classroom layer of `media/read-aloud.js`, §3f of `media/read-aloud.css`,
+    the tokens in `media/read-aloud-page.css`, the commands and settings in `package.json`;
+    suites `test/classroom/*.test.js`, `test/read-aloud/classroom-sheet.test.js` and new
+    cases in `messages.test.js`, `help-engine.test.js`, `help-sheet.test.js`,
+    `control-panel.test.js`; `classroom=1` and `module=1` in `test/harness/`.
+
 ### Changed
 
 - `engines.vscode` raised from `^1.70.0` to `^1.82.0` and `@types/vscode` to `1.82.0`, so the

@@ -1,3 +1,5 @@
+import * as os from 'os';
+import * as path from 'path';
 import type * as vscode from 'vscode';
 import * as packageJSON from '../../package.json';
 import { getMPEConfig, updateMPEConfig } from '../config';
@@ -29,9 +31,11 @@ import {
   HELP_CONTEXT_MODES,
   normaliseGlobalTheme,
   normaliseHighlightTheme,
+  normaliseNotesDecoration,
   normalisePlayerFont,
   normaliseWordMarker,
   type HelpContextMode,
+  type NotesDecoration,
   type ReadAloudFont,
   type ReadAloudGlobalTheme,
   type ReadAloudHighlightTheme,
@@ -79,6 +83,21 @@ export const READ_ALOUD_SETTING_KEYS = [
   'readAloudHelpAutoPlay',
   'readAloudHelpTimeoutSeconds',
   'readAloudHelpBinaryPath',
+  // Notes (`featrues/12-notes/spec.md` §14.1). `notesEnabled` and
+  // `notesDecoration` ride in `readAloudConfig`; the root and the generate
+  // switch are read per operation.
+  'notesEnabled',
+  'notesDirectory',
+  'notesGenerate',
+  'notesDecoration',
+  // Classroom (`featrues/13-classroom/spec.md` §14.1). `classroomEnabled`
+  // rides in `readAloudConfig`; the others are read per Prepare or Build.
+  'classroomEnabled',
+  'classroomDirectory',
+  'classroomPersona',
+  'classroomAudience',
+  'classroomFollowLinks',
+  'classroomAutoOpen',
 ] as const;
 
 export type ReadAloudSettingKey = (typeof READ_ALOUD_SETTING_KEYS)[number];
@@ -108,6 +127,31 @@ export interface ReadAloudHelpSettings {
   binaryPath: { claude?: string; codex?: string };
 }
 
+/** §14.1 — the four notes settings. */
+export interface ReadAloudNotesSettings {
+  enabled: boolean;
+  /** The root, `~` expanded; '' means `<globalConfigPath>/notes` (§7.1). */
+  directory: string;
+  generate: boolean;
+  decoration: NotesDecoration;
+}
+
+/** 13 §14.1 — the six classroom settings. */
+export interface ReadAloudClassroomSettings {
+  enabled: boolean;
+  /** The root, `~` expanded; '' means `<globalConfigPath>/classroom` (§11.1). */
+  directory: string;
+  /** The persona id in force; validated against the id pattern. */
+  persona: string;
+  /** The audience line; '' means the persona's default. */
+  audience: string;
+  followLinks: boolean;
+  autoOpen: boolean;
+}
+
+export const CLASSROOM_PERSONA_SETTING_RE = /^[a-z0-9][a-z0-9-]{0,39}$/;
+export const DEFAULT_CLASSROOM_PERSONA = 'max';
+
 export interface ReadAloudSettings {
   enabled: boolean;
   clickToRead: boolean;
@@ -124,6 +168,8 @@ export interface ReadAloudSettings {
   cacheSizeMB: number;
   kokoroBaseUrl: string;
   help: ReadAloudHelpSettings;
+  notes: ReadAloudNotesSettings;
+  classroom: ReadAloudClassroomSettings;
 }
 
 const SETTINGS_NAMESPACE = 'markdown-preview-enhanced';
@@ -248,6 +294,83 @@ export function readHelpSettings(): ReadAloudHelpSettings {
   };
 }
 
+/**
+ * §14.1 — the notes settings. `notesDirectory` is machine scope for the
+ * reason `kokoroBaseUrl` is: a workspace's `.vscode/settings.json` must not
+ * be able to redirect where document text is written. A relative path is
+ * ignored (the root must be absolute once `~` is expanded).
+ */
+export function readNotesSettings(): ReadAloudNotesSettings {
+  const enabledRaw = getMPEConfig<boolean>('notesEnabled');
+  const generateRaw = getMPEConfig<boolean>('notesGenerate');
+  const directoryRaw = getMPEConfig<string>('notesDirectory');
+  let directory = '';
+  if (typeof directoryRaw === 'string' && directoryRaw.trim()) {
+    const expanded = directoryRaw.trim().replace(/^~(?=$|[\\/])/, os.homedir());
+    if (path.isAbsolute(expanded)) {
+      directory = expanded;
+    } else {
+      readAloudLog(
+        `ignoring notesDirectory ${JSON.stringify(directoryRaw)}: not an absolute path; using the default root`,
+      );
+    }
+  }
+  return {
+    enabled: typeof enabledRaw === 'boolean' ? enabledRaw : true,
+    directory,
+    generate: typeof generateRaw === 'boolean' ? generateRaw : true,
+    decoration: normaliseNotesDecoration(
+      getMPEConfig<string>('notesDecoration'),
+    ),
+  };
+}
+
+/**
+ * 13 §14.1 — the classroom settings. `classroomDirectory` is machine scope
+ * for the reason `notesDirectory` is; a relative path is ignored.
+ */
+export function readClassroomSettings(): ReadAloudClassroomSettings {
+  const enabledRaw = getMPEConfig<boolean>('classroomEnabled');
+  const directoryRaw = getMPEConfig<string>('classroomDirectory');
+  const personaRaw = getMPEConfig<string>('classroomPersona');
+  const audienceRaw = getMPEConfig<string>('classroomAudience');
+  const followRaw = getMPEConfig<boolean>('classroomFollowLinks');
+  const autoOpenRaw = getMPEConfig<boolean>('classroomAutoOpen');
+  let directory = '';
+  if (typeof directoryRaw === 'string' && directoryRaw.trim()) {
+    const expanded = directoryRaw.trim().replace(/^~(?=$|[\\/])/, os.homedir());
+    if (path.isAbsolute(expanded)) {
+      directory = expanded;
+    } else {
+      readAloudLog(
+        `ignoring classroomDirectory ${JSON.stringify(directoryRaw)}: not an absolute path; using the default root`,
+      );
+    }
+  }
+  let persona = DEFAULT_CLASSROOM_PERSONA;
+  if (typeof personaRaw === 'string' && personaRaw.trim()) {
+    const trimmed = personaRaw.trim();
+    if (CLASSROOM_PERSONA_SETTING_RE.test(trimmed)) {
+      persona = trimmed;
+    } else {
+      readAloudLog(
+        `ignoring classroomPersona ${JSON.stringify(trimmed)}: not a persona id; using ${DEFAULT_CLASSROOM_PERSONA}`,
+      );
+    }
+  }
+  return {
+    enabled: typeof enabledRaw === 'boolean' ? enabledRaw : true,
+    directory,
+    persona,
+    audience:
+      typeof audienceRaw === 'string'
+        ? audienceRaw.replace(/\s+/g, ' ').trim().slice(0, 300)
+        : '',
+    followLinks: typeof followRaw === 'boolean' ? followRaw : true,
+    autoOpen: typeof autoOpenRaw === 'boolean' ? autoOpenRaw : true,
+  };
+}
+
 /** All settings, normalised. Never throws; every value is range-checked. */
 export function readReadAloudSettings(): ReadAloudSettings {
   const enabledRaw = getMPEConfig<boolean>('readAloudEnabled');
@@ -302,6 +425,8 @@ export function readReadAloudSettings(): ReadAloudSettings {
     cacheSizeMB: readInteger('readAloudCacheSizeMB', 100, 1),
     kokoroBaseUrl,
     help: readHelpSettings(),
+    notes: readNotesSettings(),
+    classroom: readClassroomSettings(),
   };
 }
 
@@ -401,4 +526,15 @@ export async function writeHelpModelSettings(
     await updateMPEConfig('readAloudHelpCodexModel', model, true);
     await updateMPEConfig('readAloudHelpCodexEffort', effort, true);
   }
+}
+
+/** 13 §5.4 step 2 — Build writes the instructor and the audience it used. */
+export async function writeClassroomPersonaSetting(id: string): Promise<void> {
+  await updateMPEConfig('classroomPersona', id, true);
+}
+
+export async function writeClassroomAudienceSetting(
+  audience: string,
+): Promise<void> {
+  await updateMPEConfig('classroomAudience', audience, true);
 }

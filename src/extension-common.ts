@@ -5,10 +5,35 @@ import * as vscode from 'vscode';
 import { setAiTranslatorContext, promptAndStoreApiKey } from './ai-translator';
 import { ReadAloudController } from './read-aloud/controller';
 import { readAloudLog } from './read-aloud/log';
+import { NotesController } from './notes/notes-controller';
+import { ClassroomController } from './classroom/classroom-controller';
+import {
+  NOTES_VIEW_ID,
+  NotesTreeProvider,
+  shortenHome,
+  type NoteNode,
+} from './notes/notes-tree';
 import {
   parseCancelArgs,
+  parseClassroomBuildArgs,
+  parseClassroomCancelArgs,
+  parseClassroomContinueArgs,
+  parseClassroomOpenArgs,
+  parseClassroomOpenFolderArgs,
+  parseClassroomOpenSourceArgs,
+  parseClassroomPrepareArgs,
   parseHelpArgs,
   parseHelpCancelArgs,
+  parseNoteAnchorsArgs,
+  parseNoteCopyArgs,
+  parseNoteCreateArgs,
+  parseNoteDeleteArgs,
+  parseNoteOpenArgs,
+  parseNoteReattachArgs,
+  parseNoteRegenerateArgs,
+  parseNotesShowAllArgs,
+  parseNoteUndoDeleteArgs,
+  parseNoteUpdateArgs,
   parsePlayingArgs,
   parseResetPageArgs,
   parseSetFontArgs,
@@ -29,6 +54,7 @@ import { WikilinkHoverProvider } from './wikilink-hover-provider';
 import {
   WikilinkDocumentLinkProvider,
   openWikilinkTarget,
+  resolveWikilinkUri,
 } from './wikilink-document-link-provider';
 import { PreviewColorScheme, getMPEConfig, updateMPEConfig } from './config';
 import { customEditorProviderOptions } from './custom-editor-options';
@@ -132,6 +158,128 @@ export async function initExtensionCommon(context: vscode.ExtensionContext) {
     },
   });
   context.subscriptions.push(readAloud);
+
+  // Notes (`featrues/12-notes/spec.md`): the store, the generation queue and
+  // the Notes view. Desktop only — the store writes to the home directory and
+  // the engine spawns a process — so the web build gets the controller (which
+  // answers every message with the web notice) and no view.
+  const notes = new NotesController({
+    isWebBuild: isVSCodeWebExtension(),
+    engineDeps: readAloud.engineDeps,
+    getSinkFor: readAloud.previewDeps.getSinkFor,
+    renderMarkdown: readAloud.previewDeps.renderMarkdown,
+    getDocumentText: readAloud.previewDeps.getDocumentText,
+    hasPreview: (uri) => {
+      if (getPreviewMode() === PreviewMode.SinglePreview) {
+        return PreviewProvider.isSinglePreviewShowing(uri);
+      }
+      return getAllPreviewProviders().some((candidate) =>
+        candidate.isPreviewOn(uri),
+      );
+    },
+    openPreview: async (uri) => {
+      const document = await vscode.workspace.openTextDocument(uri);
+      const previewProvider = await getPreviewContentProvider(uri);
+      await previewProvider.initPreview({
+        sourceUri: uri,
+        document,
+        cursorLine: 0,
+        viewOptions: {
+          viewColumn: vscode.ViewColumn.Beside,
+          preserveFocus: true,
+        },
+      });
+    },
+  });
+  context.subscriptions.push(notes);
+  // The document's list rides right behind the config handshake (12 §14.3).
+  readAloud.addConfigListener((sourceUri) => notes.onPreviewReady(sourceUri));
+
+  // Classroom (`featrues/13-classroom/spec.md`): the module store, the one
+  // build queue per host and the module previews. Desktop only, like notes.
+  const classroom = new ClassroomController({
+    isWebBuild: isVSCodeWebExtension(),
+    engineDeps: readAloud.engineDeps,
+    getSinkFor: readAloud.previewDeps.getSinkFor,
+    getDocumentText: readAloud.previewDeps.getDocumentText,
+    hasPreview: (uri) => {
+      if (getPreviewMode() === PreviewMode.SinglePreview) {
+        return PreviewProvider.isSinglePreviewShowing(uri);
+      }
+      return getAllPreviewProviders().some((candidate) =>
+        candidate.isPreviewOn(uri),
+      );
+    },
+    openPreview: async (uri) => {
+      const document = await vscode.workspace.openTextDocument(uri);
+      const previewProvider = await getPreviewContentProvider(uri);
+      await previewProvider.initPreview({
+        sourceUri: uri,
+        document,
+        cursorLine: 0,
+        viewOptions: {
+          viewColumn: vscode.ViewColumn.Beside,
+          preserveFocus: true,
+        },
+      });
+    },
+    // 13 §9.7 — after every appended chapter the module's preview re-renders
+    // from its document, which follows the file on disk when it is not dirty.
+    refreshPreview: async (uri) => {
+      const previewProvider = await getPreviewContentProvider(uri);
+      previewProvider.updateMarkdown(uri);
+    },
+    isSinglePreviewMode: () => getPreviewMode() === PreviewMode.SinglePreview,
+    resolveWikilink: (sourceUri, target) =>
+      resolveWikilinkUri(sourceUri, target, notebooksManager),
+    markdownExtensions: () =>
+      getMPEConfig<string[]>('markdownFileExtensions') ?? [
+        '.md',
+        '.markdown',
+        '.mdown',
+        '.mkdn',
+        '.mkd',
+        '.rmd',
+        '.qmd',
+        '.mdx',
+      ],
+  });
+  context.subscriptions.push(classroom);
+  readAloud.addConfigListener((sourceUri) =>
+    classroom.onPreviewReady(sourceUri),
+  );
+  readAloud.moduleConfigFor = (sourceUri) =>
+    classroom.moduleConfigFor(sourceUri);
+
+  /** 13 §13 — the module the active tab shows, when it is a module preview. */
+  function activeModuleUri(): vscode.Uri | undefined {
+    try {
+      const tab = vscode.window.tabGroups.activeTabGroup.activeTab;
+      const input = tab?.input;
+      if (
+        input instanceof vscode.TabInputCustom &&
+        input.uri.scheme === 'file'
+      ) {
+        return classroom.moduleStore.isModulePath(input.uri.fsPath)
+          ? input.uri
+          : undefined;
+      }
+      if (
+        input instanceof vscode.TabInputWebview &&
+        getPreviewMode() === PreviewMode.SinglePreview
+      ) {
+        for (const provider of getAllPreviewProviders()) {
+          const target = provider.singlePreviewTarget();
+          if (target && classroom.moduleStore.isModulePath(target.fsPath)) {
+            return target;
+          }
+        }
+      }
+    } catch {
+      /* no tab API, or no active tab */
+    }
+    return undefined;
+  }
 
   function getCurrentWorkingDirectory() {
     const activeEditor = vscode.window.activeTextEditor;
@@ -2091,6 +2239,419 @@ export async function initExtensionCommon(context: vscode.ExtensionContext) {
       },
     ),
   );
+
+  // ---------------------------------------------------------------------------
+  // Notes (`featrues/12-notes/spec.md` §13.3, §14.2): the palette commands,
+  // the `_crossnote.readAloudNote*` handlers and the Notes view.
+  // ---------------------------------------------------------------------------
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      'markdown-preview-enhanced.notes.create',
+      async () => {
+        await readAloud.control('note');
+      },
+    ),
+    vscode.commands.registerCommand(
+      'markdown-preview-enhanced.notes.showList',
+      async () => {
+        await readAloud.control('notesList');
+      },
+    ),
+    vscode.commands.registerCommand(
+      '_crossnote.readAloudNoteCreate',
+      async (...args: unknown[]) => {
+        const request = parseNoteCreateArgs(args);
+        if (!request) {
+          readAloudLog('dropped invalid readAloudNoteCreate message');
+          return;
+        }
+        await notes.create(request);
+      },
+    ),
+    vscode.commands.registerCommand(
+      '_crossnote.readAloudNoteUpdate',
+      async (...args: unknown[]) => {
+        const request = parseNoteUpdateArgs(args);
+        if (!request) {
+          readAloudLog('dropped invalid readAloudNoteUpdate message');
+          return;
+        }
+        await notes.update(request);
+      },
+    ),
+    vscode.commands.registerCommand(
+      '_crossnote.readAloudNoteDelete',
+      async (...args: unknown[]) => {
+        const request = parseNoteDeleteArgs(args);
+        if (!request) {
+          readAloudLog('dropped invalid readAloudNoteDelete message');
+          return;
+        }
+        await notes.delete(request);
+      },
+    ),
+    vscode.commands.registerCommand(
+      '_crossnote.readAloudNoteUndoDelete',
+      async (...args: unknown[]) => {
+        const request = parseNoteUndoDeleteArgs(args);
+        if (!request) {
+          readAloudLog('dropped invalid readAloudNoteUndoDelete message');
+          return;
+        }
+        await notes.undoDelete(request);
+      },
+    ),
+    vscode.commands.registerCommand(
+      '_crossnote.readAloudNoteRegenerate',
+      async (...args: unknown[]) => {
+        const request = parseNoteRegenerateArgs(args);
+        if (!request) {
+          readAloudLog('dropped invalid readAloudNoteRegenerate message');
+          return;
+        }
+        await notes.regenerate(request);
+      },
+    ),
+    vscode.commands.registerCommand(
+      '_crossnote.readAloudNoteReattach',
+      async (...args: unknown[]) => {
+        const request = parseNoteReattachArgs(args);
+        if (!request) {
+          readAloudLog('dropped invalid readAloudNoteReattach message');
+          return;
+        }
+        await notes.reattach(request);
+      },
+    ),
+    vscode.commands.registerCommand(
+      '_crossnote.readAloudNoteOpen',
+      async (...args: unknown[]) => {
+        const request = parseNoteOpenArgs(args);
+        if (!request) {
+          readAloudLog('dropped invalid readAloudNoteOpen message');
+          return;
+        }
+        await notes.open(request);
+      },
+    ),
+    vscode.commands.registerCommand(
+      '_crossnote.readAloudNoteCopy',
+      async (...args: unknown[]) => {
+        const request = parseNoteCopyArgs(args);
+        if (!request) {
+          readAloudLog('dropped invalid readAloudNoteCopy message');
+          return;
+        }
+        await notes.copy(request);
+      },
+    ),
+    vscode.commands.registerCommand(
+      '_crossnote.readAloudNoteAnchors',
+      async (...args: unknown[]) => {
+        const request = parseNoteAnchorsArgs(args);
+        if (!request) {
+          readAloudLog('dropped invalid readAloudNoteAnchors message');
+          return;
+        }
+        await notes.anchors(request);
+      },
+    ),
+    vscode.commands.registerCommand(
+      '_crossnote.readAloudNotesShowAll',
+      async (...args: unknown[]) => {
+        if (!parseNotesShowAllArgs(args)) {
+          readAloudLog('dropped invalid readAloudNotesShowAll message');
+          return;
+        }
+        await notes.showAll();
+      },
+    ),
+  );
+
+  // ---------------------------------------------------------------------------
+  // Classroom (`featrues/13-classroom/spec.md` §13, §14.2): the palette
+  // commands and the `_crossnote.readAloudClassroom*` handlers.
+  // ---------------------------------------------------------------------------
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      'markdown-preview-enhanced.readAloud.classroom',
+      async () => {
+        await readAloud.control('classroom');
+      },
+    ),
+    vscode.commands.registerCommand(
+      'markdown-preview-enhanced.readAloud.classroomModule',
+      async () => {
+        await readAloud.control('classroomModule');
+      },
+    ),
+    vscode.commands.registerCommand(
+      'markdown-preview-enhanced.classroom.open',
+      async () => {
+        await classroom.openQuickPick();
+      },
+    ),
+    vscode.commands.registerCommand(
+      'markdown-preview-enhanced.classroom.openFolder',
+      async () => {
+        await classroom.openFolder();
+      },
+    ),
+    vscode.commands.registerCommand(
+      'markdown-preview-enhanced.classroom.continue',
+      async () => {
+        await classroom.continueCommand(activeModuleUri());
+      },
+    ),
+    vscode.commands.registerCommand(
+      'markdown-preview-enhanced.classroom.cancel',
+      async () => {
+        await classroom.cancelCommand();
+      },
+    ),
+    vscode.commands.registerCommand(
+      '_crossnote.readAloudClassroomPrepare',
+      async (...args: unknown[]) => {
+        const request = parseClassroomPrepareArgs(args);
+        if (!request) {
+          readAloudLog('dropped invalid readAloudClassroomPrepare message');
+          return;
+        }
+        await classroom.prepare(request);
+      },
+    ),
+    vscode.commands.registerCommand(
+      '_crossnote.readAloudClassroomBuild',
+      async (...args: unknown[]) => {
+        const request = parseClassroomBuildArgs(args);
+        if (!request) {
+          readAloudLog('dropped invalid readAloudClassroomBuild message');
+          return;
+        }
+        await classroom.build(request);
+      },
+    ),
+    vscode.commands.registerCommand(
+      '_crossnote.readAloudClassroomCancel',
+      async (...args: unknown[]) => {
+        const request = parseClassroomCancelArgs(args);
+        if (!request) {
+          readAloudLog('dropped invalid readAloudClassroomCancel message');
+          return;
+        }
+        await classroom.cancel(request);
+      },
+    ),
+    vscode.commands.registerCommand(
+      '_crossnote.readAloudClassroomContinue',
+      async (...args: unknown[]) => {
+        const request = parseClassroomContinueArgs(args);
+        if (!request) {
+          readAloudLog('dropped invalid readAloudClassroomContinue message');
+          return;
+        }
+        await classroom.continueModule(request);
+      },
+    ),
+    vscode.commands.registerCommand(
+      '_crossnote.readAloudClassroomOpen',
+      async (...args: unknown[]) => {
+        const request = parseClassroomOpenArgs(args);
+        if (!request) {
+          readAloudLog('dropped invalid readAloudClassroomOpen message');
+          return;
+        }
+        await classroom.open(request);
+      },
+    ),
+    vscode.commands.registerCommand(
+      '_crossnote.readAloudClassroomOpenSource',
+      async (...args: unknown[]) => {
+        const request = parseClassroomOpenSourceArgs(args);
+        if (!request) {
+          readAloudLog('dropped invalid readAloudClassroomOpenSource message');
+          return;
+        }
+        await classroom.openSource(request);
+      },
+    ),
+    vscode.commands.registerCommand(
+      '_crossnote.readAloudClassroomOpenFolder',
+      async (...args: unknown[]) => {
+        if (!parseClassroomOpenFolderArgs(args)) {
+          readAloudLog('dropped invalid readAloudClassroomOpenFolder message');
+          return;
+        }
+        await classroom.openFolder();
+      },
+    ),
+  );
+
+  if (!isVSCodeWebExtension()) {
+    const notesTree = new NotesTreeProvider(notes);
+    const notesView = vscode.window.createTreeView(NOTES_VIEW_ID, {
+      treeDataProvider: notesTree,
+      showCollapseAll: true,
+    });
+    // §7.1 — which root the view lists.
+    const describeRoot = () => {
+      notesView.description = shortenHome(notes.rootPath());
+    };
+    describeRoot();
+    context.subscriptions.push(notesTree, notesView);
+
+    /** The document and note a view command was invoked on. */
+    const noteOf = (node: unknown) =>
+      node && typeof node === 'object' && (node as NoteNode).kind === 'note'
+        ? (node as Extract<NoteNode, { kind: 'note' }>)
+        : null;
+
+    context.subscriptions.push(
+      vscode.commands.registerCommand(
+        'markdown-preview-enhanced.notes.refresh',
+        () => {
+          describeRoot();
+          notesTree.refresh();
+        },
+      ),
+      vscode.commands.registerCommand(
+        'markdown-preview-enhanced.notes.openFolder',
+        async () => {
+          const root = vscode.Uri.file(notes.rootPath());
+          try {
+            await vscode.workspace.fs.createDirectory(root);
+          } catch {
+            /* exists, or cannot be made: revealFileInOS says so */
+          }
+          await vscode.commands.executeCommand('revealFileInOS', root);
+        },
+      ),
+      vscode.commands.registerCommand(
+        'markdown-preview-enhanced.notes.revealInPreview',
+        async (node: unknown) => {
+          const note = noteOf(node);
+          if (!note || !note.documentUri) {
+            return;
+          }
+          await notes.revealInPreview(note.documentUri, note.record.id);
+        },
+      ),
+      vscode.commands.registerCommand(
+        'markdown-preview-enhanced.notes.openNoteFile',
+        async (node: unknown) => {
+          const filePath =
+            noteOf(node)?.record.filePath ??
+            (node &&
+            typeof node === 'object' &&
+            (node as NoteNode).kind === 'unreadable'
+              ? (node as Extract<NoteNode, { kind: 'unreadable' }>).filePath
+              : null);
+          if (filePath) {
+            await notes.openNoteFile(filePath);
+          }
+        },
+      ),
+      vscode.commands.registerCommand(
+        'markdown-preview-enhanced.notes.openInEditor',
+        async (node: unknown) => {
+          const note = noteOf(node);
+          if (note && note.documentUri) {
+            await notes.openInEditor(note.documentUri, note.record);
+          }
+        },
+      ),
+      vscode.commands.registerCommand(
+        'markdown-preview-enhanced.notes.copy',
+        async (node: unknown) => {
+          const note = noteOf(node);
+          if (note && note.documentUri) {
+            await notes.copy({
+              sourceUri: note.documentUri.toString(),
+              noteId: note.record.id,
+            });
+          }
+        },
+      ),
+      vscode.commands.registerCommand(
+        'markdown-preview-enhanced.notes.regenerate',
+        async (node: unknown) => {
+          const note = noteOf(node);
+          if (note && note.documentUri) {
+            await notes.regenerate({
+              sourceUri: note.documentUri.toString(),
+              noteId: note.record.id,
+              fields: null,
+            });
+          }
+        },
+      ),
+      vscode.commands.registerCommand(
+        'markdown-preview-enhanced.notes.delete',
+        async (node: unknown) => {
+          const note = noteOf(node);
+          if (note && note.documentUri) {
+            await notes.delete(
+              {
+                sourceUri: note.documentUri.toString(),
+                noteId: note.record.id,
+              },
+              true,
+            );
+          }
+        },
+      ),
+      vscode.commands.registerCommand(
+        'markdown-preview-enhanced.notes.search',
+        async () => {
+          const all = notes.notesStore.listAll();
+          const items = all.notes.map((record) => ({
+            label: record.title || 'Note',
+            description: `${record.document.path} · ${record.created.slice(0, 10)}`,
+            detail: [
+              record.passage.replace(/\s+/g, ' ').slice(0, 100),
+              record.tags.length
+                ? record.tags.map((t) => `#${t}`).join(' ')
+                : '',
+            ]
+              .filter(Boolean)
+              .join('  ·  '),
+            record,
+          }));
+          const picked = await vscode.window.showQuickPick(items, {
+            placeHolder: items.length
+              ? 'Search notes by title, path, passage or tag'
+              : 'No notes yet',
+            matchOnDescription: true,
+            matchOnDetail: true,
+          });
+          if (!picked) {
+            return;
+          }
+          const uri = notes.documentUriFor(
+            picked.record.document.workspace,
+            picked.record.document.path,
+            picked.record.document.absolute,
+          );
+          if (uri) {
+            await notes.revealInPreview(uri, picked.record.id);
+          }
+        },
+      ),
+    );
+
+    context.subscriptions.push(
+      vscode.workspace.onDidChangeConfiguration((event) => {
+        if (
+          event.affectsConfiguration('markdown-preview-enhanced.notesDirectory')
+        ) {
+          describeRoot();
+          notesTree.refresh();
+        }
+      }),
+    );
+  }
 
   context.subscriptions.push(
     vscode.commands.registerCommand(

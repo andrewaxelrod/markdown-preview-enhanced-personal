@@ -334,6 +334,65 @@ extension chooses the variant from the preview theme's background (`atom-dark.cs
 dark one, `github-light.css` the light one), not from the VS Code colour theme. The decoration
 is added when playback starts and removed when it ends; nothing of it reaches exports.
 
+### Notes: keep a passage for later
+
+The third button of the selection cluster, **Note** (`Alt+N`), saves the selected passage
+with enough context to understand it months later: the exact words, the block they sit in
+with the passage marked between ⟦ and ⟧, the block before and after, the heading path, and
+the document's title, path and git commit. The file is written at once; the help engine then
+writes a title, a short summary, why the passage matters, its terms and a few tags into it
+(`notesGenerate`; off keeps the capture only). **Save as note** on the Help sheet keeps an
+explanation you already have. Saved notes show as a marker in the right margin of their block
+and a dotted line under their words; either opens the **Note sheet**, where _My note_ and the
+tags are yours to edit, and where the note can be regenerated, opened in the editor, copied,
+played, or deleted (six seconds of Undo, then the OS trash). The **Notes** button on the panel
+(`Alt+Shift+N`) lists this document's notes in reading order; the **Notes** view in the
+Explorer lists every document's, and _Search notes_ (command palette) finds one by title,
+path, passage or tag. Notes re-anchor on every render and survive edits around them; one
+whose passage is gone is kept and marked _Not in this version_, with _Re-attach to selection_.
+
+Notes live **outside the document**, one markdown file per note with YAML front matter, under
+`~/.crossnote/notes/<workspace folder>/<relative path>/` by default (on Linux, under
+`~/.local/state/crossnote/notes`). Nothing is ever written into the markdown you are reading,
+and the default root is outside every repository. **Notes copy document text into your home
+directory**: the passage, its block, its neighbours and the heading path. A root inside a
+synced folder syncs that text; a confidential document's notes belong in a root that does not.
+To move the root, set `markdown-preview-enhanced.notesDirectory` to an absolute path (`~` is
+allowed; machine scope, so a workspace cannot redirect it). `notesDecoration` chooses between
+the marker and the words' mark, the marker only, or nothing in the document.
+
+### Classroom: a module that teaches the passage
+
+The fourth button of the selection cluster, **Classroom** (`Alt+C`), and **Teach me this** on the
+Help sheet open a sheet that asks one thing before anything is sent: how lost you are, in three
+rows, with an optional sentence in your own words. It shows the instructor (**Max**, a patient
+practitioner whose voice and chapter structure come from an authoring guide shipped as a persona
+package), the audience line, the engine label and exactly which files will leave the machine.
+**Build** has the help engine write a teaching module the way the guide says a course is written:
+one call for the plan, then one call per chapter in course order, each briefed with the previous
+chapter's closing bridge, the next chapter's question and the promises due, each checked
+mechanically and appended to a markdown file. The module opens beside the document as soon as its
+first chapter is on disk and is a document like any other from then on: read aloud, followed,
+dimmed, explained, noted. In a module's preview the bar's Classroom button (`Alt+Shift+C`) opens
+the **Module sheet**: progress, the chapter list, Cancel, Continue for a stopped or failed build,
+and _Open the source passage_. _Open Classroom Module_ (command palette) lists every module.
+
+**Classroom sends more than Help does**: the whole document (up to 120,000 characters, the
+passage marked) and up to four linked workspace markdown files, to the configured engine, on
+Build only. The sheet names every file and lets you untick the linked ones;
+`markdown-preview-enhanced.classroomFollowLinks` turns link following off. Modules live under
+`~/.crossnote/classroom/modules/<workspace folder>/<relative path>/` (`classroomDirectory`,
+machine scope), so a module copies document text into your home directory, like a note. Every
+call of a build runs from one working directory so the persona-and-fuel prefix is cached: a
+six-chapter module at `claude · sonnet` measured at about two minutes and thirty cents.
+
+To add an instructor, make a folder `~/.crossnote/classroom/personas/<id>/` with a `persona.md`
+(YAML front matter `name`, `id`, `tagline`, `audience`, `version`, an optional `levels` override
+of the chapter budgets, then the persona's own notes as the body) and an optional `specimen.md`
+(a transcript of the instructor speaking). A folder whose `id` is `max` replaces the built-in
+Max, which is how the built-in guide is edited without a rebuild. `classroomPersona` names the
+instructor in force and `classroomAudience` the audience line; the sheet writes both.
+
 ### What exactly is sent
 
 The text comes from the rendered preview, so markdown syntax is already gone, and before the

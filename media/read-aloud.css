@@ -1502,16 +1502,1273 @@
 }
 
 /* --------------------------------------------------------------------------
+ * 3e. Notes (`featrues/12-notes/spec.md` §10–§12)
+ *
+ * The marker in the right margin mirrors the play button on the left; the
+ * words' mark is a CSS custom highlight, never DOM; the two sheets take the
+ * help sheet's shape (the container rule below repeats `.mpe-ra-help`'s). The
+ * Note sheet's body carries `.mpe-ra-help-body` as well as
+ * `.mpe-ra-note-body`, so the reader template of 3d and of
+ * media/read-aloud-page.css reaches it with no second copy of those rules.
+ * Tokens: neutral ink derived from the text colour (brief Q1), published here
+ * for the page-off case and per tier in media/read-aloud-page.css.
+ * ----------------------------------------------------------------------- */
+
+.markdown-preview[data-for='preview'],
+html {
+  --mpe-ra-note-ink: color-mix(in srgb, currentColor 55%, transparent);
+  --mpe-ra-note-ink-strong: currentColor;
+  --mpe-ra-note-hover-surface: color-mix(in srgb, currentColor 8%, transparent);
+  --mpe-ra-note-badge-bg: currentColor;
+  --mpe-ra-note-badge-fg: #ffffff;
+}
+
+.markdown-preview[data-mpe-ra-scheme='dark'] {
+  --mpe-ra-note-badge-fg: #1e1e1e;
+}
+
+/* Room for the marker on a narrow pane, mirroring `.mpe-ra-gutter` (§10.1). */
+.markdown-preview.mpe-ra-notes-gutter {
+  padding-right: 2.4em;
+}
+
+.mpe-ra-note-marker {
+  position: absolute;
+  top: 0.1em;
+  right: -1.9em;
+  z-index: 2;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5em;
+  height: 1.5em;
+  min-width: 24px;
+  min-height: 24px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--mpe-ra-note-ink);
+  font-size: inherit;
+  line-height: 1;
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.mpe-ra-note-marker svg {
+  width: 1em;
+  height: 1em;
+  min-width: 16px;
+  min-height: 16px;
+}
+
+.mpe-ra-note-marker:hover {
+  color: var(--mpe-ra-note-ink-strong);
+  background: var(--mpe-ra-note-hover-surface);
+}
+
+.mpe-ra-note-marker:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, #007fd4);
+  outline-offset: 1px;
+}
+
+/* Its sheet is open: the glyph inverted (brief W6). */
+.mpe-ra-note-marker.is-active {
+  color: var(--mpe-ra-note-badge-fg);
+  background: var(--mpe-ra-note-ink-strong);
+}
+
+/* The summary is being written: a hollow, dashed glyph, no motion. */
+.mpe-ra-note-marker.is-pending svg {
+  stroke-dasharray: 2 1.6;
+  opacity: 0.85;
+}
+
+.mpe-ra-note-count {
+  position: absolute;
+  top: -0.3em;
+  right: -0.3em;
+  box-sizing: border-box;
+  min-width: 1.4em;
+  padding: 0 0.3em;
+  border-radius: 999px;
+  background: var(--mpe-ra-note-badge-bg);
+  color: var(--mpe-ra-note-badge-fg);
+  font-family: var(--vscode-font-family, sans-serif);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.5;
+  text-align: center;
+  pointer-events: none;
+}
+
+/* The words' mark (§10.2). Only colour and the text-decoration longhands are
+ * honoured on a highlight pseudo; where the thickness or offset is ignored
+ * the default dotted underline stands. */
+::highlight(mpe-ra-note) {
+  text-decoration: underline dotted var(--mpe-ra-note-ink, currentColor);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.18em;
+}
+
+/* The two sheets: the help sheet's container, repeated (§11.1, §12). */
+.mpe-ra-note,
+.mpe-ra-notes-list {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 10px);
+  transform: translateX(-50%);
+  /* Below the volume, speed and theme popovers: the help sheet stays open
+   * while the reader works, and those three are momentary. */
+  z-index: 0;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 680px;
+  max-width: calc(100vw - 32px);
+  max-height: 60vh;
+  padding: 16px 20px 18px;
+  border: 1px solid var(--mpe-ra-panel-border);
+  border-radius: 16px;
+  background: var(--mpe-ra-panel-bg);
+  color: var(--mpe-ra-panel-fg);
+  box-shadow: var(--mpe-ra-panel-shadow);
+  font-family: var(--vscode-font-family, sans-serif);
+  font-size: 13px;
+  line-height: 1.35;
+  text-align: left;
+}
+
+.mpe-ra-note[hidden] {
+  display: none;
+}
+
+.mpe-ra-notes-list[hidden] {
+  display: none;
+}
+
+.mpe-ra-note:focus-visible,
+.mpe-ra-notes-list:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, #007fd4);
+  outline-offset: 2px;
+}
+
+.mpe-ra-note-head,
+.mpe-ra-notes-list-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+}
+
+.mpe-ra-note-title,
+.mpe-ra-notes-list-title {
+  flex: 1 1 auto;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.mpe-ra-note-footer,
+.mpe-ra-notes-list-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  flex: none;
+  padding-top: 10px;
+  border-top: 1px solid var(--mpe-ra-panel-border);
+}
+
+.mpe-ra-note-actions,
+.mpe-ra-note-pager {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* The bar's Notes button carries a count (§12). */
+.mpe-ra-bar .mpe-ra-bar-notes {
+  position: relative;
+}
+
+.mpe-ra-bar .mpe-ra-bar-notes.is-active {
+  background: var(--mpe-ra-panel-hover);
+}
+
+.mpe-ra-bar-badge {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  box-sizing: border-box;
+  min-width: 1.5em;
+  padding: 0 0.3em;
+  border-radius: 999px;
+  background: var(--mpe-ra-accent);
+  color: var(--mpe-ra-accent-fg);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1.5;
+  text-align: center;
+  pointer-events: none;
+}
+
+.mpe-ra-bar-badge[hidden] {
+  display: none;
+}
+
+/* The status chip after a save or a delete: the status slot's look, above
+ * the status text, with an optional Undo. */
+.mpe-ra-bar .mpe-ra-note-chip {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  z-index: 3;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(30rem, calc(100vw - 32px));
+  padding: 4px 10px;
+  border: 1px solid var(--mpe-ra-panel-border);
+  border-radius: 8px;
+  background: var(--mpe-ra-panel-bg);
+  color: var(--mpe-ra-panel-fg);
+  box-shadow: var(--mpe-ra-panel-shadow);
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.mpe-ra-bar .mpe-ra-note-chip[hidden] {
+  display: none;
+}
+
+.mpe-ra-bar .mpe-ra-note-chip-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mpe-ra-bar .mpe-ra-note-undo {
+  flex: none;
+  padding: 1px 8px;
+  border: 1px solid var(--mpe-ra-panel-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--mpe-ra-accent);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.mpe-ra-bar .mpe-ra-note-undo:hover {
+  background: var(--mpe-ra-panel-hover);
+}
+
+.mpe-ra-bar .mpe-ra-note-undo[hidden] {
+  display: none;
+}
+
+/* The Note sheet's details chip: the date, the engine, or the state. */
+.mpe-ra-note-details {
+  flex: none;
+  max-width: 50%;
+  padding: 3px 9px;
+  border: 1px solid var(--mpe-ra-panel-border);
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0.85;
+}
+
+.mpe-ra-note-details.is-error {
+  border-color: var(--mpe-ra-error, #c62828);
+  color: var(--mpe-ra-error, #c62828);
+  opacity: 1;
+}
+
+/* The orphan banner (§11.3). */
+.mpe-ra-note-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  flex: none;
+  padding: 8px 12px;
+  border: 1px solid var(--mpe-ra-panel-border);
+  border-radius: 10px;
+  background: var(--mpe-ra-panel-hover);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.mpe-ra-note-banner[hidden] {
+  display: none;
+}
+
+.mpe-ra-note-banner-text {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+
+/* The heading path eyebrow (§11.1). */
+.mpe-ra-note-path {
+  flex: none;
+  font-size: 11px;
+  line-height: 1.4;
+  letter-spacing: 0.02em;
+  opacity: 0.7;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mpe-ra-note-path[hidden] {
+  display: none;
+}
+
+/* Everything from the banner to the context lives in one scrolling column,
+ * so the footer stays put; the body itself no longer scrolls on its own. */
+.mpe-ra-note-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mpe-ra-note-body {
+  flex: none;
+  overflow: visible;
+}
+
+.mpe-ra-note-body > blockquote {
+  margin-inline: 0;
+  padding-left: 0.8em;
+  border-left: 3px solid var(--mpe-ra-panel-track);
+}
+
+/* The My note mirror is read, not seen: the textarea below is the display. */
+.mpe-ra-note-body > .mpe-ra-note-mine-echo {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Skeletons (§11.2): static blocks in the rule colour, nothing pulses. */
+.mpe-ra-note-skel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45em;
+  margin: 0 0 var(--mpe-ra-block-gap, 1.1em);
+}
+
+.mpe-ra-note-skel > i {
+  display: block;
+  height: 0.7em;
+  border-radius: 4px;
+  background: var(--mpe-ra-panel-track);
+  opacity: 0.55;
+}
+
+.mpe-ra-note-skel > i:last-child {
+  width: 62%;
+}
+
+.mpe-ra-note-skel.is-title > i {
+  height: 1.1em;
+  width: 70%;
+}
+
+/* The one quiet line of the error and generation-off states. */
+.mpe-ra-note-line {
+  margin: 0 0 var(--mpe-ra-block-gap, 1.1em);
+  font-size: 0.9em;
+  opacity: 0.8;
+}
+
+.mpe-ra-note-line.is-error {
+  color: var(--mpe-ra-error, #c62828);
+  opacity: 1;
+}
+
+/* My note (§11.1). */
+.mpe-ra-note-mine {
+  flex: none;
+}
+
+.mpe-ra-note-textarea {
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  min-height: 2.6em;
+  max-height: calc(8 * 1.5em + 14px);
+  padding: 6px 10px;
+  border: 1px solid var(--mpe-ra-panel-border);
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  resize: none;
+  overflow-y: auto;
+}
+
+.mpe-ra-note-textarea:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, #007fd4);
+  outline-offset: 1px;
+}
+
+.mpe-ra-note-textarea::placeholder {
+  color: inherit;
+  opacity: 0.5;
+}
+
+/* Tags: chips with × and an add input (§11.1). */
+.mpe-ra-note-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  font-size: 12px;
+}
+
+.mpe-ra-note-tags-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+
+.mpe-ra-note-tag-list {
+  display: contents;
+}
+
+.mpe-ra-note-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px 2px 9px;
+  border: 1px solid var(--mpe-ra-panel-border);
+  border-radius: 999px;
+  line-height: 1.4;
+}
+
+.mpe-ra-bar .mpe-ra-note-tag-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.mpe-ra-bar .mpe-ra-note-tag-remove:hover {
+  background: var(--mpe-ra-panel-hover);
+}
+
+.mpe-ra-bar .mpe-ra-note-tag-remove:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, #007fd4);
+  outline-offset: 1px;
+}
+
+.mpe-ra-note-tag-input {
+  box-sizing: border-box;
+  width: 9em;
+  padding: 3px 9px;
+  border: 1px dashed var(--mpe-ra-panel-border);
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.mpe-ra-note-tag-input[hidden] {
+  display: none;
+}
+
+.mpe-ra-note-tag-input:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, #007fd4);
+  outline-offset: 1px;
+}
+
+/* Context: a disclosure and the three quotes (§11.1). */
+.mpe-ra-note-context {
+  flex: none;
+  font-size: 12px;
+}
+
+.mpe-ra-bar .mpe-ra-note-context-toggle {
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+  cursor: pointer;
+  opacity: 0.8;
+}
+
+.mpe-ra-bar .mpe-ra-note-context-toggle[hidden] {
+  display: none;
+}
+
+.mpe-ra-bar .mpe-ra-note-context-toggle:hover {
+  opacity: 1;
+  text-decoration: underline;
+}
+
+.mpe-ra-bar .mpe-ra-note-context-toggle:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, #007fd4);
+  outline-offset: 1px;
+}
+
+.mpe-ra-note-context-body {
+  margin-top: 6px;
+  line-height: 1.5;
+}
+
+.mpe-ra-note-context-body[hidden] {
+  display: none;
+}
+
+.mpe-ra-note-context-label {
+  margin: 8px 0 3px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+
+.mpe-ra-note-context-quote {
+  margin: 0;
+  padding-left: 0.8em;
+  border-left: 3px solid var(--mpe-ra-panel-track);
+  white-space: pre-wrap;
+  opacity: 0.9;
+}
+
+/* Footer: actions left, pager and Play right (§11.1). */
+.mpe-ra-note-footer {
+  justify-content: space-between;
+}
+
+.mpe-ra-note-pager {
+  margin-left: auto;
+}
+
+.mpe-ra-note-pager-label {
+  min-width: 4.5em;
+  font-size: 12px;
+  text-align: center;
+  opacity: 0.85;
+}
+
+.mpe-ra-bar .mpe-ra-note-pager .mpe-ra-help-btn {
+  padding: 5px 8px;
+}
+
+.mpe-ra-bar .mpe-ra-note-pager .mpe-ra-help-btn svg {
+  width: 12px;
+  height: 12px;
+}
+
+.mpe-ra-bar .mpe-ra-note-play:not([disabled]),
+.mpe-ra-bar .mpe-ra-note-resume:not([disabled]) {
+  border-color: transparent;
+  background: var(--mpe-ra-accent);
+  color: var(--mpe-ra-accent-fg);
+}
+
+.mpe-ra-bar .mpe-ra-note-play:not([disabled]):hover,
+.mpe-ra-bar .mpe-ra-note-resume:not([disabled]):hover {
+  background: var(--mpe-ra-accent-hover);
+}
+
+/* Save as note on the help sheet: Saved shows a check and is disabled. */
+.mpe-ra-bar .mpe-ra-help-save svg {
+  width: 12px;
+  height: 12px;
+  margin-right: 4px;
+  vertical-align: -1px;
+}
+
+/* The Notes list sheet (§12). */
+.mpe-ra-notes-list-rows {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mpe-ra-notes-list-rows[hidden] {
+  display: none;
+}
+
+.mpe-ra-bar .mpe-ra-notes-row {
+  display: block;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.45;
+  text-align: left;
+  cursor: pointer;
+}
+
+.mpe-ra-bar .mpe-ra-notes-row:hover {
+  background: var(--mpe-ra-panel-hover);
+}
+
+.mpe-ra-bar .mpe-ra-notes-row:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, #007fd4);
+  outline-offset: 1px;
+}
+
+.mpe-ra-notes-row-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.mpe-ra-notes-row-title > span:first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.mpe-ra-notes-row-summary {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.85;
+}
+
+.mpe-ra-notes-row-meta {
+  display: block;
+  font-size: 11px;
+  opacity: 0.65;
+}
+
+.mpe-ra-notes-badge {
+  flex: none;
+  padding: 0 7px;
+  border: 1px solid var(--mpe-ra-panel-border);
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.6;
+  white-space: nowrap;
+  opacity: 0.8;
+}
+
+.mpe-ra-notes-list-empty {
+  margin: 12px 0;
+  font-size: 12px;
+  text-align: center;
+  opacity: 0.75;
+}
+
+.mpe-ra-notes-list-empty[hidden] {
+  display: none;
+}
+
+.mpe-ra-notes-list-hint {
+  margin-left: auto;
+  font-size: 11px;
+  opacity: 0.65;
+}
+
+@media (forced-colors: active) {
+  .mpe-ra-note,
+  .mpe-ra-notes-list,
+  .mpe-ra-note-chip {
+    border-color: CanvasText;
+    background: Canvas;
+    color: CanvasText;
+  }
+
+  .mpe-ra-note-marker {
+    color: CanvasText;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mpe-ra-note-marker,
+  .mpe-ra-note-skel > i {
+    transition: none;
+    animation: none;
+  }
+}
+
+/* --------------------------------------------------------------------------
+ * 3f. Classroom (`featrues/13-classroom/spec.md` §5, §12)
+ *
+ * Two more sheets in the help sheet's slot: the Classroom sheet (the lever,
+ * the sentence, the instructor, the audience, what will be sent, the
+ * document's modules, then the progress card) and the Module sheet of a
+ * module's own preview. Both repeat the help sheet's container and take the
+ * page's size and measure in media/read-aloud-page.css. Every region is
+ * chrome (`.mpe-ra-ui`): neither sheet is a reading scope. Tokens: the lever
+ * ring is the accent, the badge the accent pair; the page redefines them.
+ * ----------------------------------------------------------------------- */
+
+.markdown-preview[data-for='preview'],
+html {
+  --mpe-ra-lever-ring: var(--mpe-ra-accent, #007fd4);
+  --mpe-ra-classroom-warning: #b45309;
+}
+
+.markdown-preview[data-mpe-ra-scheme='dark'] {
+  --mpe-ra-classroom-warning: #f0b35a;
+}
+
+.mpe-ra-classroom,
+.mpe-ra-module {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 10px);
+  transform: translateX(-50%);
+  z-index: 0;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 680px;
+  max-width: calc(100vw - 32px);
+  max-height: 60vh;
+  padding: 16px 20px 18px;
+  border: 1px solid var(--mpe-ra-panel-border);
+  border-radius: 16px;
+  background: var(--mpe-ra-panel-bg);
+  color: var(--mpe-ra-panel-fg);
+  box-shadow: var(--mpe-ra-panel-shadow);
+  font-family: var(--vscode-font-family, sans-serif);
+  font-size: 13px;
+  line-height: 1.35;
+  text-align: left;
+}
+
+.mpe-ra-classroom[hidden] {
+  display: none;
+}
+
+.mpe-ra-module[hidden] {
+  display: none;
+}
+
+.mpe-ra-classroom:focus-visible,
+.mpe-ra-module:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, #007fd4);
+  outline-offset: 2px;
+}
+
+.mpe-ra-classroom-head,
+.mpe-ra-module-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+}
+
+.mpe-ra-classroom-title,
+.mpe-ra-module-title {
+  flex: 1 1 auto;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+/* Everything between the head and the footer scrolls as one column. */
+.mpe-ra-classroom-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-right: 2px;
+}
+
+/* The passage under its heading path: a quiet quote (§5.2). */
+.mpe-ra-classroom-passage {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: none;
+}
+
+.mpe-ra-classroom-path {
+  font-size: 11px;
+  line-height: 1.4;
+  letter-spacing: 0.02em;
+  opacity: 0.7;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mpe-ra-classroom-path[hidden] {
+  display: none;
+}
+
+.mpe-ra-classroom-quote {
+  padding-left: 10px;
+  border-left: 3px solid var(--mpe-ra-panel-track);
+  font-size: 13px;
+  font-style: italic;
+  line-height: 1.45;
+  opacity: 0.85;
+}
+
+.mpe-ra-classroom-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.mpe-ra-classroom-form[hidden] {
+  display: none;
+}
+
+/* The lever (§6): three rows, one checked, on the panel's own surface. */
+.mpe-ra-classroom-lever {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px;
+}
+
+.mpe-ra-bar .mpe-ra-lever-row {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--mpe-ra-panel-border);
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.35;
+  text-align: left;
+  cursor: pointer;
+}
+
+.mpe-ra-bar .mpe-ra-lever-row:hover {
+  background: var(--mpe-ra-panel-hover);
+}
+
+.mpe-ra-bar .mpe-ra-lever-row[aria-checked='true'] {
+  border-color: var(--mpe-ra-lever-ring);
+  background: var(--mpe-ra-panel-hover);
+  box-shadow: inset 0 0 0 1px var(--mpe-ra-lever-ring);
+  font-weight: 600;
+}
+
+.mpe-ra-bar .mpe-ra-lever-row:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, #007fd4);
+  outline-offset: 1px;
+}
+
+/* A labelled field: the label above, the control below. */
+.mpe-ra-classroom-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mpe-ra-classroom-label {
+  font-size: 11px;
+  line-height: 1.4;
+  letter-spacing: 0.02em;
+  opacity: 0.7;
+}
+
+.mpe-ra-classroom-field .mpe-ra-help-input {
+  width: 100%;
+}
+
+.mpe-ra-classroom-field .mpe-ra-help-model {
+  align-self: flex-start;
+}
+
+/* What will be sent (§5.2): one line, then a checkbox per linked file. */
+.mpe-ra-classroom-sending {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.mpe-ra-classroom-sending[hidden] {
+  display: none;
+}
+
+.mpe-ra-classroom-sending-line {
+  margin: 0;
+}
+
+.mpe-ra-classroom-sending-line.is-skeleton {
+  opacity: 0.6;
+}
+
+.mpe-ra-classroom-links {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mpe-ra-classroom-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.mpe-ra-classroom-link[hidden] {
+  display: none;
+}
+
+.mpe-ra-classroom-link-box {
+  margin: 0;
+  accent-color: var(--mpe-ra-accent);
+}
+
+.mpe-ra-classroom-link-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The document's modules (§5.2). */
+.mpe-ra-classroom-modules {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--mpe-ra-panel-border);
+}
+
+.mpe-ra-classroom-modules[hidden] {
+  display: none;
+}
+
+.mpe-ra-classroom-modules-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.mpe-ra-classroom-module-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mpe-ra-classroom-module-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.mpe-ra-classroom-module-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.mpe-ra-classroom-module-meta {
+  flex: none;
+  font-size: 11px;
+  opacity: 0.65;
+  white-space: nowrap;
+}
+
+/* The progress card (§5.4) and the Module sheet's rows (§12.2). */
+.mpe-ra-classroom-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mpe-ra-classroom-card[hidden] {
+  display: none;
+}
+
+.mpe-ra-classroom-card-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.mpe-ra-classroom-card-title[hidden] {
+  display: none;
+}
+
+.mpe-ra-classroom-chapters {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.mpe-ra-chapter-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.mpe-ra-chapter-row[hidden] {
+  display: none;
+}
+
+.mpe-ra-chapter-glyph {
+  display: inline-flex;
+  flex: none;
+  width: 16px;
+  height: 16px;
+}
+
+.mpe-ra-chapter-glyph svg {
+  width: 16px;
+  height: 16px;
+}
+
+.mpe-ra-chapter-row[data-state='queued'] {
+  opacity: 0.55;
+}
+
+.mpe-ra-chapter-row[data-state='writing'] .mpe-ra-chapter-glyph svg {
+  animation: mpe-ra-classroom-spin 1s linear infinite;
+}
+
+.mpe-ra-chapter-row[data-state='done'] .mpe-ra-chapter-glyph {
+  color: var(--mpe-ra-accent);
+}
+
+.mpe-ra-chapter-row[data-state='flagged'] .mpe-ra-chapter-glyph {
+  color: var(--mpe-ra-classroom-warning);
+}
+
+.mpe-ra-chapter-row[data-state='failed'] .mpe-ra-chapter-glyph,
+.mpe-ra-chapter-row[data-state='failed'] .mpe-ra-chapter-title {
+  color: var(--mpe-ra-error, #c62828);
+}
+
+.mpe-ra-chapter-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@keyframes mpe-ra-classroom-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.mpe-ra-classroom-elapsed {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.4;
+  opacity: 0.7;
+}
+
+.mpe-ra-classroom-elapsed[hidden] {
+  display: none;
+}
+
+.mpe-ra-classroom-error {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--mpe-ra-error, #c62828);
+}
+
+.mpe-ra-classroom-error[hidden] {
+  display: none;
+}
+
+.mpe-ra-module-from {
+  margin: 0;
+  flex: none;
+  font-size: 12px;
+  line-height: 1.45;
+  opacity: 0.8;
+}
+
+.mpe-ra-module-from[hidden] {
+  display: none;
+}
+
+.mpe-ra-module-rows {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* Footers: the help footer's shape; Build is the primary and comes last, so
+ * a wrapped footer at 600 px keeps it on the final row (§18 C8). */
+.mpe-ra-classroom-footer,
+.mpe-ra-module-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  flex: none;
+  padding-top: 10px;
+  border-top: 1px solid var(--mpe-ra-panel-border);
+}
+
+.mpe-ra-bar .mpe-ra-classroom-build {
+  order: 9;
+  margin-left: auto;
+}
+
+.mpe-ra-bar .mpe-ra-classroom-build:not([disabled]),
+.mpe-ra-bar .mpe-ra-classroom-continue:not([disabled]),
+.mpe-ra-bar .mpe-ra-module-continue:not([disabled]) {
+  border-color: transparent;
+  background: var(--mpe-ra-accent);
+  color: var(--mpe-ra-accent-fg);
+}
+
+.mpe-ra-bar .mpe-ra-classroom-build:not([disabled]):hover,
+.mpe-ra-bar .mpe-ra-classroom-continue:not([disabled]):hover,
+.mpe-ra-bar .mpe-ra-module-continue:not([disabled]):hover {
+  background: var(--mpe-ra-accent-hover);
+}
+
+/* The module preview's bar button (§12.2): a badge that counts, or warns. */
+.mpe-ra-bar .mpe-ra-bar-classroom {
+  position: relative;
+}
+
+.mpe-ra-bar .mpe-ra-bar-classroom[hidden] {
+  display: none;
+}
+
+.mpe-ra-bar .mpe-ra-bar-classroom.is-active {
+  background: var(--mpe-ra-panel-hover);
+}
+
+.mpe-ra-bar-badge.is-warning {
+  padding: 0;
+  min-width: 14px;
+  height: 14px;
+  background: var(--mpe-ra-classroom-warning);
+  color: var(--mpe-ra-panel-bg);
+  line-height: 0;
+}
+
+.mpe-ra-bar-badge.is-warning svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+}
+
+/* _Open the source passage_ (§12.4): the anchored block flashes for a second. */
+.markdown-preview .mpe-ra-flash {
+  outline: 2px solid var(--mpe-ra-accent, #007fd4);
+  outline-offset: 6px;
+  border-radius: 4px;
+  animation: mpe-ra-classroom-flash 1s ease-out forwards;
+}
+
+@keyframes mpe-ra-classroom-flash {
+  from {
+    outline-color: var(--mpe-ra-accent, #007fd4);
+  }
+  to {
+    outline-color: transparent;
+  }
+}
+
+@media (forced-colors: active) {
+  .mpe-ra-classroom,
+  .mpe-ra-module {
+    border-color: CanvasText;
+    background: Canvas;
+    color: CanvasText;
+  }
+
+  .mpe-ra-bar .mpe-ra-lever-row[aria-checked='true'] {
+    border-color: Highlight;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mpe-ra-chapter-row[data-state='writing'] .mpe-ra-chapter-glyph svg,
+  .markdown-preview .mpe-ra-flash {
+    animation: none;
+  }
+}
+
+/* --------------------------------------------------------------------------
  * 4. Selection affordance and hints (F2)
  * ----------------------------------------------------------------------- */
 
-/* The affordance is a cluster of two (09 §10): _Read aloud_, and _Explain_,
- * which is the only way to reach help while the panel is faded out or
- * dismissed. The container keeps the appearance the single button had. */
+/* The affordance is a cluster (09 §10; 12 §5.1; 13 §5.1): _Read aloud_,
+ * _Explain_, _Note_ and _Classroom_. _Explain_ is the only way to reach help
+ * while the panel is faded out or dismissed. The container keeps the
+ * appearance the single button had; at the column's widest text size it
+ * wraps to two rows rather than shrinking the buttons (13 §5.1). */
 .mpe-ra-float {
   position: absolute;
   z-index: 99999;
   display: flex;
+  flex-wrap: wrap;
   align-items: stretch;
   gap: 1px;
   padding: 2px;
@@ -1560,7 +2817,7 @@
 }
 
 /* A hairline between the two, drawn only when both are there. */
-.mpe-ra-float-read:not([hidden]) + .mpe-ra-float-help:not([hidden]) {
+.mpe-ra-float-btn:not([hidden]) + .mpe-ra-float-btn:not([hidden]) {
   border-left: 1px solid
     var(--vscode-editorWidget-border, rgba(128, 128, 128, 0.35));
   border-top-left-radius: 0;
@@ -1568,7 +2825,9 @@
   padding-inline: 0.4rem;
 }
 
-.mpe-ra-float-help svg {
+.mpe-ra-float-help svg,
+.mpe-ra-float-note svg,
+.mpe-ra-float-classroom svg {
   width: 14px;
   height: 14px;
 }
@@ -1634,6 +2893,7 @@
 /* Never print or export the controls or the reading decoration. */
 @media print {
   .mpe-ra-btn,
+  .mpe-ra-note-marker,
   .mpe-ra-bar,
   .mpe-ra-float,
   .mpe-ra-hint {

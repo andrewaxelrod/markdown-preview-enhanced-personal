@@ -75,7 +75,17 @@ type VSCodeMPEConfigKey =
   | 'readAloudHelpAudience'
   | 'readAloudHelpAutoPlay'
   | 'readAloudHelpTimeoutSeconds'
-  | 'readAloudHelpBinaryPath';
+  | 'readAloudHelpBinaryPath'
+  | 'notesEnabled'
+  | 'notesDirectory'
+  | 'notesGenerate'
+  | 'notesDecoration'
+  | 'classroomEnabled'
+  | 'classroomDirectory'
+  | 'classroomPersona'
+  | 'classroomAudience'
+  | 'classroomFollowLinks'
+  | 'classroomAutoOpen';
 
 type ConfigKey = keyof NotebookConfig | VSCodeMPEConfigKey;
 

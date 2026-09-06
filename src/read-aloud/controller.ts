@@ -70,12 +70,14 @@ import {
   showReadAloudLog,
 } from './log';
 import {
+  type ClassroomModuleConfig,
   HELP_FIELD_CAPS,
   type CancelRequest,
   type HelpRequest,
   type HostToWebviewMessage,
   type PlayingRequest,
   type ReadAloudConfigMessage,
+  type ReadAloudControlMessage,
   type ReadAloudControlAction,
   type ReadAloudFont,
   type ReadAloudGlobalTheme,
@@ -120,6 +122,19 @@ const WEB_BUILD_MESSAGE =
   'Read aloud is not available in VS Code for the Web (v1).';
 /** §11 check 12 — the help button is absent in the web build; `Alt+H` says so. */
 const HELP_WEB_BUILD_MESSAGE = 'Help is not available in the web extension.';
+/** Notes (12 §3) — desktop only; `Alt+N` and `Alt+Shift+N` say so on the web. */
+const NOTES_WEB_BUILD_MESSAGE = 'Notes are not available in the web extension.';
+const CLASSROOM_WEB_BUILD_MESSAGE =
+  'Classroom is not available in the web extension.';
+const CLASSROOM_CONTROL_ACTIONS: ReadAloudControlAction[] = [
+  'classroom',
+  'classroomModule',
+];
+const NOTE_CONTROL_ACTIONS: ReadAloudControlAction[] = [
+  'note',
+  'notesList',
+  'showNote',
+];
 const SETUP_CHOOSE_VOICE = 'Choose Read Aloud Voice';
 const SETUP_SHOW_LOG = 'Show Read Aloud Log';
 const SETUP_CHECK_KOKORO = 'Check Kokoro Server';
@@ -250,8 +265,10 @@ function metaOfError(error: unknown): ResponseMeta | undefined {
   return error instanceof KokoroHttpError ? error.meta : undefined;
 }
 
-/** The settings shape the engine wants (§7.1 -> §7.2). */
-function helpEngineConfig(help: ReadAloudHelpSettings): HelpEngineConfig {
+/** The settings shape the engine wants (§7.1 -> §7.2); notes reuse it (12 §8.1). */
+export function helpEngineConfig(
+  help: ReadAloudHelpSettings,
+): HelpEngineConfig {
   return {
     engine: help.engine,
     claudeModel: help.claudeModel,
@@ -311,6 +328,22 @@ export class ReadAloudController implements vscode.Disposable {
   private webNoticeShown = false;
   private job: Job | null = null;
   private helpJob: HelpJob | null = null;
+  /**
+   * Notes (12 §14.3) and classroom (13 §14.3): called right after the config
+   * handshake of a preview, so the document's `readAloudNotes` rides with the
+   * config and a pending reveal is flushed. Added by `extension-common.ts`.
+   */
+  private readonly configListeners: ((sourceUri: vscode.Uri) => void)[] = [];
+  /**
+   * Classroom (13 §12.2): what a module preview's config carries, or null for
+   * any other document. Set by `extension-common.ts`.
+   */
+  public moduleConfigFor:
+    ((sourceUri: vscode.Uri) => ClassroomModuleConfig | null) | null = null;
+
+  public addConfigListener(listener: (sourceUri: vscode.Uri) => void): void {
+    this.configListeners.push(listener);
+  }
 
   private constructor(context: vscode.ExtensionContext, deps: ControllerDeps) {
     this.deps = deps;
@@ -426,21 +459,49 @@ export class ReadAloudController implements vscode.Disposable {
   }
 
   /** F3/F13 — `readAloudControl` from a command or keybinding. */
-  public async control(action: ReadAloudControlAction): Promise<void> {
+  public async control(
+    action: ReadAloudControlAction,
+    noteId?: string,
+  ): Promise<void> {
     if (action === 'help' && this.deps.isWebBuild) {
       // §11 check 12 — the web build has no help button, and `Alt+H` says why
       // rather than falling through to the generic read-aloud notice.
       void vscode.window.showInformationMessage(HELP_WEB_BUILD_MESSAGE);
       return;
     }
+    if (NOTE_CONTROL_ACTIONS.includes(action) && this.deps.isWebBuild) {
+      void vscode.window.showInformationMessage(NOTES_WEB_BUILD_MESSAGE);
+      return;
+    }
+    if (CLASSROOM_CONTROL_ACTIONS.includes(action) && this.deps.isWebBuild) {
+      void vscode.window.showInformationMessage(CLASSROOM_WEB_BUILD_MESSAGE);
+      return;
+    }
     if (this.guardWebBuild()) {
       return;
     }
     try {
-      await this.deps.postToAll({ command: 'readAloudControl', action });
+      const message: ReadAloudControlMessage = {
+        command: 'readAloudControl',
+        action,
+      };
+      if (noteId) {
+        message.noteId = noteId;
+      }
+      await this.deps.postToAll(message);
     } catch (error) {
       readAloudLog(`control ${action} failed: ${String(error)}`);
     }
+  }
+
+  /** The process glue the help engine runs with; notes generate through it (12 §8.1). */
+  public get engineDeps(): HelpEngineDeps {
+    return this.helpEngineDeps;
+  }
+
+  /** The preview sinks and the markdown renderer, shared with the notes controller. */
+  public get previewDeps(): ControllerDeps {
+    return this.deps;
   }
 
   /** F13 `readAloudSetSpeed`: persist only; the broadcast follows the setting change. */
@@ -982,10 +1043,10 @@ export class ReadAloudController implements vscode.Disposable {
    * `readAloudConfig` message. A Kokoro voice id is its own name, so nothing
    * is ever looked up over the network for it.
    */
-  public buildInitialConfig(): ReadAloudConfigMessage {
+  public buildInitialConfig(sourceUri?: vscode.Uri): ReadAloudConfigMessage {
     const settings = readReadAloudSettings();
     const label = engineLabel(helpEngineConfig(settings.help));
-    return {
+    const config: ReadAloudConfigMessage = {
       command: 'readAloudConfig',
       enabled: settings.enabled,
       clickToRead: settings.clickToRead,
@@ -1010,7 +1071,23 @@ export class ReadAloudController implements vscode.Disposable {
       helpModel: label.model,
       helpEffort: label.effort,
       helpAutoPlay: settings.help.autoPlay,
+      // Notes (12 §3, §14.3): the store and the engine are Node-only.
+      notesAvailable: !this.deps.isWebBuild && settings.notes.enabled,
+      notesDecoration: settings.notes.decoration,
+      // Classroom (13 §14.3): the same reasons.
+      classroomAvailable: !this.deps.isWebBuild && settings.classroom.enabled,
     };
+    // A module preview learns what it shows (13 §12.2). A broadcast (no
+    // `sourceUri`) leaves the field out, so the webview keeps its value.
+    if (sourceUri && this.moduleConfigFor) {
+      try {
+        config.classroomModule = this.moduleConfigFor(sourceUri);
+      } catch (error) {
+        readAloudLog(`classroom: module config failed: ${String(error)}`);
+        config.classroomModule = null;
+      }
+    }
+    return config;
   }
 
   /** Posted after crossnote's `webviewFinishLoading` (contract §2 handshake). */
@@ -1020,9 +1097,16 @@ export class ReadAloudController implements vscode.Disposable {
     }
     try {
       const sink = await this.deps.getSinkFor(sourceUri);
-      await sink.post(this.buildInitialConfig());
+      await sink.post(this.buildInitialConfig(sourceUri));
     } catch (error) {
       readAloudLog(`sendConfig failed: ${String(error)}`);
+    }
+    for (const listener of this.configListeners) {
+      try {
+        listener(sourceUri);
+      } catch (error) {
+        readAloudLog(`onConfigSent listener failed: ${String(error)}`);
+      }
     }
   }
 

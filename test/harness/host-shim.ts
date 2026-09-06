@@ -40,15 +40,35 @@ import type {
   CaptionedSpeechRequestWire,
   CaptionedSpeechResponseWire,
 } from '../../src/read-aloud/kokoro-types';
+import planAnswer from '../classroom/fixtures/plan-answer.md';
+import { parsePlan } from '../../src/classroom/plan-prompt';
 import {
   clampSpeed,
   clampTextSize,
   clampVolume,
   normaliseGlobalTheme,
   normaliseHighlightTheme,
+  normaliseNotesDecoration,
   normalisePlayerFont,
   normaliseWordMarker,
   parseCancelArgs,
+  parseClassroomBuildArgs,
+  parseClassroomCancelArgs,
+  parseClassroomContinueArgs,
+  parseClassroomOpenArgs,
+  parseClassroomOpenFolderArgs,
+  parseClassroomOpenSourceArgs,
+  parseClassroomPrepareArgs,
+  parseNoteAnchorsArgs,
+  parseNoteCopyArgs,
+  parseNoteCreateArgs,
+  parseNoteDeleteArgs,
+  parseNoteOpenArgs,
+  parseNoteReattachArgs,
+  parseNoteRegenerateArgs,
+  parseNotesShowAllArgs,
+  parseNoteUndoDeleteArgs,
+  parseNoteUpdateArgs,
   parsePlayingArgs,
   parseResetPageArgs,
   parseSetFontArgs,
@@ -59,10 +79,23 @@ import {
   parseSetVolumeArgs,
   parseSetWordMarkerArgs,
   parseSynthesizeArgs,
+  type ClassroomChapterState,
+  type ClassroomProgress,
+  type NoteSummary,
   type ReadAloudAudioMessage,
   type ReadAloudConfigMessage,
   type ReadAloudErrorMessage,
 } from '../../src/read-aloud/messages';
+import {
+  applyGenerated,
+  generatedMarkdown,
+  generatedSectionsInOrder,
+  summaryLineOf,
+  titleFromPassage,
+  type NoteSectionName,
+  type ParsedNote,
+} from '../../src/notes/note-format';
+import { parseNoteAnswer } from '../../src/notes/note-prompt';
 import {
   mapSpanBack,
   sanitizeForSpeech,
@@ -150,6 +183,16 @@ const config: ReadAloudConfigMessage & { helpContextMode: string } = {
   helpEffort: 'low',
   helpAutoPlay: true,
   helpContextMode: 'section',
+  // Notes (12 §18): `notes=1` seeds three canned notes and answers every
+  // note message from an in-memory store.
+  notesAvailable: flag('notes', false),
+  notesDecoration: normaliseNotesDecoration(
+    param('decoration') ?? 'marker-and-mark',
+  ),
+  // Classroom (13 §18): `classroom=1` answers Prepare and Build with canned
+  // messages; `module=1` makes the fixture itself a module preview.
+  classroomAvailable: flag('classroom', false),
+  classroomModule: null,
 };
 
 let helpTimer = 0;
@@ -701,9 +744,895 @@ function handleMessage(message: { command?: unknown; args?: unknown }): void {
       log(command, 'canned request cancelled');
       return;
     default:
+      if (handleNoteMessage(command, args)) {
+        return;
+      }
+      if (handleClassroomMessage(command, args)) {
+        return;
+      }
       log('unknown message', command);
   }
 }
+
+// -------------------------------------------------------- the classroom end
+
+/**
+ * 13 §18 — the host's part of a classroom build, in memory. Prepare is
+ * answered at once with Max, two linked documents, one existing module and
+ * the fixture's word count; Build with a sequence of `Progress` messages
+ * built from the experiment's plan, one every `classroomdelay` ms (default
+ * 800): planning, then each chapter writing and done, then done.
+ * `classroomfail=<n>` fails chapter n with a canned reason; Cancel stops the
+ * sequence and posts stopped; Continue resumes from the first chapter not
+ * done. `module=1` puts a canned `classroomModule` into the config, with
+ * `modulestatus=writing|done|stopped|failed`.
+ */
+const CLASSROOM_DELAY_MS = Number(param('classroomdelay') ?? 800);
+const CLASSROOM_FAIL_AT = Number(param('classroomfail') ?? 0);
+const CLASSROOM_MODULE_ID = '20260905T173010Z-4c2e';
+const CLASSROOM_MODULE_URI =
+  'file:///harness/classroom/modules/harness/fixture.md/20260905T173010Z-4c2e-the-measure.md';
+const CLASSROOM_PLAN = (() => {
+  const parsed = parsePlan(planAnswer, 2, [5, 6], 'the measure');
+  return parsed.ok ? parsed.plan : null;
+})();
+
+interface ClassroomBuildState {
+  chapters: ClassroomChapterState[];
+  status: ClassroomProgress['status'];
+  documentUri: string;
+  startedAt: number;
+  timer: number;
+  error: string | null;
+  words: number;
+}
+
+let classroomBuild: ClassroomBuildState | null = null;
+
+function classroomProgressOf(
+  state: ClassroomBuildState,
+  chapter: number,
+): ClassroomProgress {
+  const writing = state.chapters.find((c) => c.status === 'writing');
+  return {
+    moduleId: CLASSROOM_MODULE_ID,
+    documentUri: state.documentUri,
+    moduleUri: CLASSROOM_MODULE_URI,
+    status: state.status,
+    title: CLASSROOM_PLAN ? CLASSROOM_PLAN.title : 'Classroom: the measure',
+    chapter: writing ? writing.n : chapter,
+    of: state.chapters.length,
+    chapterTitle: writing ? writing.title : '',
+    chapters: state.chapters.map((c) => ({ ...c, flagged: c.flagged.slice() })),
+    elapsedMs: performance.now() - state.startedAt,
+    words: state.words,
+    queuePosition: 0,
+    error: state.error,
+    hasChapter: state.chapters.some((c) => c.status === 'done'),
+  };
+}
+
+function postClassroomProgress(state: ClassroomBuildState, chapter = 0): void {
+  const progress = classroomProgressOf(state, chapter);
+  log(
+    'classroom',
+    progress.status + ' ' + progress.chapter + '/' + progress.of,
+  );
+  postToPlayer({ command: 'readAloudClassroomProgress', ...progress });
+}
+
+/** One step of the canned sequence, `CLASSROOM_DELAY_MS` after the last. */
+function classroomStep(state: ClassroomBuildState): void {
+  if (classroomBuild !== state) {
+    return;
+  }
+  const writing = state.chapters.findIndex((c) => c.status === 'writing');
+  if (writing >= 0) {
+    // The chapter being written is done, or fails.
+    if (CLASSROOM_FAIL_AT === writing + 1) {
+      state.chapters[writing].status = 'failed';
+      state.status = 'failed';
+      state.error =
+        'claude exited with code 1: canned failure for chapter ' +
+        (writing + 1);
+      postClassroomProgress(state);
+      classroomBuild = null;
+      return;
+    }
+    state.chapters[writing].status = 'done';
+    state.chapters[writing].flagged = writing === 1 ? ['length-target'] : [];
+    state.words += writing === 0 ? 292 : 500;
+  }
+  const next = state.chapters.findIndex((c) => c.status !== 'done');
+  if (next < 0) {
+    state.status = 'done';
+    postClassroomProgress(state);
+    classroomBuild = null;
+    return;
+  }
+  state.chapters[next].status = 'writing';
+  state.status = 'writing';
+  postClassroomProgress(state, next + 1);
+  state.timer = window.setTimeout(
+    () => classroomStep(state),
+    CLASSROOM_DELAY_MS,
+  );
+}
+
+function startClassroomBuild(
+  documentUri: string,
+  resume: ClassroomBuildState | null,
+): void {
+  const chapters: ClassroomChapterState[] = resume
+    ? resume.chapters.map((c) => ({
+        ...c,
+        status: c.status === 'done' ? 'done' : 'queued',
+      }))
+    : (CLASSROOM_PLAN ? CLASSROOM_PLAN.chapters : []).map((c) => ({
+        n: c.n,
+        title: c.title,
+        status: 'queued',
+        flagged: [],
+      }));
+  const state: ClassroomBuildState = {
+    chapters,
+    status: resume ? 'writing' : 'planning',
+    documentUri,
+    startedAt: performance.now(),
+    timer: 0,
+    error: null,
+    words: resume ? resume.words : 0,
+  };
+  classroomBuild = state;
+  if (!resume) {
+    // Planning shows before the plan's rows exist.
+    const planning: ClassroomBuildState = { ...state, chapters: [] };
+    postClassroomProgress(planning);
+  }
+  state.timer = window.setTimeout(
+    () => classroomStep(state),
+    CLASSROOM_DELAY_MS,
+  );
+}
+
+let lastClassroomBuild: ClassroomBuildState | null = null;
+
+function handleClassroomMessage(command: string, args: unknown): boolean {
+  switch (command) {
+    case 'readAloudClassroomPrepare': {
+      const request = parseClassroomPrepareArgs(args);
+      if (!request) {
+        log('dropped invalid readAloudClassroomPrepare message');
+        return true;
+      }
+      const words = (root()?.textContent ?? '')
+        .split(/\s+/)
+        .filter(Boolean).length;
+      log('classroom', 'prepared ' + words + ' words');
+      postToPlayer({
+        command: 'readAloudClassroomPrepared',
+        requestId: request.requestId,
+        persona: {
+          id: 'max',
+          name: 'Max',
+          tagline:
+            'A patient practitioner who explains the machinery one on one',
+        },
+        personas: [
+          {
+            id: 'max',
+            name: 'Max',
+            tagline:
+              'A patient practitioner who explains the machinery one on one',
+          },
+          { id: 'ada', name: 'Ada', tagline: 'Diagrams first, then words' },
+        ],
+        audience:
+          'a professionally motivated reader who has used at least one AI agent as a user, is comfortable with everyday computing, and is not a programmer',
+        documentWords: words,
+        linked: [
+          {
+            path: 'featrues/04-help-module.md',
+            title: '04 — Help: explain the selection',
+            words: 6100,
+          },
+          {
+            path: 'featrues/12-notes/spec.md',
+            title: '12 — Notes',
+            words: 9000,
+          },
+        ],
+        modules: [
+          {
+            id: '20260905T170000Z-aaaa',
+            title: 'An Earlier Module',
+            created: '2026-09-05T17:00:00Z',
+            status: 'done',
+            chapters: 6,
+            done: 6,
+            minutes: 20,
+          },
+        ],
+        engine: { engine: 'claude', model: 'sonnet', effort: 'medium' },
+        building: classroomBuild
+          ? classroomProgressOf(classroomBuild, 0)
+          : null,
+      });
+      return true;
+    }
+    case 'readAloudClassroomBuild': {
+      const request = parseClassroomBuildArgs(args);
+      if (!request) {
+        log('dropped invalid readAloudClassroomBuild message');
+        return true;
+      }
+      log(
+        'classroom',
+        'build level ' +
+          request.level +
+          ' ' +
+          request.persona +
+          ' linked ' +
+          request.linked.join(',') +
+          ' note ' +
+          JSON.stringify(request.readerNote),
+      );
+      startClassroomBuild(request.sourceUri, null);
+      return true;
+    }
+    case 'readAloudClassroomCancel': {
+      const request = parseClassroomCancelArgs(args);
+      if (!request) {
+        log('dropped invalid readAloudClassroomCancel message');
+        return true;
+      }
+      if (classroomBuild) {
+        window.clearTimeout(classroomBuild.timer);
+        const state = classroomBuild;
+        classroomBuild = null;
+        for (const chapter of state.chapters) {
+          if (chapter.status === 'writing') {
+            chapter.status = 'queued';
+          }
+        }
+        state.status = 'stopped';
+        lastClassroomBuild = state;
+        log('classroom', 'cancelled (' + request.reason + ')');
+        postClassroomProgress(state);
+      }
+      return true;
+    }
+    case 'readAloudClassroomContinue': {
+      const request = parseClassroomContinueArgs(args);
+      if (!request) {
+        log('dropped invalid readAloudClassroomContinue message');
+        return true;
+      }
+      const resume = lastClassroomBuild;
+      if (resume && !classroomBuild) {
+        for (const chapter of resume.chapters) {
+          if (chapter.status === 'failed') {
+            chapter.status = 'queued';
+          }
+        }
+        log(
+          'classroom',
+          'continue from ' +
+            (resume.chapters.filter((c) => c.status === 'done').length + 1),
+        );
+        startClassroomBuild(resume.documentUri, resume);
+      }
+      return true;
+    }
+    case 'readAloudClassroomOpen':
+      log(
+        'classroom',
+        'open ' + JSON.stringify(parseClassroomOpenArgs(args) ?? 'invalid'),
+      );
+      return true;
+    case 'readAloudClassroomOpenSource':
+      log(
+        'classroom',
+        'open source ' +
+          JSON.stringify(parseClassroomOpenSourceArgs(args) ?? 'invalid'),
+      );
+      return true;
+    case 'readAloudClassroomOpenFolder':
+      log(
+        'classroom',
+        'open folder ' +
+          JSON.stringify(parseClassroomOpenFolderArgs(args) ?? 'invalid'),
+      );
+      return true;
+    default:
+      return false;
+  }
+}
+
+/** `module=1` — the fixture is a module preview; the message line follows. */
+function seedModule(): void {
+  if (!flag('module', false) || !CLASSROOM_PLAN) {
+    return;
+  }
+  const status = (param('modulestatus') ??
+    'writing') as ClassroomProgress['status'];
+  const chapters: ClassroomChapterState[] = CLASSROOM_PLAN.chapters.map(
+    (c, i) => ({
+      n: c.n,
+      title: c.title,
+      status:
+        status === 'done'
+          ? 'done'
+          : i < 2
+            ? 'done'
+            : i === 2
+              ? status === 'writing'
+                ? 'writing'
+                : status === 'failed'
+                  ? 'failed'
+                  : 'queued'
+              : 'queued',
+      flagged: i === 1 ? ['length-target'] : [],
+    }),
+  );
+  config.classroomModule = {
+    id: CLASSROOM_MODULE_ID,
+    title: CLASSROOM_PLAN.title,
+    status,
+    chapters,
+    documentTitle: 'Module 1: The Governed Harness',
+    documentPath: 'test-file.md',
+    documentHeading: 'The Governed Path: From Issue to Merge',
+  };
+  echoConfig();
+  const state: ClassroomBuildState = {
+    chapters,
+    status,
+    documentUri: 'file:///harness/source.md',
+    startedAt: performance.now(),
+    timer: 0,
+    error:
+      status === 'failed' ? 'claude exited with code 1: canned failure' : null,
+    words: status === 'done' ? 3000 : 1043,
+  };
+  postClassroomProgress(state, 3);
+}
+
+// ------------------------------------------------------------ the notes end
+
+/**
+ * 12 §18 — an in-memory notes store. `readAloudNoteCreate` writes a pending
+ * note at once and fills the generated sections in after `notesdelay` ms
+ * (default 1,500) from a canned skeleton in the shape of §21.1; every other
+ * note message is applied to the store and echoed as `readAloudNotes`. Three
+ * notes are seeded against the fixture: one mid-paragraph, one on a list
+ * item, one whose passage is not in the fixture (an orphan). `count=0` seeds
+ * none.
+ */
+const NOTES_DELAY_MS = Number(param('notesdelay') ?? 1500);
+const NOTES_SOURCE_URI = 'file:///harness/fixture.md';
+
+const NOTE_ANSWER = [
+  '# The measure: how many characters fit a line',
+  '',
+  '## Summary',
+  'The passage fixes the measure at sixty-six characters, the middle of the forty-five to seventy-five band typographers recommend for running text.',
+  '',
+  '## Why it matters',
+  'The whole page is set from this one number, so the eye can sweep a line and find the next.',
+  '',
+  '## Terms',
+  '- **Measure**: the number of characters on a line, spaces included.',
+  "- **Return sweep**: the eye's jump from the end of one line to the start of the next.",
+  '',
+  'Tags: measure, typography, reading',
+].join('\n');
+
+const notesStore = new Map<string, ParsedNote>();
+const notesDeleting = new Map<string, number>();
+let noteSequence = 0;
+
+function noteNow(): string {
+  return new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
+}
+
+function newNoteId(): string {
+  noteSequence++;
+  const now = new Date();
+  const pad = (n: number, w: number) => String(n).padStart(w, '0');
+  const stamp =
+    `${pad(now.getUTCFullYear(), 4)}${pad(now.getUTCMonth() + 1, 2)}${pad(now.getUTCDate(), 2)}` +
+    `T${pad(now.getUTCHours(), 2)}${pad(now.getUTCMinutes(), 2)}${pad(now.getUTCSeconds(), 2)}Z`;
+  return `${stamp}-${(0x1000 + noteSequence).toString(16).slice(-4)}`;
+}
+
+/** The rendered sections: a tiny markdown-to-HTML for the canned shapes. */
+function renderSections(markdown: string): string {
+  const out: string[] = [];
+  let list: string[] = [];
+  const flushList = () => {
+    if (list.length) {
+      out.push('<ul>' + list.join('') + '</ul>');
+      list = [];
+    }
+  };
+  for (const raw of markdown.split('\n')) {
+    const line = raw.trim();
+    if (!line) {
+      continue;
+    }
+    const inline = line
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+      .replace(/`([^`]+)`/g, '<code>$1</code>');
+    if (/^### /.test(line)) {
+      flushList();
+      out.push('<h3>' + inline.slice(4) + '</h3>');
+    } else if (/^## /.test(line)) {
+      flushList();
+      out.push('<h2>' + inline.slice(3) + '</h2>');
+    } else if (/^[-*] /.test(line)) {
+      list.push('<li>' + inline.slice(2) + '</li>');
+    } else {
+      flushList();
+      out.push('<p>' + inline + '</p>');
+    }
+  }
+  flushList();
+  return out.join('');
+}
+
+function summaryOf(note: ParsedNote): NoteSummary {
+  const sectionsMarkdown = generatedMarkdown(note);
+  return {
+    id: note.id,
+    title: note.title,
+    titleEdited: note.titleEdited,
+    shape: note.shape,
+    created: note.created,
+    updated: note.updated,
+    headings: note.document.headings.slice(),
+    passage: note.passage,
+    anchor: {
+      block: note.anchor.block,
+      line: note.anchor.line,
+      exact: note.anchor.exact,
+      prefix: note.anchor.prefix,
+      suffix: note.anchor.suffix,
+      offset: note.anchor.offset,
+      blocks: note.anchor.blocks,
+      lastSeen: note.anchor.lastSeen,
+      missingSince: note.anchor.missingSince,
+      current: note.anchor.current ? { ...note.anchor.current } : undefined,
+    },
+    generated: { ...note.generated },
+    tags: note.tags.slice(),
+    myNote: note.myNote,
+    html: sectionsMarkdown ? renderSections(sectionsMarkdown) : '',
+    sectionsMarkdown,
+    sectionNames: generatedSectionsInOrder(note).map((s) => s.heading),
+    context: { ...note.context },
+    summaryLine: summaryLineOf(note),
+  };
+}
+
+function postNotes(): void {
+  const deleting = Array.from(notesDeleting.keys());
+  const notes = Array.from(notesStore.values())
+    .filter((note) => !notesDeleting.has(note.id))
+    .sort((a, b) =>
+      a.created < b.created ? -1 : a.created > b.created ? 1 : 0,
+    )
+    .map(summaryOf);
+  postToPlayer({
+    command: 'readAloudNotes',
+    sourceUri: NOTES_SOURCE_URI,
+    notes,
+    deleting,
+    deleteMode: 'trash',
+    generate: flag('generate', true),
+  });
+  log(
+    'notes',
+    'posted ' +
+      notes.length +
+      (deleting.length ? ' (+' + deleting.length + ' deleting)' : ''),
+  );
+}
+
+function makeNote(input: {
+  passage: string;
+  headings: string[];
+  anchor: ParsedNote['anchor'];
+  enclosing: string;
+  status: 'pending' | 'done';
+  source?: 'engine' | 'help';
+  explanation?: string;
+}): ParsedNote {
+  const now = noteNow();
+  const sections = new Map<NoteSectionName, string>();
+  if (input.explanation) {
+    sections.set('Explanation', input.explanation);
+  }
+  return {
+    id: newNoteId(),
+    created: now,
+    updated: now,
+    shape: input.passage.trim().split(/\s+/).length <= 5 ? 'term' : 'passage',
+    titleEdited: false,
+    document: {
+      workspace: 'harness',
+      path: 'fixture.md',
+      absolute: '/harness/fixture.md',
+      title: 'Reading on a screen, without the strain',
+      headings: input.headings,
+      git: { remote: '', commit: '' },
+    },
+    anchor: { ...input.anchor, lastSeen: now },
+    generated:
+      input.status === 'done'
+        ? {
+            status: 'done',
+            source: input.source ?? 'engine',
+            engine: 'claude',
+            model: 'sonnet',
+            effort: 'low',
+            at: now,
+          }
+        : { status: 'pending', source: 'engine' },
+    tags: [],
+    unknown: {},
+    title: titleFromPassage(input.passage),
+    passage: input.passage,
+    sections,
+    extras: [],
+    myNote: '',
+    context: { enclosing: input.enclosing, before: '', after: '' },
+  };
+}
+
+function generateNote(id: string, delay: number): void {
+  window.setTimeout(() => {
+    const note = notesStore.get(id);
+    if (!note || note.generated.status !== 'pending') {
+      return;
+    }
+    const parts = parseNoteAnswer(NOTE_ANSWER, note.passage);
+    const next = applyGenerated(note, parts);
+    const at = noteNow();
+    next.generated = {
+      status: 'done',
+      source: 'engine',
+      engine: 'claude',
+      model: 'sonnet',
+      effort: 'low',
+      prompt: 1,
+      at,
+    };
+    next.updated = at;
+    notesStore.set(id, next);
+    log('notes', 'generated ' + id);
+    postNotes();
+  }, delay);
+}
+
+/** Seed the canned notes once the fixture is in the page (its keys depend on it). */
+function seedNotes(): void {
+  if (!config.notesAvailable || param('count') === '0') {
+    return;
+  }
+  const core = (window as unknown as { MpeReadAloudCore: any })
+    .MpeReadAloudCore;
+  const target = root();
+  if (!core || !target) {
+    return;
+  }
+  const children = Array.from(target.children);
+  const blockKey = (el: Element) =>
+    core.blockKey(el, core.extractText(el).text) as string;
+  const paragraph = children.find(
+    (el) =>
+      el.tagName === 'P' &&
+      (el.textContent ?? '').includes('sixty-six is the figure'),
+  );
+  const list = children.find((el) => el.tagName === 'UL');
+  if (paragraph) {
+    const text = core.extractText(paragraph).text as string;
+    const passage = 'sixty-six is the figure that appears most often';
+    const offset = text.indexOf(passage);
+    const note = makeNote({
+      passage,
+      headings: ['Reading on a screen, without the strain', 'The measure'],
+      anchor: {
+        block: blockKey(paragraph),
+        line: Number(paragraph.getAttribute('data-source-line') ?? 0) || null,
+        exact: passage,
+        prefix: text.slice(Math.max(0, offset - 64), offset),
+        suffix: text.slice(
+          offset + passage.length,
+          offset + passage.length + 64,
+        ),
+        offset,
+        blocks: 1,
+      },
+      enclosing: text.replace(passage, '⟦' + passage + '⟧'),
+      status: 'done',
+    });
+    const parts = parseNoteAnswer(NOTE_ANSWER, passage);
+    notesStore.set(note.id, applyGenerated(note, parts));
+  }
+  if (list) {
+    const item = list.querySelector('li');
+    const text = core.extractText(list).text as string;
+    const passage = (item?.textContent ?? '')
+      .trim()
+      .split('\n')[0]
+      .slice(0, 40)
+      .trim();
+    const offset = text.indexOf(passage);
+    if (passage && offset >= 0) {
+      const note = makeNote({
+        passage,
+        headings: ['Reading on a screen, without the strain', 'The measure'],
+        anchor: {
+          block: blockKey(list),
+          line: Number(item?.getAttribute('data-source-line') ?? 0) || null,
+          exact: passage,
+          prefix: text.slice(Math.max(0, offset - 64), offset),
+          suffix: text.slice(
+            offset + passage.length,
+            offset + passage.length + 64,
+          ),
+          offset,
+          blocks: 1,
+        },
+        enclosing: text.replace(passage, '⟦' + passage + '⟧'),
+        status: 'done',
+      });
+      note.title = 'On the list';
+      note.sections.set(
+        'Summary',
+        'A note anchored to a list item, so the marker sits by the item.',
+      );
+      note.tags = ['list'];
+      notesStore.set(note.id, note);
+    }
+  }
+  const orphan = makeNote({
+    passage: 'a passage that is not in this fixture at all',
+    headings: [
+      'Reading on a screen, without the strain',
+      'A section that was rewritten',
+    ],
+    anchor: {
+      block: 'bdeadbeef',
+      line: 90,
+      exact: 'a passage that is not in this fixture at all',
+      prefix: '',
+      suffix: '',
+      offset: 0,
+      blocks: 1,
+    },
+    enclosing:
+      'The old paragraph carried ⟦a passage that is not in this fixture at all⟧, before the section was rewritten.',
+    status: 'done',
+  });
+  orphan.title = 'A note whose passage is gone';
+  orphan.sections.set(
+    'Summary',
+    'This note is an orphan: its passage was removed from the document.',
+  );
+  orphan.anchor.missingSince = noteNow();
+  notesStore.set(orphan.id, orphan);
+  log('notes', 'seeded ' + notesStore.size);
+  postNotes();
+}
+
+function handleNoteMessage(command: string, args: unknown): boolean {
+  switch (command) {
+    case 'readAloudNoteCreate': {
+      const request = parseNoteCreateArgs(args);
+      if (!request) {
+        log('dropped invalid readAloudNoteCreate message');
+        return true;
+      }
+      const generate = flag('generate', true);
+      const note = makeNote({
+        passage: request.passage,
+        headings: request.fields.breadcrumb,
+        anchor: request.anchor,
+        enclosing: request.fields.enclosing,
+        status: request.source === 'help' || !generate ? 'done' : 'pending',
+        source: request.source === 'help' ? 'help' : 'engine',
+        explanation: request.explanation,
+      });
+      if (!generate && request.source !== 'help') {
+        note.generated = { status: 'done' };
+      }
+      notesStore.set(note.id, note);
+      log(
+        'notes',
+        'created ' +
+          note.id +
+          ' (' +
+          request.passage.length +
+          ' chars, ' +
+          request.source +
+          ')',
+      );
+      postNotes();
+      if (request.source !== 'help' && generate) {
+        generateNote(note.id, NOTES_DELAY_MS);
+      }
+      return true;
+    }
+    case 'readAloudNoteUpdate': {
+      const request = parseNoteUpdateArgs(args);
+      const note = request ? notesStore.get(request.noteId) : undefined;
+      if (!request || !note) {
+        log('dropped readAloudNoteUpdate');
+        return true;
+      }
+      if (request.title !== undefined) {
+        note.title = request.title;
+        note.titleEdited = true;
+      }
+      if (request.tags !== undefined) {
+        note.tags = request.tags;
+      }
+      if (request.myNote !== undefined) {
+        note.myNote = request.myNote;
+      }
+      note.updated = noteNow();
+      log(
+        'notes',
+        'updated ' +
+          note.id +
+          ' (' +
+          Object.keys(request)
+            .filter((k) => k !== 'sourceUri' && k !== 'noteId')
+            .join(', ') +
+          ')',
+      );
+      if (request.myNote === undefined) {
+        postNotes();
+      }
+      return true;
+    }
+    case 'readAloudNoteDelete': {
+      const request = parseNoteDeleteArgs(args);
+      if (!request || !notesStore.has(request.noteId)) {
+        return true;
+      }
+      const timer = window.setTimeout(() => {
+        notesDeleting.delete(request.noteId);
+        notesStore.delete(request.noteId);
+        log('notes', 'trashed ' + request.noteId);
+        postNotes();
+      }, 6000);
+      notesDeleting.set(request.noteId, timer);
+      log('notes', 'deleting ' + request.noteId);
+      postNotes();
+      return true;
+    }
+    case 'readAloudNoteUndoDelete': {
+      const request = parseNoteUndoDeleteArgs(args);
+      const timer = request ? notesDeleting.get(request.noteId) : undefined;
+      if (request && timer !== undefined) {
+        window.clearTimeout(timer);
+        notesDeleting.delete(request.noteId);
+        log('notes', 'undo delete ' + request.noteId);
+      }
+      postNotes();
+      return true;
+    }
+    case 'readAloudNoteRegenerate': {
+      const request = parseNoteRegenerateArgs(args);
+      const note = request ? notesStore.get(request.noteId) : undefined;
+      if (!request || !note) {
+        return true;
+      }
+      note.generated = { ...note.generated, status: 'pending' };
+      note.updated = noteNow();
+      log(
+        'notes',
+        'regenerating ' +
+          note.id +
+          (request.fields ? ' (fresh fields)' : ' (stored context)'),
+      );
+      postNotes();
+      generateNote(note.id, NOTES_DELAY_MS);
+      return true;
+    }
+    case 'readAloudNoteReattach': {
+      const request = parseNoteReattachArgs(args);
+      const note = request ? notesStore.get(request.noteId) : undefined;
+      if (!request || !note) {
+        return true;
+      }
+      if (!note.anchor.original) {
+        note.anchor.original = {
+          block: note.anchor.block,
+          line: note.anchor.line,
+        };
+      }
+      note.anchor.current = {
+        block: request.anchor.block,
+        line: request.anchor.line,
+      };
+      delete note.anchor.missingSince;
+      note.anchor.lastSeen = noteNow();
+      note.document.headings = request.breadcrumb;
+      note.updated = noteNow();
+      log('notes', 'reattached ' + note.id);
+      postNotes();
+      return true;
+    }
+    case 'readAloudNoteOpen': {
+      const request = parseNoteOpenArgs(args);
+      log(
+        'notes',
+        'open ' +
+          (request ? request.target + ' for ' + request.noteId : 'invalid'),
+      );
+      return true;
+    }
+    case 'readAloudNoteCopy': {
+      const request = parseNoteCopyArgs(args);
+      log('notes', 'copy ' + (request ? request.noteId : 'invalid'));
+      return true;
+    }
+    case 'readAloudNoteAnchors': {
+      const request = parseNoteAnchorsArgs(args);
+      if (!request) {
+        log('dropped invalid readAloudNoteAnchors message');
+        return true;
+      }
+      const found = request.anchors.filter((a) => a.found).length;
+      for (const report of request.anchors) {
+        const note = notesStore.get(report.noteId);
+        if (!note) {
+          continue;
+        }
+        if (report.found) {
+          delete note.anchor.missingSince;
+          note.anchor.lastSeen = noteNow();
+          if (report.block && report.block !== note.anchor.block) {
+            note.anchor.current = {
+              block: report.block,
+              line: report.line ?? null,
+            };
+          } else {
+            delete note.anchor.current;
+          }
+        } else if (!note.anchor.missingSince) {
+          note.anchor.missingSince = noteNow();
+        }
+      }
+      lastAnchorsReport = request.anchors;
+      log('notes', 'anchors ' + found + '/' + request.anchors.length);
+      return true;
+    }
+    case 'readAloudNotesShowAll':
+      log(
+        'notes',
+        parseNotesShowAllArgs(args)
+          ? 'show all (the view would focus)'
+          : 'invalid show all',
+      );
+      return true;
+    default:
+      return false;
+  }
+}
+
+let lastAnchorsReport: {
+  noteId: string;
+  found: boolean;
+  block?: string;
+  line?: number | null;
+}[] = [];
 
 // ----------------------------------------------------- the webview API end
 
@@ -798,14 +1727,47 @@ async function loadFixture(): Promise<void> {
   }
 }
 
-/** Replace the root's children with a fresh copy, as an `updateHtml` would. */
-function rerender(): number {
+/**
+ * Replace the root's children with a fresh copy, as an `updateHtml` would.
+ * `rerender('edited')` (12 §18) replaces it with a copy in which the noted
+ * paragraph has a sentence added before the passage and the first list item
+ * has moved into the next list, so anchoring steps 2 and 3 run.
+ */
+function rerender(variant?: string): number {
   const target = root();
   if (!target) {
     return 0;
   }
-  target.innerHTML = fixtureHtml;
-  log('rerender', target.children.length + ' elements');
+  let html = fixtureHtml;
+  if (variant === 'edited') {
+    const scratch = document.createElement('div');
+    scratch.innerHTML = fixtureHtml;
+    const paragraph = Array.from(scratch.children).find(
+      (el) =>
+        el.tagName === 'P' &&
+        (el.textContent ?? '').includes('sixty-six is the figure'),
+    );
+    if (paragraph && paragraph.firstChild) {
+      paragraph.insertBefore(
+        document.createTextNode('An edit made after the note was saved. '),
+        paragraph.firstChild,
+      );
+    }
+    const lists = Array.from(scratch.children).filter(
+      (el) => el.tagName === 'UL',
+    );
+    if (lists.length >= 2 && lists[0].firstElementChild) {
+      lists[1].appendChild(lists[0].firstElementChild);
+    }
+    html = scratch.innerHTML;
+  }
+  target.innerHTML = html;
+  log(
+    'rerender',
+    target.children.length +
+      ' elements' +
+      (variant ? ' (' + variant + ')' : ''),
+  );
   return target.children.length;
 }
 
@@ -1014,7 +1976,287 @@ function checks(): Record<string, unknown> {
       scrollIntoViewCalls,
     },
     audio: audioModePromise ? 'probed' : 'not probed',
+    notes: notesChecks(target),
+    classroom: classroomChecks(),
     config: { ...config },
+  };
+}
+
+/**
+ * `color(srgb r g b / a)` and `rgba()` as Chromium reports a translucent ink,
+ * composited over `surface`, so the contrast of a 55% ink can be measured.
+ */
+function compositeOver(color: string, surface: string): string {
+  const rgb = hexToRgb(surface) ?? [255, 255, 255];
+  let channels: [number, number, number] | null = null;
+  let alpha = 1;
+  const srgb =
+    /^color\(srgb\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)(?:\s*\/\s*([\d.]+))?\)/.exec(
+      color,
+    );
+  if (srgb) {
+    channels = [
+      Math.round(Number(srgb[1]) * 255),
+      Math.round(Number(srgb[2]) * 255),
+      Math.round(Number(srgb[3]) * 255),
+    ];
+    alpha = srgb[4] === undefined ? 1 : Number(srgb[4]);
+  } else {
+    const rgba = /^rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/.exec(
+      color,
+    );
+    if (rgba) {
+      channels = [Number(rgba[1]), Number(rgba[2]), Number(rgba[3])];
+      alpha = rgba[4] === undefined ? 1 : Number(rgba[4]);
+    }
+  }
+  if (!channels) {
+    return color;
+  }
+  const mixed = channels.map((c, i) =>
+    Math.round(c * alpha + rgb[i] * (1 - alpha)),
+  );
+  return `rgb(${mixed[0]}, ${mixed[1]}, ${mixed[2]})`;
+}
+
+/** 13 §18 — the cluster's width and rows, the sheets' width and measure, contrasts, the bar's count. */
+function classroomChecks(): Record<string, unknown> {
+  const float = document.querySelector('.mpe-ra-float') as HTMLElement | null;
+  const floatRect =
+    float && !float.hidden ? float.getBoundingClientRect() : null;
+  const floatButtons = float
+    ? (
+        Array.from(float.querySelectorAll('.mpe-ra-float-btn')) as HTMLElement[]
+      ).filter((b) => !b.hidden)
+    : [];
+  const tops = new Set(
+    floatButtons.map((b) => Math.round(b.getBoundingClientRect().top)),
+  );
+  const column = root();
+  const columnRect = column ? column.getBoundingClientRect() : null;
+  const sheet = document.querySelector(
+    '.mpe-ra-classroom',
+  ) as HTMLElement | null;
+  const moduleSheet = document.querySelector(
+    '.mpe-ra-module',
+  ) as HTMLElement | null;
+  const measureOf = (el: HTMLElement | null) => {
+    if (!el || el.hidden) {
+      return null;
+    }
+    const style = getComputedStyle(el);
+    return {
+      width: el.getBoundingClientRect().width,
+      fontSize: style.fontSize,
+      lineHeight: style.lineHeight,
+      maxHeight: style.maxHeight,
+    };
+  };
+  const row = document.querySelector(
+    '.mpe-ra-lever-row[aria-checked="true"]',
+  ) as HTMLElement | null;
+  const surface = sheet ? getComputedStyle(sheet).backgroundColor : '';
+  const rowStyle = row ? getComputedStyle(row) : null;
+  const badge = document.querySelector(
+    '.mpe-ra-bar-classroom-badge',
+  ) as HTMLElement | null;
+  const badgeStyle = badge && !badge.hidden ? getComputedStyle(badge) : null;
+  return {
+    cluster: floatRect
+      ? {
+          width: floatRect.width,
+          rows: tops.size,
+          buttons: floatButtons.length,
+          insideColumn: columnRect
+            ? floatRect.right <= columnRect.right + 1
+            : null,
+        }
+      : null,
+    sheet: measureOf(sheet),
+    moduleSheet: measureOf(moduleSheet),
+    lever: rowStyle
+      ? {
+          text: rowStyle.color,
+          ring: rowStyle.borderColor,
+          surface,
+          textContrast: contrast(
+            rowStyle.color,
+            compositeOver(surface, surface),
+          ),
+          ringContrast: contrast(
+            rowStyle.borderColor,
+            compositeOver(surface, surface),
+          ),
+        }
+      : null,
+    badge: badgeStyle
+      ? {
+          text: badgeStyle.color,
+          background: badgeStyle.backgroundColor,
+          contrast: contrast(badgeStyle.color, badgeStyle.backgroundColor),
+        }
+      : null,
+    barButtons: Array.from(
+      document.querySelectorAll('.mpe-ra-bar > .mpe-ra-bar-btn'),
+    ).filter((b) => !(b as HTMLElement).hidden).length,
+    state: {
+      sheetOpen: !!sheet && !sheet.hidden,
+      details:
+        document.querySelector('.mpe-ra-classroom-details')?.textContent ??
+        null,
+      chapterRows: document.querySelectorAll(
+        '.mpe-ra-classroom-card .mpe-ra-chapter-row',
+      ).length,
+      message:
+        document.querySelector('.mpe-ra-bar-status')?.textContent ?? null,
+    },
+  };
+}
+
+/** 12 §18 — the notes report: markers, ranges, contrast, the sheet, the pass. */
+function notesChecks(target: HTMLElement | null): Record<string, unknown> {
+  const markers = Array.from(
+    document.querySelectorAll('.mpe-ra-note-marker'),
+  ) as HTMLElement[];
+  const highlights = (
+    CSS as unknown as { highlights?: Map<string, Set<Range>> }
+  ).highlights;
+  const highlight = highlights ? highlights.get('mpe-ra-note') : undefined;
+  const ranges = highlight
+    ? Array.from(highlight as unknown as Iterable<Range>)
+    : [];
+  const firstRange = ranges[0];
+  const markerRows = markers.map((marker) => {
+    const block = marker.parentElement as HTMLElement;
+    const blockRect = block.getBoundingClientRect();
+    const rect = marker.getBoundingClientRect();
+    const style = getComputedStyle(marker);
+    const range = ranges.find((r) => block.contains(r.startContainer));
+    const lineRect = range ? range.getClientRects()[0] : undefined;
+    const surface = target
+      ? getComputedStyle(target).backgroundColor
+      : 'rgb(255,255,255)';
+    const ink = style.color;
+    const badge = marker.querySelector(
+      '.mpe-ra-note-count',
+    ) as HTMLElement | null;
+    return {
+      noteId: marker.getAttribute('data-mpe-ra-note'),
+      block: block.tagName.toLowerCase() + (block.id ? '#' + block.id : ''),
+      right: style.right,
+      rightPx: Math.round(blockRect.right - rect.right),
+      top: Math.round(rect.top - blockRect.top),
+      lineTop: lineRect ? Math.round(lineRect.top - blockRect.top) : null,
+      width: rect.width,
+      height: rect.height,
+      count: badge ? badge.textContent : null,
+      title: marker.getAttribute('title'),
+      pending: marker.classList.contains('is-pending'),
+      active: marker.classList.contains('is-active'),
+      ink,
+      inkComposited: compositeOver(ink, surface),
+      inkOnSurface: contrast(compositeOver(ink, surface), surface),
+      badge: badge
+        ? {
+            fg: getComputedStyle(badge).color,
+            bg: getComputedStyle(badge).backgroundColor,
+            contrast: contrast(
+              getComputedStyle(badge).color,
+              getComputedStyle(badge).backgroundColor,
+            ),
+          }
+        : null,
+    };
+  });
+  const sheet = document.querySelector('.mpe-ra-note') as HTMLElement | null;
+  const body = document.querySelector(
+    '.mpe-ra-note-body',
+  ) as HTMLElement | null;
+  const textarea = document.querySelector(
+    '.mpe-ra-note-textarea',
+  ) as HTMLTextAreaElement | null;
+  const list = document.querySelector(
+    '.mpe-ra-notes-list',
+  ) as HTMLElement | null;
+  const markInk =
+    firstRange && firstRange.startContainer.parentElement
+      ? getComputedStyle(firstRange.startContainer.parentElement)
+          .getPropertyValue('--mpe-ra-note-ink')
+          .trim()
+      : null;
+  return {
+    markers: markerRows,
+    gutter: target ? target.classList.contains('mpe-ra-notes-gutter') : null,
+    ranges: ranges.length,
+    rangeTexts: ranges.map((r) => r.toString().slice(0, 40)),
+    markInk,
+    sheet: sheet
+      ? {
+          hidden: sheet.hidden,
+          width: getComputedStyle(sheet).width,
+          fontSize: getComputedStyle(sheet).fontSize,
+          bodyWidth: body ? getComputedStyle(body).width : null,
+          bodyCharsPerLine: body ? charsPerLine(body) : null,
+          details:
+            (
+              document.querySelector(
+                '.mpe-ra-note-details',
+              ) as HTMLElement | null
+            )?.textContent ?? null,
+          textareaRows: textarea ? textarea.rows : null,
+          textareaHeight: textarea ? getComputedStyle(textarea).height : null,
+          tags: Array.from(document.querySelectorAll('.mpe-ra-note-tag')).map(
+            (t) => t.getAttribute('data-tag'),
+          ),
+          pager:
+            (
+              document.querySelector(
+                '.mpe-ra-note-pager-label',
+              ) as HTMLElement | null
+            )?.textContent ?? null,
+          banner: !(
+            document.querySelector('.mpe-ra-note-banner') as HTMLElement | null
+          )?.hidden,
+        }
+      : null,
+    list: list
+      ? {
+          hidden: list.hidden,
+          rows: Array.from(document.querySelectorAll('.mpe-ra-notes-row')).map(
+            (row) => ({
+              title:
+                row.querySelector('.mpe-ra-notes-row-title > span')
+                  ?.textContent ?? '',
+              badge:
+                row.querySelector('.mpe-ra-notes-badge')?.textContent ?? null,
+              meta:
+                row.querySelector('.mpe-ra-notes-row-meta')?.textContent ?? '',
+            }),
+          ),
+        }
+      : null,
+    barBadge:
+      (document.querySelector('.mpe-ra-bar-badge') as HTMLElement | null)
+        ?.textContent ?? null,
+    chip:
+      (document.querySelector('.mpe-ra-note-chip-text') as HTMLElement | null)
+        ?.textContent ?? null,
+    chipHidden:
+      (document.querySelector('.mpe-ra-note-chip') as HTMLElement | null)
+        ?.hidden ?? null,
+    lastAnchorsReport,
+    stored: Array.from(notesStore.values()).map((note) => ({
+      id: note.id,
+      title: note.title,
+      status: note.generated.status,
+      tags: note.tags,
+      myNote: note.myNote,
+      missingSince: note.anchor.missingSince ?? null,
+      current: note.anchor.current ?? null,
+    })),
+    passMs:
+      (window as unknown as { mpeReadAloudNotesPassMs?: number })
+        .mpeReadAloudNotesPassMs ?? null,
   };
 }
 
@@ -1024,6 +2266,8 @@ function checks(): Record<string, unknown> {
   charsPerLine,
   events,
   config,
+  notes: notesStore,
+  postNotes,
   get scrollIntoViewCalls() {
     return scrollIntoViewCalls;
   },
@@ -1035,7 +2279,11 @@ function checks(): Record<string, unknown> {
 
 document.addEventListener('DOMContentLoaded', () => {
   document.body.classList.add(vscodeKind);
-  void loadFixture();
+  void loadFixture().then(() => {
+    // The player has decorated the fixture by now; the canned notes key on it.
+    window.setTimeout(seedNotes, 100);
+    window.setTimeout(seedModule, 150);
+  });
   void audioMode();
 });
 

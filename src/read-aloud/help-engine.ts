@@ -555,9 +555,35 @@ export async function resolveHelpBinary(
  * answer and `is_error` the failure. Some builds print progress lines first,
  * so the last line that parses wins, with the whole of stdout as a fallback.
  */
+/** The CLI's `usage` block, as far as the log wants it (13 §14.4). */
+export interface ClaudeUsage {
+  cacheRead?: number;
+  cacheCreation?: number;
+  costUsd?: number;
+}
+
+function usageOf(object: Record<string, unknown>): ClaudeUsage | undefined {
+  const usage: ClaudeUsage = {};
+  const raw = object.usage;
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    const fields = raw as Record<string, unknown>;
+    if (typeof fields.cache_read_input_tokens === 'number') {
+      usage.cacheRead = fields.cache_read_input_tokens;
+    }
+    if (typeof fields.cache_creation_input_tokens === 'number') {
+      usage.cacheCreation = fields.cache_creation_input_tokens;
+    }
+  }
+  if (typeof object.total_cost_usd === 'number') {
+    usage.costUsd = object.total_cost_usd;
+  }
+  return Object.keys(usage).length ? usage : undefined;
+}
+
 export function parseClaudeJson(stdout: string): {
   answer: string;
   error?: string;
+  usage?: ClaudeUsage;
 } {
   const candidates: string[] = [];
   const trimmed = stdout.trim();
@@ -591,7 +617,8 @@ export function parseClaudeJson(stdout: string): {
       return { answer: '', error: result || String(object.subtype ?? 'error') };
     }
     if (result) {
-      return { answer: result };
+      const usage = usageOf(object);
+      return usage ? { answer: result, usage } : { answer: result };
     }
   }
   return { answer: '', error: '' };
@@ -603,12 +630,25 @@ export interface HelpRunRequest {
   userPrompt: string;
   codexPrompt: string;
   signal?: AbortSignal;
+  /**
+   * Classroom (13 §9.1): a working directory the caller owns. When present
+   * the child spawns there and the directory is left in place, so every call
+   * of a build shares one `cwd` and the CLI's prompt cache holds across them;
+   * when absent the engine makes and removes its own, as help does.
+   */
+  cwd?: string;
 }
 
 export interface HelpRunResult {
   markdown: string;
   label: HelpEngineLabel;
   durationMs: number;
+  /** claude only: the cache-read tokens the CLI reported (13 §14.4). */
+  cacheRead?: number;
+  /** claude only: the cache-creation tokens the CLI reported. */
+  cacheCreation?: number;
+  /** claude only: the CLI's `total_cost_usd`. */
+  costUsd?: number;
 }
 
 /**
@@ -651,15 +691,20 @@ export async function runHelpEngine(
     binary = lookup.path;
   }
 
+  const ownCwd = !request.cwd;
   let cwd: string;
-  try {
-    cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'mpe-help-'));
-  } catch (error) {
-    throw new HelpEngineError(
-      'engine_failed',
-      `Could not create a working directory: ${String(error)}`,
-      true,
-    );
+  if (request.cwd) {
+    cwd = request.cwd;
+  } else {
+    try {
+      cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'mpe-help-'));
+    } catch (error) {
+      throw new HelpEngineError(
+        'engine_failed',
+        `Could not create a working directory: ${String(error)}`,
+        true,
+      );
+    }
   }
 
   try {
@@ -704,8 +749,10 @@ export async function runHelpEngine(
     }
 
     let raw = '';
+    let usage: ClaudeUsage | undefined;
     if (invocation.answerFrom === 'claudeJson') {
       const parsed = parseClaudeJson(result.stdout);
+      usage = parsed.usage;
       if (parsed.error) {
         if (looksLikeAuthFailure(parsed.error)) {
           throw new HelpEngineError(
@@ -738,12 +785,30 @@ export async function runHelpEngine(
         true,
       );
     }
-    return { markdown: raw, label, durationMs: Date.now() - started };
+    const out: HelpRunResult = {
+      markdown: raw,
+      label,
+      durationMs: Date.now() - started,
+    };
+    if (usage) {
+      if (usage.cacheRead !== undefined) {
+        out.cacheRead = usage.cacheRead;
+      }
+      if (usage.cacheCreation !== undefined) {
+        out.cacheCreation = usage.cacheCreation;
+      }
+      if (usage.costUsd !== undefined) {
+        out.costUsd = usage.costUsd;
+      }
+    }
+    return out;
   } finally {
-    try {
-      fs.rmSync(cwd, { recursive: true, force: true });
-    } catch {
-      // The directory is under os.tmpdir(); leaving it is harmless.
+    if (ownCwd) {
+      try {
+        fs.rmSync(cwd, { recursive: true, force: true });
+      } catch {
+        // The directory is under os.tmpdir(); leaving it is harmless.
+      }
     }
   }
 }

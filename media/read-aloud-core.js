@@ -2424,6 +2424,591 @@
   }
 
   // ---------------------------------------------------------------------------
+  // Notes: the anchor and re-anchoring (featrues/12-notes/spec.md §9)
+  //
+  // Pure functions over the top-level children of a scope. `noteAnchorFor`
+  // is computed once, when a note is captured; `anchorNotes` runs on every
+  // `readAloudNotes` and after every re-render and decides, note by note,
+  // which block (and which words) a note belongs to now — by the block's
+  // content key, then by the exact passage with its prefix and suffix, then
+  // by a fuzzy match of the enclosing block — or that it is an orphan.
+  // ---------------------------------------------------------------------------
+
+  var NOTE_CONTEXT_CHARS = 64;
+  var NOTE_FUZZY_THRESHOLD = 0.75;
+  var NOTE_FUZZY_MIN_RATIO = 0.5;
+  var NOTE_FUZZY_MAX_RATIO = 2;
+
+  /**
+   * The `data-source-line` of the nearest ancestor-or-self of `node`, up to
+   * and including `top` — a list item's own line, a table row's — else null.
+   */
+  function sourceLineOf(node, top) {
+    var el = nearestElement(node);
+    while (el) {
+      if (el.hasAttribute && el.hasAttribute('data-source-line')) {
+        var value = parseInt(el.getAttribute('data-source-line'), 10);
+        if (isFinite(value) && value >= 0) {
+          return value;
+        }
+      }
+      if (el === top) {
+        break;
+      }
+      el = el.parentElement;
+    }
+    return null;
+  }
+
+  /** The cells of a table, extracted and joined with spaces (§9.2 step 2). */
+  function tableSearchText(table) {
+    if (!table || !table.querySelectorAll) {
+      return '';
+    }
+    var cells = table.querySelectorAll('th, td');
+    var parts = [];
+    for (var i = 0; i < cells.length; i++) {
+      var text = extractText(cells[i]).text;
+      if (text) {
+        parts.push(text);
+      }
+    }
+    return parts.join(' ');
+  }
+
+  /** A candidate for anchoring: an eligible block, or a table (for cell notes). */
+  function isAnchorCandidate(el) {
+    if (!el || el.nodeType !== ELEMENT_NODE) {
+      return false;
+    }
+    if (el.tagName === 'TABLE') {
+      return true;
+    }
+    return classifyBlock(el).eligible;
+  }
+
+  /** `{ text, map }` a candidate is searched in; a table has no map. */
+  function candidateExtraction(el) {
+    if (el.tagName === 'TABLE') {
+      return { text: tableSearchText(el), map: null };
+    }
+    return extractText(el);
+  }
+
+  /** The heading path above `index` among `children`, outermost first. */
+  function headingPathOf(children, index) {
+    var path = [];
+    var minLevel = 7;
+    for (var b = index - 1; b >= 0; b--) {
+      var level = headingLevel(children[b]);
+      if (!level || level >= minLevel) {
+        continue;
+      }
+      path.unshift(extractText(children[b]).text);
+      minLevel = level;
+      if (level === 1) {
+        break;
+      }
+    }
+    return path;
+  }
+
+  /**
+   * §9.1 — the anchor of a resolved selection (`resolveSelection`'s `ok`
+   * result) inside `scope`, with the live `range` when there is one for the
+   * exact offset. Null when the selection is not inside the scope.
+   */
+  function noteAnchorFor(resolved, scope, range) {
+    if (
+      !resolved ||
+      !resolved.ok ||
+      !resolved.blocks ||
+      !resolved.blocks.length ||
+      !scope
+    ) {
+      return null;
+    }
+    var first = resolved.blocks[0];
+    var top = topLevelOf(first, scope);
+    if (!top) {
+      return null;
+    }
+    var cell = isTableCell(first);
+    var whole = candidateExtraction(top);
+    var exact = typeof resolved.text === 'string' ? resolved.text : '';
+    var firstPart = exact.split('\n')[0];
+    var offset = -1;
+    if (!cell && whole.map && range && range.startContainer) {
+      try {
+        var caret = caretToTextOffset(
+          whole.map,
+          range.startContainer,
+          range.startOffset,
+        );
+        if (typeof caret === 'number' && caret >= 0) {
+          var at = caret;
+          while (
+            at < whole.text.length &&
+            isWhitespaceCode(whole.text.charCodeAt(at))
+          ) {
+            at++;
+          }
+          if (whole.text.substr(at, firstPart.length) === firstPart) {
+            offset = at;
+          }
+        }
+      } catch (error) {
+        offset = -1;
+      }
+    }
+    if (offset < 0) {
+      offset = whole.text.indexOf(firstPart);
+    }
+    if (offset < 0) {
+      offset = 0;
+    }
+    var end = offset + firstPart.length;
+    var tops = [];
+    for (var b = 0; b < resolved.blocks.length; b++) {
+      var t = topLevelOf(resolved.blocks[b], scope);
+      if (t && tops.indexOf(t) < 0) {
+        tops.push(t);
+      }
+    }
+    var startNode =
+      !cell && range && range.startContainer ? range.startContainer : first;
+    return {
+      block: blockKey(top, whole.text),
+      line: sourceLineOf(startNode, top),
+      exact: exact,
+      prefix: whole.text.slice(
+        Math.max(0, offset - NOTE_CONTEXT_CHARS),
+        offset,
+      ),
+      suffix: whole.text.slice(end, end + NOTE_CONTEXT_CHARS),
+      offset: offset,
+      blocks: Math.max(1, tops.length),
+    };
+  }
+
+  function bigramCounts(text) {
+    var map = Object.create(null);
+    var count = 0;
+    for (var i = 0; i + 1 < text.length; i++) {
+      var gram = text.substr(i, 2);
+      map[gram] = (map[gram] || 0) + 1;
+      count++;
+    }
+    return { map: map, count: count };
+  }
+
+  /** Sørensen–Dice over character bigrams, 0–1. */
+  function bigramDice(a, b) {
+    if (typeof a !== 'string' || typeof b !== 'string' || !a || !b) {
+      return 0;
+    }
+    if (a === b) {
+      return 1;
+    }
+    var x = bigramCounts(a);
+    var y = bigramCounts(b);
+    if (!x.count || !y.count) {
+      return 0;
+    }
+    var shared = 0;
+    for (var gram in x.map) {
+      if (y.map[gram]) {
+        shared += Math.min(x.map[gram], y.map[gram]);
+      }
+    }
+    return (2 * shared) / (x.count + y.count);
+  }
+
+  /**
+   * How much of the stored `expected` context the candidate's `actual`
+   * context repeats, counted from the passage outwards: 0–1. With nothing
+   * stored there is nothing to contradict.
+   */
+  function contextScore(expected, actual, fromEnd) {
+    if (!expected) {
+      return actual ? 0.5 : 1;
+    }
+    var matched = 0;
+    var n = Math.min(expected.length, actual.length);
+    for (var i = 0; i < n; i++) {
+      var e = fromEnd
+        ? expected.charAt(expected.length - 1 - i)
+        : expected.charAt(i);
+      var a = fromEnd ? actual.charAt(actual.length - 1 - i) : actual.charAt(i);
+      if (e !== a) {
+        break;
+      }
+      matched++;
+    }
+    return matched / expected.length;
+  }
+
+  function lineDistance(a, b) {
+    if (typeof a !== 'number' || typeof b !== 'number') {
+      return Number.MAX_SAFE_INTEGER;
+    }
+    return Math.abs(a - b);
+  }
+
+  /** The stored enclosing block with the ⟦ ⟧ markers removed, whitespace flattened. */
+  function enclosingPlain(note) {
+    var text =
+      note && note.context && typeof note.context.enclosing === 'string'
+        ? note.context.enclosing
+        : '';
+    return text
+      .split(ENCLOSING_OPEN)
+      .join('')
+      .split(ENCLOSING_CLOSE)
+      .join('')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function storedLine(note) {
+    var anchor = note.anchor || {};
+    if (anchor.current && typeof anchor.current.line === 'number') {
+      return anchor.current.line;
+    }
+    return typeof anchor.line === 'number' ? anchor.line : null;
+  }
+
+  /**
+   * The continuation of a multi-block passage (§9.2): following candidates
+   * whose text carries the next parts of the passage in order. Middle parts
+   * must be whole blocks; the last part is the start of its block.
+   */
+  function continuationSpans(candidates, fromIndex, parts) {
+    var spans = [];
+    var k = 1;
+    for (
+      var c = fromIndex + 1;
+      c < candidates.length && k < parts.length;
+      c++
+    ) {
+      var candidate = candidates[c];
+      var part = parts[k];
+      var last = k === parts.length - 1;
+      if (last ? candidate.text.indexOf(part) === 0 : candidate.text === part) {
+        spans.push({
+          el: candidate.el,
+          map: candidate.map,
+          start: 0,
+          end: part.length,
+        });
+        k++;
+      } else {
+        break;
+      }
+    }
+    return spans;
+  }
+
+  function found(note, candidate, step, start, end, parts, candidates) {
+    var result = {
+      noteId: note.id,
+      found: true,
+      step: step,
+      el: candidate.el,
+      index: candidate.index,
+      block: candidate.key,
+      line: candidate.line,
+      text: candidate.text,
+      map: candidate.map,
+      start: start,
+      end: end,
+      spans: [],
+    };
+    if (start >= 0 && candidate.map) {
+      result.spans.push({
+        el: candidate.el,
+        map: candidate.map,
+        start: start,
+        end: end,
+      });
+      if (parts.length > 1) {
+        result.spans = result.spans.concat(
+          continuationSpans(candidates, candidate.index, parts),
+        );
+      }
+      var dom = offsetToDom(candidate.map, start);
+      if (dom) {
+        var line = sourceLineOf(dom.node, candidate.el);
+        if (line !== null) {
+          result.line = line;
+        }
+      }
+    }
+    return result;
+  }
+
+  /**
+   * §9.2 — re-anchor `notes` against the top-level children of `scope`. One
+   * extraction per candidate for the pass. Returns one result per note, in
+   * the order given: `{ noteId, found, step, el, index, block, line, text,
+   * map, start, end, spans }`, with `found: false` and `step: 0` for an orphan.
+   */
+  function anchorNotes(scope, notes) {
+    var results = [];
+    if (!scope || !notes || !notes.length) {
+      return results;
+    }
+    var children = [];
+    for (var c = 0; c < scope.children.length; c++) {
+      children.push(scope.children[c]);
+    }
+    var candidates = [];
+    var byKey = Object.create(null);
+    for (var i = 0; i < children.length; i++) {
+      var el = children[i];
+      if (!isAnchorCandidate(el)) {
+        continue;
+      }
+      var extracted = candidateExtraction(el);
+      if (!extracted.text) {
+        continue;
+      }
+      var candidate = {
+        el: el,
+        index: candidates.length,
+        childIndex: i,
+        text: extracted.text,
+        map: extracted.map,
+        key: blockKey(el, extracted.text),
+        line: sourceLineOf(el, el),
+        path: null,
+      };
+      candidates.push(candidate);
+      (byKey[candidate.key] = byKey[candidate.key] || []).push(candidate);
+    }
+
+    var byId = Object.create(null);
+    var order = notes.slice().sort(function (a, b) {
+      var la = storedLine(a);
+      var lb = storedLine(b);
+      if (la === null && lb === null) {
+        return 0;
+      }
+      if (la === null) {
+        return 1;
+      }
+      if (lb === null) {
+        return -1;
+      }
+      return la - lb;
+    });
+
+    // Step 1 — block key. Identical blocks are told apart by the stored
+    // line, and consumed in document order when no line is known.
+    var cursor = Object.create(null);
+    var remaining = [];
+    for (var n = 0; n < order.length; n++) {
+      var note = order[n];
+      var anchor = note.anchor || {};
+      var parts = String(anchor.exact || '').split('\n');
+      var keys = [];
+      if (anchor.current && anchor.current.block) {
+        keys.push(anchor.current.block);
+      }
+      if (anchor.block && keys.indexOf(anchor.block) < 0) {
+        keys.push(anchor.block);
+      }
+      var hit = null;
+      for (var k = 0; k < keys.length && !hit; k++) {
+        var list = byKey[keys[k]];
+        if (!list || !list.length) {
+          continue;
+        }
+        var want = storedLine(note);
+        if (list.length === 1) {
+          hit = list[0];
+        } else if (want !== null) {
+          var best = null;
+          var bestDistance = Infinity;
+          for (var l = 0; l < list.length; l++) {
+            var distance = lineDistance(list[l].line, want);
+            if (distance < bestDistance) {
+              best = list[l];
+              bestDistance = distance;
+            }
+          }
+          hit = best;
+        } else {
+          var used = cursor[keys[k]] || 0;
+          hit = list[Math.min(used, list.length - 1)];
+          cursor[keys[k]] = used + 1;
+        }
+      }
+      if (!hit) {
+        remaining.push(note);
+        continue;
+      }
+      var start = -1;
+      if (
+        typeof anchor.offset === 'number' &&
+        hit.text.substr(anchor.offset, parts[0].length) === parts[0]
+      ) {
+        start = anchor.offset;
+      } else {
+        start = hit.text.indexOf(parts[0]);
+      }
+      byId[note.id] = found(
+        note,
+        hit,
+        1,
+        start,
+        start >= 0 ? start + parts[0].length : -1,
+        parts,
+        candidates,
+      );
+    }
+
+    // Step 2 — the exact passage, scored by prefix, suffix, line, order.
+    var stillRemaining = [];
+    for (var r = 0; r < remaining.length; r++) {
+      var note2 = remaining[r];
+      var anchor2 = note2.anchor || {};
+      var parts2 = String(anchor2.exact || '').split('\n');
+      var needle = parts2[0];
+      var occurrences = [];
+      if (needle) {
+        for (var ci = 0; ci < candidates.length; ci++) {
+          var text = candidates[ci].text;
+          var from = 0;
+          var at;
+          while ((at = text.indexOf(needle, from)) >= 0) {
+            occurrences.push({ candidate: candidates[ci], start: at });
+            from = at + Math.max(1, needle.length);
+          }
+        }
+      }
+      if (!occurrences.length) {
+        stillRemaining.push(note2);
+        continue;
+      }
+      var chosen = occurrences[0];
+      if (occurrences.length > 1) {
+        var want2 = storedLine(note2);
+        var scored = occurrences.map(function (occurrence, position) {
+          var textAt = occurrence.candidate.text;
+          var before = textAt.slice(
+            Math.max(0, occurrence.start - NOTE_CONTEXT_CHARS),
+            occurrence.start,
+          );
+          var after = textAt.slice(
+            occurrence.start + needle.length,
+            occurrence.start + needle.length + NOTE_CONTEXT_CHARS,
+          );
+          return {
+            occurrence: occurrence,
+            score:
+              contextScore(anchor2.prefix || '', before, true) +
+              contextScore(anchor2.suffix || '', after, false),
+            distance: lineDistance(occurrence.candidate.line, want2),
+            position: position,
+          };
+        });
+        scored.sort(function (a, b) {
+          if (b.score !== a.score) {
+            return b.score - a.score;
+          }
+          if (a.distance !== b.distance) {
+            return a.distance - b.distance;
+          }
+          return a.position - b.position;
+        });
+        chosen = scored[0].occurrence;
+      }
+      byId[note2.id] = found(
+        note2,
+        chosen.candidate,
+        2,
+        chosen.start,
+        chosen.start + needle.length,
+        parts2,
+        candidates,
+      );
+    }
+
+    // Step 3 — fuzzy: the enclosing block against candidates of a similar
+    // length, under the same heading path first.
+    for (var f = 0; f < stillRemaining.length; f++) {
+      var note3 = stillRemaining[f];
+      var plain = enclosingPlain(note3);
+      var result3 = null;
+      if (plain) {
+        var wantPath = (
+          note3.headings ||
+          (note3.document && note3.document.headings) ||
+          []
+        ).join(' › ');
+        var bestFuzzy = null;
+        for (var fi = 0; fi < candidates.length; fi++) {
+          var fc = candidates[fi];
+          var ratio = fc.text.length / plain.length;
+          if (ratio < NOTE_FUZZY_MIN_RATIO || ratio > NOTE_FUZZY_MAX_RATIO) {
+            continue;
+          }
+          var dice = bigramDice(plain, fc.text.replace(/\s+/g, ' ').trim());
+          if (dice < NOTE_FUZZY_THRESHOLD) {
+            continue;
+          }
+          if (fc.path === null) {
+            fc.path = headingPathOf(children, fc.childIndex).join(' › ');
+          }
+          var samePath = fc.path === wantPath ? 1 : 0;
+          if (
+            !bestFuzzy ||
+            samePath > bestFuzzy.samePath ||
+            (samePath === bestFuzzy.samePath && dice > bestFuzzy.dice)
+          ) {
+            bestFuzzy = { candidate: fc, dice: dice, samePath: samePath };
+          }
+        }
+        if (bestFuzzy) {
+          var parts3 = String((note3.anchor || {}).exact || '').split('\n');
+          var start3 = parts3[0]
+            ? bestFuzzy.candidate.text.indexOf(parts3[0])
+            : -1;
+          result3 = found(
+            note3,
+            bestFuzzy.candidate,
+            3,
+            start3,
+            start3 >= 0 ? start3 + parts3[0].length : -1,
+            parts3,
+            candidates,
+          );
+        }
+      }
+      byId[note3.id] = result3 || {
+        noteId: note3.id,
+        found: false,
+        step: 0,
+        el: null,
+        index: -1,
+        block: null,
+        line: null,
+        text: '',
+        map: null,
+        start: -1,
+        end: -1,
+        spans: [],
+      };
+    }
+
+    for (var o = 0; o < notes.length; o++) {
+      results.push(byId[notes[o].id]);
+    }
+    return results;
+  }
+
+  // ---------------------------------------------------------------------------
   // Exports
   // ---------------------------------------------------------------------------
 
@@ -2511,6 +3096,15 @@
     tierFor: tierFor,
     resolvePageScheme: resolvePageScheme,
     backgroundLuminance: backgroundLuminance,
+    // Notes (12 §9)
+    NOTE_CONTEXT_CHARS: NOTE_CONTEXT_CHARS,
+    NOTE_FUZZY_THRESHOLD: NOTE_FUZZY_THRESHOLD,
+    sourceLineOf: sourceLineOf,
+    tableSearchText: tableSearchText,
+    headingPathOf: headingPathOf,
+    noteAnchorFor: noteAnchorFor,
+    bigramDice: bigramDice,
+    anchorNotes: anchorNotes,
   };
 
   if (typeof module !== 'undefined' && module.exports) {

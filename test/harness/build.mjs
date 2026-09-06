@@ -17,4 +17,6 @@ await build({
   outfile: join(here, 'dist', 'host-shim.js'),
   sourcemap: 'inline',
   logLevel: 'info',
+  // The classroom's canned plan is the experiment's, imported as text (13 §18).
+  loader: { '.md': 'text' },
 });

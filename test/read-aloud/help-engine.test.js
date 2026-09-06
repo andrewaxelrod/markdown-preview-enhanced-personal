@@ -1303,4 +1303,112 @@ suite('read-aloud/help-answer', function () {
       }
     });
   });
+
+  suite('13 §9.1 — a caller-owned cwd, and the cache column', function () {
+    // This suite sits outside the engine suite's setup, so it makes its own
+    // executable for the binary override.
+    let ownBinDir;
+    let fakeBinary;
+
+    suiteSetup(function () {
+      ownBinDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpe-help-bin-'));
+      fakeBinary = path.join(ownBinDir, 'fake-cli');
+      fs.writeFileSync(fakeBinary, '#!/bin/sh\nexit 0\n', 'utf8');
+      fs.chmodSync(fakeBinary, 0o755);
+      engine.clearHelpBinaryCache();
+    });
+
+    suiteTeardown(function () {
+      if (ownBinDir && fs.existsSync(ownBinDir)) {
+        fs.rmSync(ownBinDir, { recursive: true, force: true });
+      }
+    });
+
+    test('with cwd given the child spawns there and the directory is left in place', async function () {
+      const own = fs.mkdtempSync(path.join(os.tmpdir(), 'mpe-classroom-test-'));
+      let seen;
+      const spawn = makeSpawn(function (call) {
+        seen = call.options.cwd;
+        call.finish({
+          stdout: JSON.stringify({
+            result: 'ok',
+            usage: {
+              cache_read_input_tokens: 30016,
+              cache_creation_input_tokens: 0,
+            },
+            total_cost_usd: 0.029,
+          }),
+          code: 0,
+        });
+      });
+      const result = await engine.runHelpEngine(
+        request({
+          config: config({ binaryPath: { claude: fakeBinary } }),
+          cwd: own,
+        }),
+        deps(spawn),
+      );
+      assert.strictEqual(seen, own);
+      assert.strictEqual(fs.existsSync(own), true, 'not removed');
+      assert.strictEqual(result.cacheRead, 30016);
+      assert.strictEqual(result.cacheCreation, 0);
+      assert.strictEqual(result.costUsd, 0.029);
+      fs.rmSync(own, { recursive: true, force: true });
+    });
+
+    test('without cwd the engine makes and removes its own, and reports no usage without a block', async function () {
+      let seen;
+      const spawn = makeSpawn(function (call) {
+        seen = call.options.cwd;
+        call.finish({ stdout: '{"result":"ok"}', code: 0 });
+      });
+      const result = await engine.runHelpEngine(
+        request({ config: config({ binaryPath: { claude: fakeBinary } }) }),
+        deps(spawn),
+      );
+      assert.ok(seen && seen.includes('mpe-help-'));
+      assert.strictEqual(fs.existsSync(seen), false);
+      assert.strictEqual(result.cacheRead, undefined);
+      assert.strictEqual(result.costUsd, undefined);
+    });
+
+    test('a caller-owned cwd survives a killed run too', async function () {
+      const own = fs.mkdtempSync(path.join(os.tmpdir(), 'mpe-classroom-test-'));
+      const controller = new AbortController();
+      const spawn = makeHangingSpawn(function () {
+        controller.abort();
+      });
+      const error = await rejection(
+        engine.runHelpEngine(
+          request({
+            config: config({ binaryPath: { claude: fakeBinary } }),
+            signal: controller.signal,
+            cwd: own,
+          }),
+          deps(spawn),
+        ),
+      );
+      assert.strictEqual(error.code, 'cancelled');
+      assert.strictEqual(fs.existsSync(own), true);
+      fs.rmSync(own, { recursive: true, force: true });
+    });
+
+    test('parseClaudeJson surfaces the usage block only when there is one', function () {
+      assert.deepStrictEqual(
+        engine.parseClaudeJson(
+          '{"result":"x","usage":{"cache_read_input_tokens":12,"cache_creation_input_tokens":3},"total_cost_usd":0.5}',
+        ),
+        {
+          answer: 'x',
+          usage: { cacheRead: 12, cacheCreation: 3, costUsd: 0.5 },
+        },
+      );
+      assert.deepStrictEqual(
+        engine.parseClaudeJson('{"result":"x","usage":{}}'),
+        {
+          answer: 'x',
+        },
+      );
+    });
+  });
 });

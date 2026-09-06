@@ -37,7 +37,7 @@
     "run-in-browser:watch": "node build.js --web-dev && concurrently \"vscode-test-web --browser none --extensionDevelopmentPath=. ${SERVE_DIR:-.}\" \"npx http-server ./crossnote -p 6789 --cors\" \"node build.js --watch\"",
     "run-in-vscode-dev": "npx serve --cors -l 5000 --ssl-cert $HOME/certs/localhost.pem --ssl-key $HOME/certs/localhost-key.pem",
     "test": "pnpm test:unit",
-    "test:unit": "mocha --ui tdd --reporter spec test/find-fragment-target-line.test.js test/block-id-helpers.test.js test/rank-by-closeness.test.js test/read-aloud/word-spans.test.js test/read-aloud/chunker.test.js test/read-aloud/speakable.test.js test/read-aloud/error-mapping.test.js test/read-aloud/messages.test.js test/read-aloud/cache.test.js test/read-aloud/block-eligibility.test.js test/read-aloud/text-extraction.test.js test/read-aloud/selection.test.js test/read-aloud/click-to-read.test.js test/read-aloud/continuous-read.test.js test/read-aloud/player.test.js test/read-aloud/control-panel.test.js test/read-aloud/theme-settings.test.js test/read-aloud/reading-decoration.test.js test/read-aloud/kokoro-client.test.js test/read-aloud/kokoro-alignment.test.js test/read-aloud/help-prompt.test.js test/read-aloud/help-engine.test.js test/read-aloud/help-sheet.test.js test/read-aloud/help-context.test.js test/read-aloud/page-tokens.test.js test/read-aloud/page-theme.test.js test/read-aloud/page-typography.test.js test/read-aloud/follow-scroll.test.js test/read-aloud/dim-tiers.test.js test/read-aloud/word-marker.test.js test/read-aloud/panel-autohide.test.js",
+    "test:unit": "mocha --ui tdd --reporter spec test/find-fragment-target-line.test.js test/block-id-helpers.test.js test/rank-by-closeness.test.js test/read-aloud/word-spans.test.js test/read-aloud/chunker.test.js test/read-aloud/speakable.test.js test/read-aloud/error-mapping.test.js test/read-aloud/messages.test.js test/read-aloud/cache.test.js test/read-aloud/block-eligibility.test.js test/read-aloud/text-extraction.test.js test/read-aloud/selection.test.js test/read-aloud/click-to-read.test.js test/read-aloud/continuous-read.test.js test/read-aloud/player.test.js test/read-aloud/control-panel.test.js test/read-aloud/theme-settings.test.js test/read-aloud/reading-decoration.test.js test/read-aloud/kokoro-client.test.js test/read-aloud/kokoro-alignment.test.js test/read-aloud/help-prompt.test.js test/read-aloud/help-engine.test.js test/read-aloud/help-sheet.test.js test/read-aloud/help-context.test.js test/read-aloud/page-tokens.test.js test/read-aloud/page-theme.test.js test/read-aloud/page-typography.test.js test/read-aloud/follow-scroll.test.js test/read-aloud/dim-tiers.test.js test/read-aloud/word-marker.test.js test/read-aloud/panel-autohide.test.js test/notes/note-format.test.js test/notes/notes-store.test.js test/notes/note-prompt.test.js test/read-aloud/note-anchor.test.js test/read-aloud/notes-sheet.test.js test/classroom/persona.test.js test/classroom/plan-prompt.test.js test/classroom/chapter-prompt.test.js test/classroom/ledger.test.js test/classroom/checks.test.js test/classroom/module-format.test.js test/classroom/module-store.test.js test/classroom/links.test.js test/read-aloud/classroom-sheet.test.js",
     "vscode:prepublish": "pnpm install --frozen-lockfile && pnpm build",
     "watch": "gulp copy-files && gulp clean-out && node build.js --watch"
   },
@@ -222,6 +222,96 @@
       {
         "command": "markdown-preview-enhanced.readAloud.help.chooseModel",
         "title": "%markdown-preview-enhanced.readAloud.help.chooseModel.title%",
+        "enablement": "!isWeb"
+      },
+      {
+        "command": "markdown-preview-enhanced.notes.create",
+        "title": "%markdown-preview-enhanced.notes.create.title%",
+        "enablement": "!isWeb"
+      },
+      {
+        "command": "markdown-preview-enhanced.notes.showList",
+        "title": "%markdown-preview-enhanced.notes.showList.title%",
+        "enablement": "!isWeb"
+      },
+      {
+        "command": "markdown-preview-enhanced.notes.search",
+        "title": "%markdown-preview-enhanced.notes.search.title%",
+        "icon": "$(search)",
+        "enablement": "!isWeb"
+      },
+      {
+        "command": "markdown-preview-enhanced.notes.openFolder",
+        "title": "%markdown-preview-enhanced.notes.openFolder.title%",
+        "icon": "$(folder-opened)",
+        "enablement": "!isWeb"
+      },
+      {
+        "command": "markdown-preview-enhanced.notes.refresh",
+        "title": "%markdown-preview-enhanced.notes.refresh.title%",
+        "icon": "$(refresh)",
+        "enablement": "!isWeb"
+      },
+      {
+        "command": "markdown-preview-enhanced.notes.revealInPreview",
+        "title": "%markdown-preview-enhanced.notes.revealInPreview.title%",
+        "icon": "$(open-preview)",
+        "enablement": "!isWeb"
+      },
+      {
+        "command": "markdown-preview-enhanced.notes.openNoteFile",
+        "title": "%markdown-preview-enhanced.notes.openNoteFile.title%",
+        "icon": "$(go-to-file)",
+        "enablement": "!isWeb"
+      },
+      {
+        "command": "markdown-preview-enhanced.notes.openInEditor",
+        "title": "%markdown-preview-enhanced.notes.openInEditor.title%",
+        "enablement": "!isWeb"
+      },
+      {
+        "command": "markdown-preview-enhanced.notes.copy",
+        "title": "%markdown-preview-enhanced.notes.copy.title%",
+        "enablement": "!isWeb"
+      },
+      {
+        "command": "markdown-preview-enhanced.notes.regenerate",
+        "title": "%markdown-preview-enhanced.notes.regenerate.title%",
+        "enablement": "!isWeb"
+      },
+      {
+        "command": "markdown-preview-enhanced.notes.delete",
+        "title": "%markdown-preview-enhanced.notes.delete.title%",
+        "enablement": "!isWeb"
+      },
+      {
+        "command": "markdown-preview-enhanced.readAloud.classroom",
+        "title": "%markdown-preview-enhanced.readAloud.classroom.title%",
+        "enablement": "!isWeb"
+      },
+      {
+        "command": "markdown-preview-enhanced.readAloud.classroomModule",
+        "title": "%markdown-preview-enhanced.readAloud.classroomModule.title%",
+        "enablement": "!isWeb"
+      },
+      {
+        "command": "markdown-preview-enhanced.classroom.open",
+        "title": "%markdown-preview-enhanced.classroom.open.title%",
+        "enablement": "!isWeb"
+      },
+      {
+        "command": "markdown-preview-enhanced.classroom.openFolder",
+        "title": "%markdown-preview-enhanced.classroom.openFolder.title%",
+        "enablement": "!isWeb"
+      },
+      {
+        "command": "markdown-preview-enhanced.classroom.continue",
+        "title": "%markdown-preview-enhanced.classroom.continue.title%",
+        "enablement": "!isWeb"
+      },
+      {
+        "command": "markdown-preview-enhanced.classroom.cancel",
+        "title": "%markdown-preview-enhanced.classroom.cancel.title%",
         "enablement": "!isWeb"
       }
     ],
@@ -1127,9 +1217,90 @@
           "default": "http://127.0.0.1:8880",
           "type": "string",
           "scope": "machine"
+        },
+        "markdown-preview-enhanced.notesEnabled": {
+          "description": "%markdown-preview-enhanced.notesEnabled.description%",
+          "default": true,
+          "type": "boolean"
+        },
+        "markdown-preview-enhanced.notesDirectory": {
+          "description": "%markdown-preview-enhanced.notesDirectory.description%",
+          "default": "",
+          "type": "string",
+          "scope": "machine"
+        },
+        "markdown-preview-enhanced.notesGenerate": {
+          "description": "%markdown-preview-enhanced.notesGenerate.description%",
+          "default": true,
+          "type": "boolean"
+        },
+        "markdown-preview-enhanced.notesDecoration": {
+          "description": "%markdown-preview-enhanced.notesDecoration.description%",
+          "default": "marker-and-mark",
+          "type": "string",
+          "enum": [
+            "marker-and-mark",
+            "marker",
+            "none"
+          ],
+          "enumDescriptions": [
+            "%markdown-preview-enhanced.notesDecoration.enumDescriptions.0%",
+            "%markdown-preview-enhanced.notesDecoration.enumDescriptions.1%",
+            "%markdown-preview-enhanced.notesDecoration.enumDescriptions.2%"
+          ]
+        },
+        "markdown-preview-enhanced.classroomEnabled": {
+          "description": "%markdown-preview-enhanced.classroomEnabled.description%",
+          "default": true,
+          "type": "boolean"
+        },
+        "markdown-preview-enhanced.classroomDirectory": {
+          "description": "%markdown-preview-enhanced.classroomDirectory.description%",
+          "default": "",
+          "type": "string",
+          "scope": "machine"
+        },
+        "markdown-preview-enhanced.classroomPersona": {
+          "description": "%markdown-preview-enhanced.classroomPersona.description%",
+          "default": "max",
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{0,39}$",
+          "patternErrorMessage": "%markdown-preview-enhanced.classroomPersona.patternErrorMessage%"
+        },
+        "markdown-preview-enhanced.classroomAudience": {
+          "description": "%markdown-preview-enhanced.classroomAudience.description%",
+          "default": "",
+          "type": "string"
+        },
+        "markdown-preview-enhanced.classroomFollowLinks": {
+          "description": "%markdown-preview-enhanced.classroomFollowLinks.description%",
+          "default": true,
+          "type": "boolean"
+        },
+        "markdown-preview-enhanced.classroomAutoOpen": {
+          "description": "%markdown-preview-enhanced.classroomAutoOpen.description%",
+          "default": true,
+          "type": "boolean"
         }
       }
     },
+    "views": {
+      "explorer": [
+        {
+          "id": "markdown-preview-enhanced.notes",
+          "name": "%markdown-preview-enhanced.notes.view.name%",
+          "contextualTitle": "%markdown-preview-enhanced.notes.view.name%",
+          "icon": "$(note)",
+          "when": "!isWeb && config.markdown-preview-enhanced.notesEnabled"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "markdown-preview-enhanced.notes",
+        "contents": "%markdown-preview-enhanced.notes.view.welcome%"
+      }
+    ],
     "customEditors": [
       {
         "viewType": "markdown-preview-enhanced",
@@ -1201,6 +1372,26 @@
         "command": "markdown-preview-enhanced.readAloud.help",
         "key": "alt+h",
         "when": "activeWebviewPanelId == 'markdown-preview-enhanced' || activeCustomEditorId == 'markdown-preview-enhanced'"
+      },
+      {
+        "command": "markdown-preview-enhanced.notes.create",
+        "key": "alt+n",
+        "when": "activeWebviewPanelId == 'markdown-preview-enhanced' || activeCustomEditorId == 'markdown-preview-enhanced'"
+      },
+      {
+        "command": "markdown-preview-enhanced.notes.showList",
+        "key": "alt+shift+n",
+        "when": "activeWebviewPanelId == 'markdown-preview-enhanced' || activeCustomEditorId == 'markdown-preview-enhanced'"
+      },
+      {
+        "command": "markdown-preview-enhanced.readAloud.classroom",
+        "key": "alt+c",
+        "when": "activeWebviewPanelId == 'markdown-preview-enhanced' || activeCustomEditorId == 'markdown-preview-enhanced'"
+      },
+      {
+        "command": "markdown-preview-enhanced.readAloud.classroomModule",
+        "key": "alt+shift+c",
+        "when": "activeWebviewPanelId == 'markdown-preview-enhanced' || activeCustomEditorId == 'markdown-preview-enhanced'"
       }
     ],
     "menus": {
@@ -1221,6 +1412,85 @@
           "command": "markdown-preview-enhanced.openPreviewToTheSide",
           "when": "editorLangId =~ /^(markdown|quarto|prompt|instructions|chatagent|skill)$/",
           "group": "navigation"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "markdown-preview-enhanced.notes.refresh",
+          "when": "view == markdown-preview-enhanced.notes",
+          "group": "navigation@3"
+        },
+        {
+          "command": "markdown-preview-enhanced.notes.search",
+          "when": "view == markdown-preview-enhanced.notes",
+          "group": "navigation@1"
+        },
+        {
+          "command": "markdown-preview-enhanced.notes.openFolder",
+          "when": "view == markdown-preview-enhanced.notes",
+          "group": "navigation@2"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "markdown-preview-enhanced.notes.revealInPreview",
+          "when": "view == markdown-preview-enhanced.notes && viewItem =~ /^note/",
+          "group": "inline@1"
+        },
+        {
+          "command": "markdown-preview-enhanced.notes.openNoteFile",
+          "when": "view == markdown-preview-enhanced.notes && viewItem =~ /^(note|unreadable)/",
+          "group": "inline@2"
+        },
+        {
+          "command": "markdown-preview-enhanced.notes.openInEditor",
+          "when": "view == markdown-preview-enhanced.notes && viewItem =~ /^note/",
+          "group": "1_open@1"
+        },
+        {
+          "command": "markdown-preview-enhanced.notes.copy",
+          "when": "view == markdown-preview-enhanced.notes && viewItem =~ /^note/",
+          "group": "1_open@2"
+        },
+        {
+          "command": "markdown-preview-enhanced.notes.regenerate",
+          "when": "view == markdown-preview-enhanced.notes && viewItem =~ /^note/",
+          "group": "2_change@1"
+        },
+        {
+          "command": "markdown-preview-enhanced.notes.delete",
+          "when": "view == markdown-preview-enhanced.notes && viewItem =~ /^note/",
+          "group": "3_delete@1"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "markdown-preview-enhanced.notes.refresh",
+          "when": "false"
+        },
+        {
+          "command": "markdown-preview-enhanced.notes.revealInPreview",
+          "when": "false"
+        },
+        {
+          "command": "markdown-preview-enhanced.notes.openNoteFile",
+          "when": "false"
+        },
+        {
+          "command": "markdown-preview-enhanced.notes.openInEditor",
+          "when": "false"
+        },
+        {
+          "command": "markdown-preview-enhanced.notes.copy",
+          "when": "false"
+        },
+        {
+          "command": "markdown-preview-enhanced.notes.regenerate",
+          "when": "false"
+        },
+        {
+          "command": "markdown-preview-enhanced.notes.delete",
+          "when": "false"
         }
       ]
     }
@@ -1251,7 +1521,8 @@
     "@types/vfile": "^3.0.2",
     "async-mutex": "^0.4.0",
     "crossnote": "0.9.32",
-    "crypto-js": "^4.2.0"
+    "crypto-js": "^4.2.0",
+    "yaml": "2.9.0"
   },
   "devDependencies": {
     "@eslint/js": "^10",

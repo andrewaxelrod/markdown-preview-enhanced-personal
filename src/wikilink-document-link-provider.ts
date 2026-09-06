@@ -186,7 +186,7 @@ export async function openWikilinkTarget(
  * heuristic when no notebook is available (untitled docs, scratch
  * buffers).
  */
-async function resolveWikilinkUri(
+export async function resolveWikilinkUri(
   sourceUri: vscode.Uri,
   noteName: string,
   notebooksManager?: NotebooksManager,

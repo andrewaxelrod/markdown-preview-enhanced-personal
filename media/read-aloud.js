@@ -100,6 +100,58 @@
   var HELP_BODY_CLASS = 'mpe-ra-help-body';
   var HELP_TOOLTIP = 'Explain the selection';
   var HELP_TOOLTIP_DISABLED = 'Select text to get help';
+  // Notes (featrues/12-notes/spec.md §5, §10–§12): the copy deck of the brief.
+  // The Note sheet's body carries the help body's class as well, so the
+  // reader template of both stylesheets reaches it without a second copy.
+  var NOTE_BODY_CLASS = 'mpe-ra-help-body mpe-ra-note-body';
+  var NOTE_HIGHLIGHT_NAME = 'mpe-ra-note';
+  var NOTE_TOOLTIP = 'Save a note (Alt+N)';
+  var NOTE_HINT_NO_SELECTION = 'Select text to save a note';
+  var NOTES_TOOLTIP = 'Notes in this document (Alt+Shift+N)';
+  var NOTE_SAVED_CHIP = 'Saved as note';
+  var NOTE_CHIP_MS = 3000;
+  var NOTE_ERROR_CHIP_MS = 6000;
+  var NOTE_UNDO_MS = 6000;
+  var NOTE_TRANSIENT_MS = 1000;
+  var NOTE_MY_NOTE_DEBOUNCE_MS = 500;
+  var NOTE_TAGS_MAX = 12;
+  var NOTE_ORPHAN_TEXT =
+    'This passage was not found in the current version of the document. The context saved with the note is below.';
+  var NOTE_OFF_TEXT =
+    'Summaries are off in settings. The passage and your note are saved.';
+  var NOTE_ERROR_PREFIX = 'The summary could not be written.';
+  var NOTES_EMPTY_TEXT = 'No notes yet. Select text and choose Save a note.';
+  // Classroom (featrues/13-classroom/spec.md §5, §12): the copy deck.
+  var CLASSROOM_TOOLTIP = 'Teach me this (Alt+C)';
+  var CLASSROOM_HINT_NO_SELECTION = 'Select text to open a classroom';
+  var CLASSROOM_TEACH_LABEL = 'Teach me this';
+  var CLASSROOM_MODULE_TOOLTIP = 'This module (Alt+Shift+C)';
+  var CLASSROOM_NOT_MODULE_HINT = 'This preview is not a classroom module';
+  var CLASSROOM_ANCHOR_MISSING =
+    'The passage is not in this version of the document';
+  var CLASSROOM_NOTE_PLACEHOLDER =
+    'In your own words, what is confusing? Optional.';
+  var CLASSROOM_NOTE_MAX = 500;
+  var CLASSROOM_AUDIENCE_MAX = 300;
+  var CLASSROOM_PASSAGE_CHARS = 160;
+  var CLASSROOM_TICK_MS = 1000;
+  var CLASSROOM_FLASH_MS = 1000;
+  var CLASSROOM_WORDS_PER_MINUTE = 150;
+  var CLASSROOM_LEVELS = [
+    { level: 1, row: 'A few gaps: I follow most of it' },
+    { level: 2, row: 'I understand the words, not how it fits together' },
+    { level: 3, row: 'Lost: half of these terms mean nothing to me' },
+  ];
+  var CLASSROOM_DEFAULT_LEVEL = 2;
+  var NOTE_MARKER_LINE_TAGS = {
+    LI: true,
+    TR: true,
+    P: true,
+    DD: true,
+    DT: true,
+    TD: true,
+    TH: true,
+  };
   // Class on the preview root while click to read is on: playable text
   // shows a pointer (media/read-aloud.css).
   var CLICK_CLASS = 'mpe-ra-click';
@@ -189,6 +241,36 @@
       '<path d="M9.7 9.5a2.35 2.35 0 1 1 2.9 2.28c-.53.14-.9.62-.9 1.17v.62"/>' +
       '<circle cx="11.95" cy="16.4" r="1.05" fill="currentColor" stroke="none"/>' +
       '</svg>',
+    // Notes (12 §5.1, §10.1): a page with a folded corner, for the cluster
+    // button and the margin marker; a bookmark for the bar's Notes button.
+    note:
+      STROKE +
+      '<path d="M6.6 3.9h7.9l3.9 3.9v12.3H6.6z"/>' +
+      '<path d="M14.5 3.9v3.9h3.9"/>' +
+      '<path d="M9.6 12.2h4.8M9.6 15.5h4.8"/></svg>',
+    notes: STROKE + '<path d="M7.2 4.3h9.6v15.4l-4.8-3.3-4.8 3.3z"/></svg>',
+    check: STROKE + '<path d="m5.6 12.4 3.9 3.9 8.9-8.9"/></svg>',
+    // Classroom (13 §5.1, §12.2): the flat cap as a rhombus with a short
+    // tassel line, for the cluster button and the module preview's bar
+    // button; a triangle for the stopped and failed badge; a ring for a
+    // queued chapter; a small flag for a flagged one.
+    classroom:
+      STROKE +
+      '<path d="M2.8 9.6 12 5.2l9.2 4.4L12 14z"/>' +
+      '<path d="M6.4 11.3v4.3c0 1.3 2.5 2.6 5.6 2.6s5.6-1.3 5.6-2.6v-4.3"/>' +
+      '<path d="M21.2 9.6v5.6"/></svg>',
+    warning:
+      STROKE +
+      '<path d="M12 4.2 21 19.4H3z"/>' +
+      '<path d="M12 9.6v4.6"/>' +
+      '<circle cx="12" cy="16.9" r="1" fill="currentColor" stroke="none"/></svg>',
+    circle: STROKE + '<circle cx="12" cy="12" r="7.5"/></svg>',
+    flag:
+      STROKE +
+      '<path d="M6.5 20.2V4.6"/>' +
+      '<path d="M6.5 5.2h10.4l-2.2 3.8 2.2 3.8H6.5"/></svg>',
+    chevronLeft: STROKE + '<path d="m14.6 6.2-5.8 5.8 5.8 5.8"/></svg>',
+    chevronRight: STROKE + '<path d="m9.4 6.2 5.8 5.8-5.8 5.8"/></svg>',
   };
 
   // Keys that scroll the document when they reach it (07 §7.3): pressing one
@@ -231,6 +313,13 @@
     helpEffort: 'low',
     helpAutoPlay: true,
     helpContextMode: 'section',
+    // Notes (12 §14.3): false in the web build and when `notesEnabled` is off.
+    notesAvailable: false,
+    notesDecoration: 'marker-and-mark',
+    // Classroom (13 §14.3): the cluster button and the sheets; and, in a
+    // module's own preview, what the module is.
+    classroomAvailable: false,
+    classroomModule: null,
   };
   try {
     if (
@@ -258,6 +347,8 @@
         config.dimWhileReading = parsed.dimWhileReading !== false;
         config.panelAutoHide = parsed.panelAutoHide !== false;
         applyHelpConfig(parsed);
+        applyNotesConfig(parsed);
+        applyClassroomConfig(parsed);
       }
     }
   } catch (error) {
@@ -275,6 +366,10 @@
   // the document's, because a re-render replaces one and never the other.
   var helpBlocks = [];
   var helpBlocksByElement = new Map();
+  // The Note sheet's body is a third reading scope (12 §11.5), kept apart for
+  // the same reason.
+  var noteBlocks = [];
+  var noteBlocksByElement = new Map();
   var rate = config.speed;
   var volume = config.volume;
   var requestCounter = 0;
@@ -371,6 +466,78 @@
     // What Retry resends, and which follow-up the answer in flight belongs to.
     last: null,
     pending: null,
+    // Notes (12 §5.4): the anchor of the passage behind the sheet, computed
+    // when it opened, and whether the answer on screen has been saved.
+    anchor: null,
+    saved: false,
+  };
+
+  /**
+   * Notes (12): the document's list as the host last posted it, the result
+   * of the last anchoring pass per note, the markers by block, the highlight
+   * registered for the words' mark, and the two sheets' state.
+   */
+  var notes = {
+    list: [],
+    byId: Object.create(null),
+    deleting: [],
+    deleteMode: 'trash',
+    generate: true,
+    results: Object.create(null),
+    markers: new Map(),
+    markerResults: new Map(),
+    anyFound: false,
+    highlight: null,
+    highlightRanges: [],
+    lastAnchorsReport: '',
+    lastPassMs: 0,
+    open: false,
+    currentId: null,
+    opener: null,
+    renderedKey: '',
+    contextOpen: false,
+    listOpen: false,
+    listOpener: null,
+    pendingCreate: null,
+    pendingMyNote: null,
+    myNoteTimer: 0,
+    transient: '',
+    transientTimer: 0,
+    chipTimer: 0,
+    chipNoteId: null,
+    resume: null,
+    layoutFrame: 0,
+  };
+  /**
+   * Classroom (13 §5): the sheet's state is held here and rendered from the
+   * host's messages; the webview keeps no build state the host has not sent.
+   */
+  var classroom = {
+    open: false,
+    // 'preparing' | 'ready' | 'building' | 'done' | 'error'
+    state: 'preparing',
+    requestId: null,
+    passage: null,
+    context: null,
+    anchor: null,
+    headingId: null,
+    prepared: null,
+    progress: null,
+    progressAt: 0,
+    moduleId: null,
+    level: CLASSROOM_DEFAULT_LEVEL,
+    note: '',
+    personaId: '',
+    audience: '',
+    unticked: Object.create(null),
+    message: '',
+    timer: 0,
+    opener: null,
+    // The Module sheet of a module preview (13 §12.2).
+    moduleOpen: false,
+    moduleOpener: null,
+    moduleProgress: null,
+    flashTimer: 0,
   };
   var pendingClick = null;
   var mediaPool = null;
@@ -535,12 +702,22 @@
     if (!el) {
       return null;
     }
-    return blocksByElement.get(el) || helpBlocksByElement.get(el) || null;
+    return (
+      blocksByElement.get(el) ||
+      helpBlocksByElement.get(el) ||
+      noteBlocksByElement.get(el) ||
+      null
+    );
   }
 
   /** The body of the help sheet, once it exists; the second reading scope. */
   function helpBody() {
     return barParts && barParts.help ? barParts.help.body : null;
+  }
+
+  /** The body of the Note sheet (12 §11.5); the third reading scope. */
+  function noteBody() {
+    return barParts && barParts.note ? barParts.note.body : null;
   }
 
   /**
@@ -555,12 +732,22 @@
     if (sheetBody && sheetBody.contains(el)) {
       return sheetBody;
     }
+    var noteSheetBody = noteBody();
+    if (noteSheetBody && noteSheetBody.contains(el)) {
+      return noteSheetBody;
+    }
     return root && root.contains(el) ? root : null;
   }
 
   /** The block list of a scope, in document order. */
   function blocksIn(scope) {
-    return scope && scope === helpBody() ? helpBlocks : blocks;
+    if (scope && scope === helpBody()) {
+      return helpBlocks;
+    }
+    if (scope && scope === noteBody()) {
+      return noteBlocks;
+    }
+    return blocks;
   }
 
   /**
@@ -677,6 +864,14 @@
       );
       barParts.help.root.setAttribute('data-mpe-ra-scheme', scheme);
       barParts.help.root.setAttribute(MARKER_ATTR, config.wordMarker);
+    }
+    if (barParts && barParts.note) {
+      barParts.note.root.setAttribute(
+        'data-mpe-ra-theme',
+        config.highlightTheme,
+      );
+      barParts.note.root.setAttribute('data-mpe-ra-scheme', scheme);
+      barParts.note.root.setAttribute(MARKER_ATTR, config.wordMarker);
     }
     if (barParts && barParts.sheet) {
       barParts.sheet.swatchContainer.setAttribute(
@@ -905,6 +1100,8 @@
         }
       }
     });
+    // The words' mark steps aside for the block being read (12 §10.2).
+    syncNoteHighlight();
   }
 
   function undecorateBlocks(els) {
@@ -920,6 +1117,9 @@
         }
       }
     });
+    // The pill merged the block's text nodes back: the note ranges of that
+    // block are rebuilt from a fresh extraction (12 §10.2).
+    anchorPass();
   }
 
   /** Unwrap the current word and merge its text nodes back (map stays valid). */
@@ -1593,8 +1793,24 @@
       'Resume',
       'mpe-ra-help-action mpe-ra-help-resume',
     );
+    // 12 §5.4 — the explanation on screen becomes a note, no second call.
+    var save = makeHelpButton(
+      'helpSaveNote',
+      'Save as note',
+      'mpe-ra-help-action mpe-ra-help-save',
+    );
+    save.hidden = true;
+    // 13 §5.5 — the explanation was not enough: escalate to a module.
+    var teach = makeHelpButton(
+      'helpTeach',
+      CLASSROOM_TEACH_LABEL,
+      'mpe-ra-help-action mpe-ra-help-teach',
+    );
+    teach.hidden = true;
     actions.appendChild(back);
     actions.appendChild(again);
+    actions.appendChild(save);
+    actions.appendChild(teach);
     actions.appendChild(resume);
 
     footer.appendChild(chips);
@@ -1620,6 +1836,8 @@
       ask: askButton,
       back: back,
       again: again,
+      save: save,
+      teach: teach,
       resume: resume,
     };
   }
@@ -1715,6 +1933,39 @@
     helpButton.setAttribute('aria-haspopup', 'dialog');
     helpButton.setAttribute('aria-expanded', 'false');
 
+    // 12 §12: the Notes button, between help and the ×, with a count badge.
+    var notesButton = makeIconButton(
+      'notes',
+      NOTES_TOOLTIP,
+      'mpe-ra-bar-btn mpe-ra-bar-notes',
+      'notes',
+    );
+    notesButton.setAttribute('aria-haspopup', 'dialog');
+    notesButton.setAttribute('aria-expanded', 'false');
+    notesButton.hidden = !config.notesAvailable;
+    var notesBadge = document.createElement('span');
+    notesBadge.className = 'mpe-ra-bar-badge';
+    notesBadge.setAttribute('aria-hidden', 'true');
+    notesBadge.hidden = true;
+    notesButton.appendChild(notesBadge);
+
+    // 13 §12.2: the module preview's own button, between notes and the ×,
+    // with a progress badge. Absent in every other preview.
+    var classroomButton = makeIconButton(
+      'classroomModule',
+      CLASSROOM_MODULE_TOOLTIP,
+      'mpe-ra-bar-btn mpe-ra-bar-classroom',
+      'classroom',
+    );
+    classroomButton.setAttribute('aria-haspopup', 'dialog');
+    classroomButton.setAttribute('aria-expanded', 'false');
+    classroomButton.hidden = !config.classroomModule;
+    var classroomBadge = document.createElement('span');
+    classroomBadge.className = 'mpe-ra-bar-badge mpe-ra-bar-classroom-badge';
+    classroomBadge.setAttribute('aria-hidden', 'true');
+    classroomBadge.hidden = true;
+    classroomButton.appendChild(classroomBadge);
+
     var close = makeIconButton(
       'close',
       'Close the player',
@@ -1724,6 +1975,11 @@
 
     var sheet = makeSheet();
     var helpSheet = makeHelpSheet();
+    var noteSheet = makeNoteSheet();
+    var listSheet = makeNotesListSheet();
+    var noteChip = makeNoteChip();
+    var classroomSheet = makeClassroomSheet();
+    var moduleSheet = makeModuleSheet();
 
     bar.appendChild(progress);
     bar.appendChild(status);
@@ -1732,6 +1988,11 @@
     bar.appendChild(speedPop.root);
     bar.appendChild(sheet.root);
     bar.appendChild(helpSheet.root);
+    bar.appendChild(noteSheet.root);
+    bar.appendChild(listSheet.root);
+    bar.appendChild(classroomSheet.root);
+    bar.appendChild(moduleSheet.root);
+    bar.appendChild(noteChip.root);
     bar.appendChild(volumeButton);
     bar.appendChild(themeButton);
     bar.appendChild(back);
@@ -1739,6 +2000,8 @@
     bar.appendChild(forward);
     bar.appendChild(speedButton);
     bar.appendChild(helpButton);
+    bar.appendChild(notesButton);
+    bar.appendChild(classroomButton);
     bar.appendChild(close);
     document.body.appendChild(bar);
 
@@ -1769,6 +2032,15 @@
       speedPop: speedPop,
       helpButton: helpButton,
       help: helpSheet,
+      notesButton: notesButton,
+      notesBadge: notesBadge,
+      note: noteSheet,
+      notesList: listSheet,
+      noteChip: noteChip,
+      classroomButton: classroomButton,
+      classroomBadge: classroomBadge,
+      classroom: classroomSheet,
+      module: moduleSheet,
       close: close,
     };
 
@@ -1806,6 +2078,34 @@
       }
     });
     helpSheet.input.addEventListener('input', syncHelpSheet);
+    // The Note sheet's fields (12 §11.1): My note saves 500 ms after the last
+    // keystroke and on blur; tags commit on Enter or a comma.
+    noteSheet.textarea.addEventListener('input', onMyNoteInput);
+    noteSheet.textarea.addEventListener('blur', flushMyNote);
+    noteSheet.tagInput.addEventListener('keydown', onTagInputKeydown);
+    noteSheet.tagInput.addEventListener('blur', function () {
+      commitTagInput();
+    });
+    // The Classroom sheet's fields (13 §5.2) are read at Build; the note
+    // and the audience are mirrored so a re-render keeps what was typed.
+    classroomSheet.note.addEventListener('input', function () {
+      classroom.note = classroomSheet.note.value.slice(0, CLASSROOM_NOTE_MAX);
+    });
+    classroomSheet.audience.addEventListener('input', function () {
+      classroom.audience = classroomSheet.audience.value.slice(
+        0,
+        CLASSROOM_AUDIENCE_MAX,
+      );
+    });
+    classroomSheet.persona.addEventListener('change', function () {
+      classroom.personaId = classroomSheet.persona.value;
+    });
+    classroomSheet.note.addEventListener('keydown', function (event) {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        buildClassroom();
+      }
+    });
     bar.addEventListener('keydown', onBarKeydown);
 
     applyBarScheme();
@@ -1816,6 +2116,11 @@
     syncVolumeControls();
     syncSheet();
     syncHelpSheet();
+    syncNotesBar();
+    syncNotesList();
+    syncClassroomBar();
+    syncClassroomSheet();
+    syncModuleSheet();
     renderBar();
     return bar;
   }
@@ -2528,6 +2833,15 @@
     if (floatParts && floatParts.help) {
       floatParts.help.hidden = !config.helpAvailable || floatScope !== root;
     }
+    if (floatParts && floatParts.note) {
+      floatParts.note.hidden = !config.notesAvailable || floatScope !== root;
+    }
+    if (floatParts && floatParts.classroom) {
+      floatParts.classroom.hidden =
+        !config.classroomAvailable || floatScope !== root;
+    }
+    // The orphan banner's Re-attach follows the live selection too (12 §11.3).
+    syncNoteReattach();
     if (!barParts || !barParts.helpButton) {
       return;
     }
@@ -2586,6 +2900,26 @@
     setEnabled(sheet.ask, ready && sheet.input.value.trim().length > 0);
     setEnabled(sheet.back, help.stack.length > 0);
     setEnabled(sheet.again, ready && helpBlocks.length > 0);
+    if (sheet.save) {
+      // 12 §5.4 — visible with an answer, Saved (and disabled) once kept.
+      sheet.save.hidden = !ready || !config.notesAvailable;
+      setEnabled(sheet.save, ready && !help.saved);
+      if (help.saved) {
+        sheet.save.innerHTML = ICONS.check;
+        sheet.save.appendChild(document.createTextNode('Saved'));
+        sheet.save.setAttribute('title', 'Saved as a note');
+        sheet.save.setAttribute('aria-label', 'Saved as a note');
+      } else {
+        sheet.save.textContent = 'Save as note';
+        sheet.save.setAttribute('title', 'Keep this explanation as a note');
+        sheet.save.setAttribute('aria-label', 'Save as note');
+      }
+    }
+
+    if (sheet.teach) {
+      // 13 §5.5 — visible whenever the sheet holds an answer.
+      sheet.teach.hidden = !ready || !config.classroomAvailable;
+    }
 
     var resumable = canResume();
     setEnabled(sheet.resume, resumable);
@@ -2733,7 +3067,11 @@
   }
 
   function canResume() {
-    var resume = help.resume;
+    return canResumeFrom(help.resume);
+  }
+
+  /** Whether a remembered read (help's or a note's, 12 §11.5) can continue. */
+  function canResumeFrom(resume) {
     if (!resume) {
       return false;
     }
@@ -2759,6 +3097,14 @@
       return;
     }
     closeHelp('resume');
+    resumeFrom(resume);
+  }
+
+  /** Continue a remembered read: the block from its word, or the selection's rest. */
+  function resumeFrom(resume) {
+    if (!canResumeFrom(resume)) {
+      return;
+    }
     if (resume.kind === 'block') {
       var entry = blocksByKey[resume.key];
       if (entry) {
@@ -2821,6 +3167,10 @@
     panelDismissed = false;
     closePopovers();
     hideFloat();
+    closeNote('help');
+    closeNotesList('help');
+    closeClassroom('help');
+    closeModuleSheet('help');
 
     help.open = true;
     help.state = 'idle';
@@ -2830,6 +3180,9 @@
     help.question = '';
     help.message = '';
     help.context = buildHelpContextFor(passage);
+    // 12 §5.4 — the anchor of the passage behind the sheet, for Save as note.
+    help.anchor = noteAnchorForPassage(passage);
+    help.saved = false;
     barParts.help.root.hidden = false;
     barParts.help.input.value = '';
     setHelpBodyHtml('');
@@ -2856,7 +3209,11 @@
       return;
     }
     cancelHelpRequest(reason || 'close');
-    if (record.scope && record.scope !== root && record.state !== 'idle') {
+    if (
+      record.scope &&
+      record.scope === helpBody() &&
+      record.state !== 'idle'
+    ) {
       endJob({ next: 'idle', reason: 'help sheet closed' });
     }
     help.open = false;
@@ -2867,6 +3224,8 @@
     help.question = '';
     help.message = '';
     help.context = null;
+    help.anchor = null;
+    help.saved = false;
     if (barParts && barParts.help) {
       barParts.help.root.hidden = true;
       barParts.help.input.value = '';
@@ -2963,7 +3322,11 @@
     // than letting it land on top of the explanation just restored.
     cancelHelpRequest('back');
     stopHelpTicker();
-    if (record.scope && record.scope !== root && record.state !== 'idle') {
+    if (
+      record.scope &&
+      record.scope === helpBody() &&
+      record.state !== 'idle'
+    ) {
       endJob({ next: 'idle', reason: 'help back' });
     }
     help.markdown = previous.markdown;
@@ -3056,6 +3419,7 @@
         ? help.pending.question
         : '';
     help.state = help.markdown ? 'ready' : 'error';
+    help.saved = false;
     help.message = help.markdown ? '' : 'The help engine returned nothing.';
     setHelpBodyHtml(help.html);
     syncHelpSheet();
@@ -3097,14 +3461,34 @@
         closeHelp('escape');
         return;
       }
+      // And the two note sheets (12 §11.4, §12).
+      if (notes.open) {
+        closeNote('escape');
+        return;
+      }
+      if (notes.listOpen) {
+        closeNotesList('escape');
+        return;
+      }
+      // And the two classroom sheets (13 §5.4 step 6, §12.2).
+      if (classroom.open) {
+        closeClassroom('escape');
+        return;
+      }
+      if (classroom.moduleOpen) {
+        closeModuleSheet('escape');
+        return;
+      }
       handleStop();
       return;
     }
-    // The question box is a text field: `[` and `]` are characters there.
+    // The question box, My note and the tag input are text fields: `[`, `]`
+    // and the space bar are characters there.
+    var target = event.target;
     if (
-      barParts &&
-      barParts.help &&
-      event.target === barParts.help.input &&
+      target &&
+      target.tagName &&
+      (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') &&
       event.key !== 'Escape'
     ) {
       return;
@@ -3259,10 +3643,29 @@
     );
     explain.setAttribute('aria-haspopup', 'dialog');
     explain.hidden = !config.helpAvailable;
+    // 12 §5.1 — the third button: Note, enabled by the help predicate.
+    var note = makeIconButton(
+      'floatNote',
+      NOTE_TOOLTIP,
+      'mpe-ra-float-btn mpe-ra-float-note',
+      'note',
+    );
+    note.hidden = !config.notesAvailable;
+    // 13 §5.1 — the fourth button: Classroom, enabled by the help predicate.
+    var teach = makeIconButton(
+      'floatClassroom',
+      CLASSROOM_TOOLTIP,
+      'mpe-ra-float-btn mpe-ra-float-classroom',
+      'classroom',
+    );
+    teach.setAttribute('aria-haspopup', 'dialog');
+    teach.hidden = !config.classroomAvailable;
     floatButton.appendChild(read);
     floatButton.appendChild(explain);
+    floatButton.appendChild(note);
+    floatButton.appendChild(teach);
     floatButton.hidden = true;
-    floatParts = { read: read, help: explain };
+    floatParts = { read: read, help: explain, note: note, classroom: teach };
     document.body.appendChild(floatButton);
     return floatButton;
   }
@@ -3385,7 +3788,14 @@
     // it left behind is the passage being explained: offering to read or to
     // re-explain it there would cross the two scopes, and the affordance
     // would stand over the answer (09 §10).
-    if (help.open && scope === root) {
+    if (
+      (help.open ||
+        notes.open ||
+        notes.listOpen ||
+        classroom.open ||
+        classroom.moduleOpen) &&
+      scope === root
+    ) {
       hideFloat();
       return;
     }
@@ -3612,10 +4022,15 @@
     // The registry was rebuilt: the tier classes go on the new elements
     // (07 §8.4), or are cleared if the rebind ended the read.
     applyTiers();
+    // Notes re-anchor in the same pass, right after the read re-located
+    // (12 §9.3), and both sheets follow the fresh results.
+    anchorPass();
     // A re-render can take the paused block with it, which is what decides
     // whether Resume is still on offer (04-help-module §4 step 6).
     syncHelpSheet();
     syncHelpButton();
+    syncNoteSheet();
+    syncNotesList();
   }
 
   // ------------------------------------------- dim while reading (07 §8)
@@ -3668,10 +4083,12 @@
           : core.tierFor(j, activeIndex, nextIndex);
       setTier(el, tier);
     }
-    // A scope's stale classes from an earlier read of the other scope.
-    var other = scope === root ? helpBody() : root;
-    if (other) {
-      clearTiersIn(other);
+    // A scope's stale classes from an earlier read of another scope.
+    var scopes = [root, helpBody(), noteBody()];
+    for (var s = 0; s < scopes.length; s++) {
+      if (scopes[s] && scopes[s] !== scope) {
+        clearTiersIn(scopes[s]);
+      }
     }
   }
 
@@ -3699,6 +4116,7 @@
   function clearTiers() {
     clearTiersIn(root);
     clearTiersIn(helpBody());
+    clearTiersIn(noteBody());
   }
 
   /** Playable text shows a pointer only while click to read is on (F17). */
@@ -3745,6 +4163,7 @@
     for (var j = 0; j < marked.length; j++) {
       marked[j].classList.remove('mpe-ra-block');
     }
+    clearNoteDecorations();
     removeThemeAttributes();
     if (root) {
       root.classList.remove(CLICK_CLASS);
@@ -3774,6 +4193,7 @@
     // none of its business (04-help-module §5).
     if (record.scope && record.scope !== root) {
       syncHelpSheet();
+      syncNoteSheet();
       return;
     }
     if (record.kind !== 'block' || !record.readBlocks.length) {
@@ -4083,7 +4503,9 @@
       payload.blockId = options.blockId;
     }
     if (
-      (options.kind === 'block' || options.kind === 'help') &&
+      (options.kind === 'block' ||
+        options.kind === 'help' ||
+        options.kind === 'note') &&
       record.readBlocks.length
     ) {
       // Decision 5: the host chunks block by block, never across a boundary.
@@ -4159,14 +4581,29 @@
       return;
     }
     startRead({
-      kind: scope === root ? 'block' : 'help',
+      kind: sheetKindFor(scope, 'block'),
       scope: scope,
       text: extracted.text,
       map: extracted.map,
-      label: scope === root ? readBlocks[0].label : 'Help',
+      label: sheetLabelFor(scope, readBlocks[0].label),
       blockId: entry.key + '#' + entry.index + (start > 0 ? '@' + start : ''),
       readBlocks: readBlocks,
     });
+  }
+
+  /** The read kind of a scope: the document's, or the sheet's own (12 §11.5). */
+  function sheetKindFor(scope, documentKind) {
+    if (scope === noteBody()) {
+      return 'note';
+    }
+    return scope === root ? documentKind : 'help';
+  }
+
+  function sheetLabelFor(scope, documentLabel) {
+    if (scope === noteBody()) {
+      return 'Note';
+    }
+    return scope === root ? documentLabel : 'Help';
   }
 
   function startSelectionRead(fallback) {
@@ -4192,11 +4629,11 @@
     }
     hideFloat();
     startRead({
-      kind: scope === root ? 'selection' : 'help',
+      kind: sheetKindFor(scope, 'selection'),
       scope: scope,
       text: resolved.text,
       map: resolved.map,
-      label: scope === root ? 'Selection' : 'Help',
+      label: sheetLabelFor(scope, 'Selection'),
       blocks: resolved.blocks,
     });
   }
@@ -5367,10 +5804,22 @@
       return;
     }
     if (action === 'helpPlayAgain') {
-      if (record.scope && record.scope !== root && record.state !== 'idle') {
+      if (
+        record.scope &&
+        record.scope === helpBody() &&
+        record.state !== 'idle'
+      ) {
         endJob({ next: 'idle', reason: 'help replay' });
       }
       playHelpFromStart();
+      return;
+    }
+    if (action === 'helpSaveNote') {
+      saveHelpAsNote();
+      return;
+    }
+    if (action === 'helpTeach') {
+      openClassroomFromHelp();
       return;
     }
     if (action === 'helpResume') {
@@ -5381,10 +5830,20 @@
       post('readAloudHelpChooseModel', []);
       return;
     }
+    if (handleNoteAction(action, element)) {
+      return;
+    }
+    if (handleClassroomAction(action, element)) {
+      return;
+    }
     if (action === 'close') {
       handleStop();
-      // Closing the panel closes the sheet (§4 step 7).
+      // Closing the panel closes the sheets (§4 step 7; 12 §11.7; 13 §5.4).
       closeHelp('panel closed');
+      closeNote('panel closed');
+      closeNotesList('panel closed');
+      closeClassroom('panel closed');
+      closeModuleSheet('panel closed');
       panelDismissed = true;
       dismissBar();
       return;
@@ -5406,6 +5865,3598 @@
     if (action === 'floatHelp') {
       openHelp();
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // 12b. Notes (featrues/12-notes/spec.md)
+  //
+  // Capture from the selection cluster (§5), the margin markers and the
+  // words' mark (§10), the Note sheet as a third reading scope (§11), the
+  // Notes list sheet and the bar button (§12). The host owns the files; this
+  // layer owns what the page shows and re-anchors every note on every render
+  // through `core.anchorNotes` (§9).
+  // ---------------------------------------------------------------------------
+
+  function applyNotesConfig(message) {
+    if (typeof message.notesAvailable === 'boolean') {
+      config.notesAvailable = message.notesAvailable;
+    }
+    if (typeof message.notesDecoration === 'string') {
+      config.notesDecoration =
+        message.notesDecoration === 'marker' ||
+        message.notesDecoration === 'none'
+          ? message.notesDecoration
+          : 'marker-and-mark';
+    }
+  }
+
+  function escapeHtml(text) {
+    return String(text)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function noteById(id) {
+    return id && notes.byId[id] ? notes.byId[id] : null;
+  }
+
+  function noteResult(id) {
+    return id && notes.results[id] ? notes.results[id] : null;
+  }
+
+  /** Orphaned means a pass ran and did not find it (§9.2 step 4). */
+  function noteIsOrphan(id) {
+    var result = noteResult(id);
+    return !!(result && !result.found);
+  }
+
+  function noteIsPending(note) {
+    return !!(note && note.generated && note.generated.status === 'pending');
+  }
+
+  /** `5 Sept 2026` — the details chip's date (brief §6). */
+  function noteDateText(iso) {
+    var date = new Date(iso);
+    if (isNaN(date.getTime())) {
+      return '';
+    }
+    try {
+      return date.toLocaleDateString(undefined, {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+      });
+    } catch (error) {
+      return String(iso).slice(0, 10);
+    }
+  }
+
+  function noteTitleText(note) {
+    if (!note) {
+      return 'Note';
+    }
+    if (noteIsPending(note) && !note.titleEdited) {
+      return core.blockLabel(note.passage) || 'Note';
+    }
+    return note.title || core.blockLabel(note.passage) || 'Note';
+  }
+
+  /** §9.1 — the anchor of what the help predicate resolved. */
+  function noteAnchorForPassage(passage) {
+    if (!passage || !root) {
+      return null;
+    }
+    try {
+      var resolved = null;
+      if (passage.range) {
+        var live = core.resolveSelection(window.getSelection(), root);
+        if (live && live.ok) {
+          resolved = live;
+        }
+      }
+      if (!resolved) {
+        resolved = { ok: true, text: passage.text, blocks: passage.els || [] };
+      }
+      return core.noteAnchorFor(resolved, root, passage.range || null);
+    } catch (error) {
+      return null;
+    }
+  }
+
+  /** The help fields object of §14.2, from `buildHelpContextFor`'s result. */
+  function noteFieldsFrom(context) {
+    return {
+      title: context.title,
+      breadcrumb: context.breadcrumb.slice(),
+      before: context.before,
+      after: context.after,
+      section: context.section,
+      enclosing: context.enclosing,
+      mentions: context.mentions,
+      contextMode: context.contextMode,
+    };
+  }
+
+  // ------------------------------------------------------------- capture
+
+  /** §5.2 — the cluster's Note button and `Alt+N`. */
+  function saveNoteFromSelection() {
+    if (!config.enabled || !config.notesAvailable) {
+      return;
+    }
+    var passage = helpPassage();
+    if (!passage) {
+      showHint(NOTE_HINT_NO_SELECTION, currentSelectionRect() || floatRect);
+      return;
+    }
+    var context = buildHelpContextFor(passage);
+    var anchor = noteAnchorForPassage(passage);
+    if (!anchor) {
+      showHint(NOTE_HINT_NO_SELECTION, currentSelectionRect() || floatRect);
+      return;
+    }
+    var requestId = nextRequestId();
+    var pending = {
+      requestId: requestId,
+      passage: passage.text,
+      breadcrumb: context.breadcrumb.slice(),
+      context: {
+        enclosing: context.enclosing,
+        before: context.before,
+        after: context.after,
+      },
+      knownIds: Object.keys(notes.byId),
+      error: '',
+    };
+    post('readAloudNoteCreate', [
+      sourceUri,
+      requestId,
+      passage.text,
+      noteFieldsFrom(context),
+      anchor,
+      { source: 'selection' },
+    ]);
+    var opener = floatParts && floatParts.note ? floatParts.note : null;
+    hideFloat();
+    notes.pendingCreate = pending;
+    showNoteChip(NOTE_SAVED_CHIP, NOTE_CHIP_MS, null);
+    openNoteSheet(null, opener);
+  }
+
+  /** §5.4 — Save as note on the help sheet: the answer on screen, no engine. */
+  function saveHelpAsNote() {
+    if (
+      !config.notesAvailable ||
+      help.state !== 'ready' ||
+      !help.markdown ||
+      !help.context ||
+      help.saved
+    ) {
+      return;
+    }
+    if (!help.anchor) {
+      showHint(NOTE_HINT_NO_SELECTION, floatRect);
+      return;
+    }
+    var requestId = nextRequestId();
+    post('readAloudNoteCreate', [
+      sourceUri,
+      requestId,
+      help.context.passage,
+      noteFieldsFrom(help.context),
+      help.anchor,
+      { source: 'help', explanation: help.markdown },
+    ]);
+    help.saved = true;
+    showNoteChip(NOTE_SAVED_CHIP, NOTE_CHIP_MS, null);
+    syncHelpSheet();
+  }
+
+  // ------------------------------------------------------ host -> notes
+
+  function isNoteSummary(value) {
+    return !!(
+      value &&
+      typeof value === 'object' &&
+      typeof value.id === 'string' &&
+      typeof value.passage === 'string' &&
+      value.anchor &&
+      typeof value.anchor === 'object'
+    );
+  }
+
+  /** §14.3 — the whole list every time; the page diffs. */
+  function onNotesMessage(message) {
+    // Single-preview mode reuses one panel: a list for another document is
+    // not this page's (§4).
+    if (
+      typeof message.sourceUri === 'string' &&
+      sourceUri &&
+      message.sourceUri !== sourceUri
+    ) {
+      return;
+    }
+    var previousDeleting = notes.deleting.slice();
+    var list = Array.isArray(message.notes) ? message.notes : [];
+    notes.list = [];
+    notes.byId = Object.create(null);
+    for (var i = 0; i < list.length; i++) {
+      var note = list[i];
+      if (!isNoteSummary(note)) {
+        continue;
+      }
+      if (!Array.isArray(note.headings)) {
+        note.headings = [];
+      }
+      if (!Array.isArray(note.tags)) {
+        note.tags = [];
+      }
+      if (!note.generated || typeof note.generated !== 'object') {
+        note.generated = { status: 'done' };
+      }
+      if (!note.context || typeof note.context !== 'object') {
+        note.context = { enclosing: '', before: '', after: '' };
+      }
+      if (!Array.isArray(note.sectionNames)) {
+        note.sectionNames = [];
+      }
+      notes.list.push(note);
+      notes.byId[note.id] = note;
+    }
+    notes.deleting = Array.isArray(message.deleting)
+      ? message.deleting.filter(function (id) {
+          return typeof id === 'string';
+        })
+      : [];
+    if (message.deleteMode === 'permanent' || message.deleteMode === 'trash') {
+      notes.deleteMode = message.deleteMode;
+    }
+    if (typeof message.generate === 'boolean') {
+      notes.generate = message.generate;
+    }
+
+    // A capture in flight: the new note is the one the list did not have.
+    if (notes.pendingCreate) {
+      var pending = notes.pendingCreate;
+      var match = null;
+      for (var m = 0; m < notes.list.length; m++) {
+        var candidate = notes.list[m];
+        if (
+          pending.knownIds.indexOf(candidate.id) < 0 &&
+          candidate.passage === pending.passage
+        ) {
+          match = candidate;
+        }
+      }
+      if (match) {
+        notes.pendingCreate = null;
+        if (notes.open && notes.currentId === null) {
+          notes.currentId = match.id;
+          notes.contextOpen = false;
+        }
+        // My note typed while the file was being written (§5.2 step 2).
+        if (notes.pendingMyNote) {
+          var typed = notes.pendingMyNote;
+          notes.pendingMyNote = null;
+          post('readAloudNoteUpdate', [sourceUri, match.id, { myNote: typed }]);
+        }
+      }
+    }
+
+    // A delete that started elsewhere (the Notes view) shows the Undo chip
+    // here too (§7.7).
+    for (var d = 0; d < notes.deleting.length; d++) {
+      var id = notes.deleting[d];
+      if (previousDeleting.indexOf(id) < 0 && notes.chipNoteId !== id) {
+        showNoteChip(deleteChipText(), NOTE_UNDO_MS, id);
+      }
+    }
+    if (notes.chipNoteId && notes.deleting.indexOf(notes.chipNoteId) < 0) {
+      // Trashed, or undone: the chip has nothing left to undo.
+      hideNoteChip();
+    }
+
+    // The open note is gone: page on, or close (§7.7).
+    if (notes.open && notes.currentId && !notes.byId[notes.currentId]) {
+      pageOnFromMissing();
+    }
+    anchorPass();
+    syncNotesBar();
+    syncNoteSheet();
+    syncNotesList();
+    syncHelpSheet();
+  }
+
+  function deleteChipText() {
+    return notes.deleteMode === 'permanent'
+      ? 'Note deleted'
+      : 'Note moved to Trash';
+  }
+
+  /** §14.3 — a write or a generation failed: the chip, and the sheet's row. */
+  function onNoteError(message) {
+    var text =
+      typeof message.message === 'string' && message.message
+        ? message.message
+        : 'The note could not be saved.';
+    if (
+      notes.pendingCreate &&
+      typeof message.requestId === 'string' &&
+      message.requestId === notes.pendingCreate.requestId
+    ) {
+      notes.pendingCreate.error = text;
+      notes.renderedKey = '';
+    }
+    showNoteChip(text, NOTE_ERROR_CHIP_MS, null);
+    syncNoteSheet();
+  }
+
+  // ----------------------------------------------------- anchoring pass
+
+  var anchorPassBusy = false;
+
+  /**
+   * §9.3 — every note of the document against the current DOM, one pass:
+   * markers and highlight ranges under `mutateSilently`, then the report.
+   */
+  function anchorPass() {
+    if (anchorPassBusy || !root) {
+      return;
+    }
+    if (!config.enabled || !config.notesAvailable) {
+      clearNoteDecorations();
+      return;
+    }
+    anchorPassBusy = true;
+    try {
+      var started =
+        typeof performance !== 'undefined' && performance.now
+          ? performance.now()
+          : Date.now();
+      var results = notes.list.length ? core.anchorNotes(root, notes.list) : [];
+      notes.results = Object.create(null);
+      for (var i = 0; i < results.length; i++) {
+        notes.results[results[i].noteId] = results[i];
+      }
+      mutateSilently(function () {
+        drawMarkers(results);
+      });
+      syncNoteHighlight();
+      notes.lastPassMs =
+        (typeof performance !== 'undefined' && performance.now
+          ? performance.now()
+          : Date.now()) - started;
+      // For the harness's `checks()` (12 §18 C9); harmless anywhere else.
+      window.mpeReadAloudNotesPassMs = notes.lastPassMs;
+      reportAnchors(results);
+    } catch (error) {
+      /* an anchoring failure must never break the preview */
+    }
+    anchorPassBusy = false;
+  }
+
+  /** §10.1 — one marker per noted block, in the right margin. */
+  function drawMarkers(results) {
+    var show = config.notesDecoration !== 'none';
+    var groups = new Map();
+    var anyFound = false;
+    for (var i = 0; i < results.length; i++) {
+      var result = results[i];
+      if (!result.found || !result.el) {
+        continue;
+      }
+      anyFound = true;
+      if (!show) {
+        continue;
+      }
+      var list = groups.get(result.el);
+      if (!list) {
+        list = [];
+        groups.set(result.el, list);
+      }
+      list.push(result);
+    }
+    notes.anyFound = anyFound;
+    notes.markers.forEach(function (marker, el) {
+      if (!groups.has(el) || !el.isConnected) {
+        if (marker.parentNode) {
+          marker.parentNode.removeChild(marker);
+        }
+        notes.markers.delete(el);
+        notes.markerResults.delete(el);
+      }
+    });
+    groups.forEach(function (list, el) {
+      list.sort(function (a, b) {
+        var sa = a.start < 0 ? Number.MAX_SAFE_INTEGER : a.start;
+        var sb = b.start < 0 ? Number.MAX_SAFE_INTEGER : b.start;
+        return sa - sb;
+      });
+      var first = list[0];
+      var marker = notes.markers.get(el);
+      if (!marker || marker.parentNode !== el) {
+        marker = null;
+        for (var c = 0; c < el.children.length; c++) {
+          var child = el.children[c];
+          if (
+            child.classList &&
+            child.classList.contains('mpe-ra-note-marker')
+          ) {
+            marker = child;
+            break;
+          }
+        }
+        if (!marker) {
+          marker = document.createElement('button');
+          marker.type = 'button';
+          marker.className = 'mpe-ra-ui mpe-ra-note-marker';
+          marker.setAttribute('data-mpe-ra-action', 'noteOpen');
+          marker.innerHTML = ICONS.note;
+          el.appendChild(marker);
+        }
+        notes.markers.set(el, marker);
+      }
+      el.classList.add('mpe-ra-block');
+      marker.setAttribute('data-mpe-ra-note', first.noteId);
+      var count = list.length;
+      var badge = null;
+      for (var b = 0; b < marker.children.length; b++) {
+        if (
+          marker.children[b].classList &&
+          marker.children[b].classList.contains('mpe-ra-note-count')
+        ) {
+          badge = marker.children[b];
+        }
+      }
+      if (count > 1) {
+        if (!badge) {
+          badge = document.createElement('span');
+          badge.className = 'mpe-ra-note-count';
+          badge.setAttribute('aria-hidden', 'true');
+          marker.appendChild(badge);
+        }
+        if (badge.textContent !== String(count)) {
+          badge.textContent = String(count);
+        }
+      } else if (badge) {
+        marker.removeChild(badge);
+      }
+      var title = noteTitleText(noteById(first.noteId));
+      var tip = count > 1 ? title + ' · ' + count + ' notes' : title;
+      marker.setAttribute('title', tip);
+      marker.setAttribute('aria-label', tip);
+      var allPending = true;
+      var active = false;
+      for (var k = 0; k < list.length; k++) {
+        if (!noteIsPending(noteById(list[k].noteId))) {
+          allPending = false;
+        }
+        if (notes.open && list[k].noteId === notes.currentId) {
+          active = true;
+        }
+      }
+      marker.classList.toggle('is-pending', allPending);
+      marker.classList.toggle('is-active', active);
+      notes.markerResults.set(el, first);
+      positionMarker(marker, first);
+    });
+    if (root) {
+      root.classList.toggle('mpe-ra-notes-gutter', show && anyFound);
+    }
+  }
+
+  /** The innermost block the passage starts in: the item, the row, the p. */
+  function innerBlockOf(result) {
+    if (!result || !result.el || !result.map || result.start < 0) {
+      return result ? result.el : null;
+    }
+    var dom = null;
+    try {
+      dom = core.offsetToDom(result.map, result.start);
+    } catch (error) {
+      dom = null;
+    }
+    if (!dom) {
+      return result.el;
+    }
+    var node = dom.node.nodeType === 1 ? dom.node : dom.node.parentElement;
+    while (node && node !== result.el) {
+      if (NOTE_MARKER_LINE_TAGS[node.tagName]) {
+        return node;
+      }
+      node = node.parentElement;
+    }
+    return result.el;
+  }
+
+  /** §10.1 — the marker's top is the passage's first line box, relative to the block. */
+  function positionMarker(marker, result) {
+    var top = null;
+    try {
+      var blockRect = result.el.getBoundingClientRect();
+      var range =
+        result.spans && result.spans.length
+          ? core.offsetsToRange(
+              result.spans[0].map,
+              result.spans[0].start,
+              result.spans[0].end,
+              document,
+            )
+          : null;
+      var rects = range && range.getClientRects ? range.getClientRects() : null;
+      if (rects && rects.length && (rects[0].height || rects[0].width)) {
+        top = rects[0].top - blockRect.top;
+      } else {
+        var inner = innerBlockOf(result);
+        if (inner && inner !== result.el) {
+          var rect = inner.getBoundingClientRect();
+          if (rect.height) {
+            top = rect.top - blockRect.top;
+          }
+        }
+      }
+    } catch (error) {
+      top = null;
+    }
+    if (top !== null && top > 1) {
+      marker.style.top = Math.round(top) + 'px';
+    } else {
+      marker.style.removeProperty('top');
+    }
+  }
+
+  function scheduleMarkerLayout() {
+    if (notes.layoutFrame || !notes.markers.size) {
+      return;
+    }
+    notes.layoutFrame = window.requestAnimationFrame(function () {
+      notes.layoutFrame = 0;
+      notes.markers.forEach(function (marker, el) {
+        var result = notes.markerResults.get(el);
+        if (result && el.isConnected) {
+          positionMarker(marker, result);
+        }
+      });
+    });
+  }
+
+  /** The active class follows the open sheet without a whole pass. */
+  function markMarkersActive() {
+    notes.markers.forEach(function (marker) {
+      var id = marker.getAttribute('data-mpe-ra-note');
+      var active = false;
+      if (notes.open && notes.currentId) {
+        var result = noteResult(notes.currentId);
+        active =
+          !!result &&
+          result.found &&
+          notes.markerResults.get(result.el) &&
+          marker.parentNode === result.el;
+      }
+      marker.classList.toggle(
+        'is-active',
+        !!active || (notes.open && id === notes.currentId),
+      );
+    });
+  }
+
+  function clearNoteDecorations() {
+    notes.markers.forEach(function (marker) {
+      if (marker.parentNode) {
+        marker.parentNode.removeChild(marker);
+      }
+    });
+    notes.markers.clear();
+    notes.markerResults.clear();
+    notes.anyFound = false;
+    if (root) {
+      root.classList.remove('mpe-ra-notes-gutter');
+    }
+    if (highlightSupported()) {
+      try {
+        window.CSS.highlights.delete(NOTE_HIGHLIGHT_NAME);
+      } catch (error) {
+        /* no registry */
+      }
+    }
+    notes.highlight = null;
+    notes.highlightRanges = [];
+  }
+
+  // ------------------------------------------------ the words' mark
+
+  /** §10.2 — the CSS Custom Highlight API, when the engine has it. */
+  function highlightSupported() {
+    try {
+      return (
+        typeof window.CSS !== 'undefined' &&
+        !!window.CSS &&
+        !!window.CSS.highlights &&
+        typeof window.Highlight === 'function'
+      );
+    } catch (error) {
+      return false;
+    }
+  }
+
+  function syncNoteHighlight() {
+    if (!highlightSupported()) {
+      return;
+    }
+    var registry = window.CSS.highlights;
+    var show =
+      config.enabled &&
+      config.notesAvailable &&
+      config.notesDecoration === 'marker-and-mark';
+    if (!show) {
+      try {
+        registry.delete(NOTE_HIGHLIGHT_NAME);
+      } catch (error) {
+        /* ignore */
+      }
+      notes.highlight = null;
+      notes.highlightRanges = [];
+      return;
+    }
+    var reading = record.blockEls || [];
+    var ranges = [];
+    for (var id in notes.results) {
+      var result = notes.results[id];
+      if (!result.found || !result.spans) {
+        continue;
+      }
+      for (var i = 0; i < result.spans.length; i++) {
+        var span = result.spans[i];
+        if (reading.indexOf(span.el) >= 0 || !span.el.isConnected) {
+          continue;
+        }
+        try {
+          var range = core.offsetsToRange(
+            span.map,
+            span.start,
+            span.end,
+            document,
+          );
+          if (range) {
+            range._mpeNoteId = id;
+            ranges.push(range);
+          }
+        } catch (error) {
+          /* a stale map after an edit: the next pass rebuilds it */
+        }
+      }
+    }
+    var highlight = new window.Highlight();
+    for (var r = 0; r < ranges.length; r++) {
+      try {
+        highlight.add(ranges[r]);
+      } catch (error) {
+        /* ignore */
+      }
+    }
+    try {
+      registry.set(NOTE_HIGHLIGHT_NAME, highlight);
+    } catch (error) {
+      /* ignore */
+    }
+    notes.highlight = highlight;
+    notes.highlightRanges = ranges;
+  }
+
+  /** §11.7 — the note whose marked words a click landed on, or null. */
+  function noteAtPoint(event) {
+    if (
+      !notes.highlightRanges.length ||
+      config.notesDecoration !== 'marker-and-mark'
+    ) {
+      return null;
+    }
+    var caret = caretFromPoint(event.clientX, event.clientY);
+    if (!caret) {
+      return null;
+    }
+    for (var i = 0; i < notes.highlightRanges.length; i++) {
+      var range = notes.highlightRanges[i];
+      try {
+        if (range.isPointInRange(caret.node, caret.offset)) {
+          return range._mpeNoteId || null;
+        }
+      } catch (error) {
+        /* a node from another document */
+      }
+    }
+    return null;
+  }
+
+  // ------------------------------------------------------- the report
+
+  /** §9.4 — one post per pass, only when the result changed. */
+  function reportAnchors(results) {
+    var report = [];
+    for (var i = 0; i < results.length && i < 500; i++) {
+      var result = results[i];
+      var entry = { noteId: result.noteId, found: !!result.found };
+      if (result.found) {
+        if (result.block) {
+          entry.block = result.block;
+        }
+        entry.line = typeof result.line === 'number' ? result.line : null;
+      }
+      report.push(entry);
+    }
+    var key = JSON.stringify(report);
+    if (key === notes.lastAnchorsReport) {
+      return;
+    }
+    notes.lastAnchorsReport = key;
+    if (report.length) {
+      post('readAloudNoteAnchors', [sourceUri, report]);
+    }
+  }
+
+  // ---------------------------------------------------- reading order
+
+  /** §11.6 — anchored notes by block position then offset; orphans last by date. */
+  function noteReadingOrder() {
+    var anchored = [];
+    var orphans = [];
+    for (var i = 0; i < notes.list.length; i++) {
+      var note = notes.list[i];
+      var result = noteResult(note.id);
+      if (result && result.found) {
+        anchored.push({
+          note: note,
+          index: result.index,
+          start: result.start < 0 ? 0 : result.start,
+        });
+      } else {
+        orphans.push(note);
+      }
+    }
+    anchored.sort(function (a, b) {
+      return a.index - b.index || a.start - b.start;
+    });
+    orphans.sort(function (a, b) {
+      return a.created < b.created ? -1 : a.created > b.created ? 1 : 0;
+    });
+    return anchored
+      .map(function (entry) {
+        return entry.note;
+      })
+      .concat(orphans);
+  }
+
+  // --------------------------------------------------------- the chips
+
+  function makeNoteChip() {
+    var chip = document.createElement('div');
+    chip.className = 'mpe-ra-ui mpe-ra-note-chip';
+    chip.setAttribute('role', 'status');
+    chip.setAttribute('aria-live', 'polite');
+    chip.hidden = true;
+    var text = document.createElement('span');
+    text.className = 'mpe-ra-note-chip-text';
+    var undo = makeButton('noteUndo', 'Undo', 'mpe-ra-note-undo');
+    undo.textContent = 'Undo';
+    undo.hidden = true;
+    chip.appendChild(text);
+    chip.appendChild(undo);
+    return { root: chip, text: text, undo: undo };
+  }
+
+  /** A chip above the bar for `ms`; with `undoId` it carries Undo (§7.7). */
+  function showNoteChip(text, ms, undoId) {
+    ensureBar();
+    var chip = barParts.noteChip;
+    chip.text.textContent = text;
+    chip.undo.hidden = !undoId;
+    if (undoId) {
+      chip.undo.setAttribute('data-mpe-ra-note', undoId);
+    } else {
+      chip.undo.removeAttribute('data-mpe-ra-note');
+    }
+    notes.chipNoteId = undoId || null;
+    chip.root.hidden = false;
+    wakePanel();
+    notes.chipTimer = clearTimer(notes.chipTimer);
+    notes.chipTimer = setTimeout(function () {
+      notes.chipTimer = 0;
+      hideNoteChip();
+    }, ms);
+  }
+
+  function hideNoteChip() {
+    notes.chipTimer = clearTimer(notes.chipTimer);
+    notes.chipNoteId = null;
+    if (barParts && barParts.noteChip) {
+      barParts.noteChip.root.hidden = true;
+      barParts.noteChip.undo.hidden = true;
+    }
+  }
+
+  /** `Saved` / `Copied` in the details chip for a second (§11.1, §11.4). */
+  function showNoteTransient(text) {
+    notes.transient = text;
+    notes.transientTimer = clearTimer(notes.transientTimer);
+    notes.transientTimer = setTimeout(function () {
+      notes.transientTimer = 0;
+      notes.transient = '';
+      syncNoteSheet();
+    }, NOTE_TRANSIENT_MS);
+    syncNoteSheet();
+  }
+
+  // ------------------------------------------------------ the bar button
+
+  function syncNotesBar() {
+    if (!barParts || !barParts.notesButton) {
+      return;
+    }
+    var button = barParts.notesButton;
+    button.hidden = !config.notesAvailable;
+    var count = notes.list.length;
+    if (count > 0) {
+      barParts.notesBadge.textContent = String(count);
+      barParts.notesBadge.hidden = false;
+    } else {
+      barParts.notesBadge.hidden = true;
+    }
+    button.classList.toggle('is-active', notes.listOpen);
+    button.setAttribute('aria-expanded', notes.listOpen ? 'true' : 'false');
+    var label = notes.listOpen
+      ? 'Close the notes list'
+      : count
+        ? NOTES_TOOLTIP + ' · ' + count
+        : NOTES_TOOLTIP;
+    button.setAttribute('title', label);
+    button.setAttribute('aria-label', label);
+  }
+
+  // ------------------------------------------------------ the Note sheet
+
+  function makeNoteSheet() {
+    var sheet = document.createElement('div');
+    sheet.className = 'mpe-ra-ui mpe-ra-note';
+    sheet.setAttribute('role', 'dialog');
+    sheet.setAttribute('aria-label', 'Note');
+    sheet.setAttribute('tabindex', '-1');
+    sheet.hidden = true;
+
+    var head = document.createElement('div');
+    head.className = 'mpe-ra-note-head';
+    var title = document.createElement('span');
+    title.className = 'mpe-ra-note-title';
+    title.textContent = 'Note';
+    var details = document.createElement('span');
+    details.className = 'mpe-ra-note-details';
+    details.setAttribute('role', 'status');
+    details.setAttribute('aria-live', 'polite');
+    var close = makeIconButton(
+      'noteClose',
+      'Close note',
+      'mpe-ra-bar-btn mpe-ra-sheet-close',
+      'close',
+    );
+    head.appendChild(title);
+    head.appendChild(details);
+    head.appendChild(close);
+
+    var scroll = document.createElement('div');
+    scroll.className = 'mpe-ra-note-scroll';
+
+    var banner = document.createElement('div');
+    banner.className = 'mpe-ra-note-banner';
+    banner.hidden = true;
+    var bannerText = document.createElement('span');
+    bannerText.className = 'mpe-ra-note-banner-text';
+    bannerText.textContent = NOTE_ORPHAN_TEXT;
+    var reattach = makeHelpButton(
+      'noteReattach',
+      'Re-attach to selection',
+      'mpe-ra-help-action mpe-ra-note-reattach',
+    );
+    banner.appendChild(bannerText);
+    banner.appendChild(reattach);
+
+    var path = document.createElement('div');
+    path.className = 'mpe-ra-note-path';
+    path.hidden = true;
+
+    // The body carries no `.mpe-ra-ui`: it is a reading scope (§11.1).
+    var body = document.createElement('div');
+    body.className = NOTE_BODY_CLASS;
+
+    var mine = document.createElement('div');
+    mine.className = 'mpe-ra-note-mine';
+    var textarea = document.createElement('textarea');
+    textarea.className = 'mpe-ra-ui mpe-ra-note-textarea';
+    textarea.placeholder = 'Why did you save this? Optional.';
+    textarea.rows = 2;
+    textarea.setAttribute('aria-label', 'My note');
+    mine.appendChild(textarea);
+
+    var tags = document.createElement('div');
+    tags.className = 'mpe-ra-note-tags';
+    var tagsLabel = document.createElement('span');
+    tagsLabel.className = 'mpe-ra-note-tags-label';
+    tagsLabel.textContent = 'Tags';
+    var tagList = document.createElement('span');
+    tagList.className = 'mpe-ra-note-tag-list';
+    var tagInput = document.createElement('input');
+    tagInput.className = 'mpe-ra-ui mpe-ra-note-tag-input';
+    tagInput.type = 'text';
+    tagInput.placeholder = '+ Add tag';
+    tagInput.setAttribute('aria-label', 'Add a tag');
+    tagInput.setAttribute('maxlength', '32');
+    tags.appendChild(tagsLabel);
+    tags.appendChild(tagList);
+    tags.appendChild(tagInput);
+
+    var context = document.createElement('div');
+    context.className = 'mpe-ra-note-context';
+    var contextToggle = makeButton(
+      'noteContext',
+      'Show context',
+      'mpe-ra-note-context-toggle',
+    );
+    contextToggle.textContent = 'Show context';
+    contextToggle.setAttribute('aria-expanded', 'false');
+    var contextBody = document.createElement('div');
+    contextBody.className = 'mpe-ra-note-context-body';
+    contextBody.hidden = true;
+    context.appendChild(contextToggle);
+    context.appendChild(contextBody);
+
+    scroll.appendChild(banner);
+    scroll.appendChild(path);
+    scroll.appendChild(body);
+    scroll.appendChild(mine);
+    scroll.appendChild(tags);
+    scroll.appendChild(context);
+
+    var footer = document.createElement('div');
+    footer.className = 'mpe-ra-note-footer';
+    var actions = document.createElement('div');
+    actions.className = 'mpe-ra-note-actions';
+    var regenerate = makeHelpButton(
+      'noteRegenerate',
+      'Regenerate',
+      'mpe-ra-help-action mpe-ra-note-regenerate',
+    );
+    var openEditor = makeHelpButton(
+      'noteOpenEditor',
+      'Open in editor',
+      'mpe-ra-help-action mpe-ra-note-open-editor',
+    );
+    var copy = makeHelpButton(
+      'noteCopy',
+      'Copy',
+      'mpe-ra-help-action mpe-ra-note-copy',
+    );
+    copy.setAttribute('title', 'Copy as markdown');
+    copy.setAttribute('aria-label', 'Copy as markdown');
+    var remove = makeHelpButton(
+      'noteDelete',
+      'Delete',
+      'mpe-ra-help-action mpe-ra-note-delete',
+    );
+    actions.appendChild(regenerate);
+    actions.appendChild(openEditor);
+    actions.appendChild(copy);
+    actions.appendChild(remove);
+
+    var pager = document.createElement('div');
+    pager.className = 'mpe-ra-note-pager';
+    var prev = makeHelpButton(
+      'notePrev',
+      'Previous note',
+      'mpe-ra-help-action mpe-ra-note-prev',
+    );
+    prev.innerHTML = ICONS.chevronLeft;
+    var pagerLabel = document.createElement('span');
+    pagerLabel.className = 'mpe-ra-note-pager-label';
+    var next = makeHelpButton(
+      'noteNext',
+      'Next note',
+      'mpe-ra-help-action mpe-ra-note-next',
+    );
+    next.innerHTML = ICONS.chevronRight;
+    var play = makeHelpButton(
+      'notePlay',
+      'Play',
+      'mpe-ra-help-action mpe-ra-note-play',
+    );
+    var resume = makeHelpButton(
+      'noteResume',
+      'Resume',
+      'mpe-ra-help-action mpe-ra-note-resume',
+    );
+    resume.hidden = true;
+    pager.appendChild(prev);
+    pager.appendChild(pagerLabel);
+    pager.appendChild(next);
+    pager.appendChild(play);
+    pager.appendChild(resume);
+
+    footer.appendChild(actions);
+    footer.appendChild(pager);
+
+    sheet.appendChild(head);
+    sheet.appendChild(scroll);
+    sheet.appendChild(footer);
+
+    return {
+      root: sheet,
+      details: details,
+      close: close,
+      scroll: scroll,
+      banner: banner,
+      reattach: reattach,
+      path: path,
+      body: body,
+      textarea: textarea,
+      tagList: tagList,
+      tagInput: tagInput,
+      contextToggle: contextToggle,
+      contextBody: contextBody,
+      regenerate: regenerate,
+      openEditor: openEditor,
+      copy: copy,
+      remove: remove,
+      pager: pager,
+      prev: prev,
+      pagerLabel: pagerLabel,
+      next: next,
+      play: play,
+      resume: resume,
+    };
+  }
+
+  /** The scrolling column of the Note sheet (the follow scroll's container). */
+  function noteScrollBox() {
+    return barParts && barParts.note ? barParts.note.scroll : null;
+  }
+
+  function skeletonHtml(lines, title) {
+    var out =
+      '<div class="mpe-ra-ui mpe-ra-note-skel' +
+      (title ? ' is-title' : '') +
+      '" aria-hidden="true">';
+    for (var i = 0; i < lines; i++) {
+      out += '<i></i>';
+    }
+    return out + '</div>';
+  }
+
+  function lineHtml(text, error) {
+    return (
+      '<div class="mpe-ra-ui mpe-ra-note-line-wrap"><p class="mpe-ra-ui mpe-ra-note-line' +
+      (error ? ' is-error' : '') +
+      '">' +
+      escapeHtml(text) +
+      '</p></div>'
+    );
+  }
+
+  /** §11.1–§11.2 — the body: title, passage, sections or their stand-ins, My note. */
+  function buildNoteBodyHtml(note, pending) {
+    var parts = [];
+    var pendingState = !note || noteIsPending(note);
+    var hasSections = !!(note && note.html);
+    if (pendingState && !hasSections && !(note && note.titleEdited)) {
+      parts.push(skeletonHtml(1, true));
+    } else {
+      parts.push('<h1>' + escapeHtml(note ? note.title : '') + '</h1>');
+    }
+    var passage = note ? note.passage : pending ? pending.passage : '';
+    parts.push(
+      '<blockquote>' +
+        passage
+          .split('\n')
+          .map(function (line) {
+            return '<p>' + escapeHtml(line) + '</p>';
+          })
+          .join('') +
+        '</blockquote>',
+    );
+    if (pending && pending.error) {
+      parts.push(lineHtml(pending.error, true));
+    } else if (hasSections) {
+      parts.push(note.html);
+    } else if (note && note.generated.status === 'error') {
+      parts.push(
+        lineHtml(
+          NOTE_ERROR_PREFIX +
+            (note.generated.error ? ' ' + note.generated.error : ''),
+          true,
+        ),
+      );
+    } else if (pendingState) {
+      parts.push(skeletonHtml(2) + skeletonHtml(1) + skeletonHtml(2));
+    } else if (note && !notes.generate && note.generated.source !== 'help') {
+      parts.push(lineHtml(NOTE_OFF_TEXT, false));
+    }
+    parts.push('<h2>My note</h2>');
+    if (note && note.myNote) {
+      parts.push(
+        '<p class="mpe-ra-note-mine-echo">' + escapeHtml(note.myNote) + '</p>',
+      );
+    }
+    return parts.join('');
+  }
+
+  /** Put the rendered note into the body and collect its blocks (§11.5). */
+  function setNoteBodyHtml(html) {
+    var body = noteBody();
+    noteBlocks = [];
+    noteBlocksByElement = new Map();
+    if (!body) {
+      return;
+    }
+    body.innerHTML = html || '';
+    if (!html) {
+      return;
+    }
+    var collected = core.collectBlocks(body);
+    for (var i = 0; i < collected.length; i++) {
+      var el = collected[i].el;
+      var text = core.extractText(el).text;
+      var entry = {
+        el: el,
+        kind: collected[i].kind,
+        index: collected[i].index,
+        key: core.blockKey(el, text),
+        text: text,
+        label: core.blockLabel(text),
+        button: null,
+        scope: body,
+        noButton: true,
+      };
+      noteBlocks.push(entry);
+      noteBlocksByElement.set(el, entry);
+      el.classList.add('mpe-ra-block');
+    }
+  }
+
+  function renderTags(tags) {
+    var sheet = barParts.note;
+    sheet.tagList.innerHTML = '';
+    for (var i = 0; i < tags.length; i++) {
+      var chip = document.createElement('span');
+      chip.className = 'mpe-ra-note-tag';
+      chip.setAttribute('data-tag', tags[i]);
+      var text = document.createElement('span');
+      text.textContent = tags[i];
+      var remove = makeButton(
+        'noteTagRemove',
+        'Remove tag ' + tags[i],
+        'mpe-ra-note-tag-remove',
+      );
+      remove.textContent = '×';
+      remove.setAttribute('data-tag', tags[i]);
+      chip.appendChild(text);
+      chip.appendChild(remove);
+      sheet.tagList.appendChild(chip);
+    }
+    sheet.tagInput.hidden = tags.length >= NOTE_TAGS_MAX;
+  }
+
+  function contextBlock(label, text) {
+    return (
+      '<div class="mpe-ra-note-context-label">' +
+      escapeHtml(label) +
+      '</div><blockquote class="mpe-ra-note-context-quote">' +
+      escapeHtml(text) +
+      '</blockquote>'
+    );
+  }
+
+  function renderContext(context) {
+    var sheet = barParts.note;
+    var parts = [];
+    if (context.enclosing) {
+      parts.push(contextBlock('Enclosing', context.enclosing));
+    }
+    if (context.before) {
+      parts.push(contextBlock('Before', context.before));
+    }
+    if (context.after) {
+      parts.push(contextBlock('After', context.after));
+    }
+    sheet.contextBody.innerHTML = parts.join('');
+    var has = parts.length > 0;
+    sheet.contextToggle.hidden = !has;
+    sheet.contextBody.hidden = !has || !notes.contextOpen;
+    sheet.contextToggle.textContent = notes.contextOpen
+      ? 'Hide context'
+      : 'Show context';
+    sheet.contextToggle.setAttribute(
+      'aria-expanded',
+      notes.contextOpen ? 'true' : 'false',
+    );
+  }
+
+  /** The textarea grows to eight lines, then scrolls (§11.1). */
+  function autoGrowTextarea(textarea) {
+    var lines = textarea.value.split('\n').length;
+    textarea.rows = Math.max(2, Math.min(8, lines));
+    try {
+      textarea.style.height = 'auto';
+      var height = textarea.scrollHeight;
+      if (height > 0) {
+        var lineHeight =
+          parseFloat(window.getComputedStyle(textarea).lineHeight) || 20;
+        textarea.style.height = Math.min(height, lineHeight * 8 + 14) + 'px';
+      }
+    } catch (error) {
+      /* no layout */
+    }
+  }
+
+  /** §11.1–§11.3 — everything the sheet shows, from the current note. */
+  function renderNote() {
+    if (!barParts || !barParts.note) {
+      return;
+    }
+    var sheet = barParts.note;
+    var note = noteById(notes.currentId);
+    var pending = !note && notes.pendingCreate ? notes.pendingCreate : null;
+    if (!note && !pending) {
+      closeNote('gone');
+      return;
+    }
+    var status = note ? note.generated.status : 'pending';
+    var fromHelp = !!(note && note.generated.source === 'help');
+    var orphan = note ? noteIsOrphan(note.id) : false;
+
+    var details;
+    if (pending && pending.error) {
+      details = pending.error;
+    } else if (!note || status === 'pending') {
+      details = 'Writing the note…';
+    } else if (status === 'error') {
+      details = NOTE_ERROR_PREFIX;
+    } else {
+      details = noteDateText(note.created);
+      if (fromHelp) {
+        details += ' · from Explain';
+      } else if (note.generated.engine) {
+        details +=
+          ' · ' +
+          note.generated.engine +
+          (note.generated.model ? ' · ' + note.generated.model : '');
+      }
+    }
+    if (notes.transient) {
+      details = notes.transient;
+    }
+    sheet.details.textContent = details;
+    sheet.details.classList.toggle(
+      'is-error',
+      !notes.transient && (status === 'error' || !!(pending && pending.error)),
+    );
+
+    sheet.banner.hidden = !orphan;
+    var headings = note ? note.headings : pending.breadcrumb;
+    sheet.path.textContent =
+      (orphan ? 'Was under ' : '') + headings.join(' › ');
+    sheet.path.hidden = !headings.length;
+
+    var key = [
+      note ? note.id : 'pending',
+      note ? note.updated : '',
+      note ? status : 'pending',
+      note ? (note.html || '').length : 0,
+      note ? note.title : '',
+      note ? note.myNote : '',
+      pending && pending.error ? 'error' : '',
+      notes.generate ? 'gen' : 'off',
+    ].join('|');
+    if (key !== notes.renderedKey) {
+      if (record.scope === noteBody() && record.state !== 'idle') {
+        endJob({ next: 'idle', reason: 'note changed' });
+      }
+      notes.renderedKey = key;
+      setNoteBodyHtml(buildNoteBodyHtml(note, pending));
+      applyThemeAttributes();
+    }
+
+    if (document.activeElement !== sheet.textarea) {
+      var value = note
+        ? note.myNote
+        : notes.pendingMyNote !== null && notes.pendingMyNote !== undefined
+          ? notes.pendingMyNote
+          : '';
+      if (sheet.textarea.value !== value && !notes.myNoteTimer) {
+        sheet.textarea.value = value;
+      }
+    }
+    autoGrowTextarea(sheet.textarea);
+    renderTags(note ? note.tags : []);
+    sheet.tagInput.disabled = !note;
+    renderContext(note ? note.context : pending.context);
+
+    var regenerable = !!note && status !== 'pending';
+    setEnabled(sheet.regenerate, regenerable);
+    sheet.regenerate.setAttribute(
+      'title',
+      regenerable ? 'Write the summary again' : 'Being written',
+    );
+    sheet.openEditor.hidden = orphan || !note;
+    setEnabled(sheet.copy, !!note);
+    setEnabled(sheet.remove, !!note);
+
+    var order = noteReadingOrder();
+    var index = note ? order.indexOf(note) : -1;
+    sheet.pagerLabel.textContent =
+      index >= 0 ? index + 1 + ' of ' + order.length : '';
+    setEnabled(sheet.prev, index > 0);
+    setEnabled(sheet.next, index >= 0 && index < order.length - 1);
+    setEnabled(sheet.play, noteBlocks.length > 0);
+    var resumable = canResumeFrom(notes.resume);
+    sheet.resume.hidden = !notes.resume;
+    setEnabled(sheet.resume, resumable);
+
+    var liveSelection = !!liveSelectionIn(root);
+    setEnabled(sheet.reattach, liveSelection);
+    sheet.reattach.setAttribute(
+      'title',
+      liveSelection ? 'Re-attach to selection' : 'Select text to re-attach',
+    );
+  }
+
+  function syncNoteSheet() {
+    if (!notes.open || !barParts || !barParts.note) {
+      return;
+    }
+    renderNote();
+    markMarkersActive();
+  }
+
+  /** Re-attach is enabled while the document has a selection that resolves. */
+  function syncNoteReattach() {
+    if (!notes.open || !barParts || !barParts.note) {
+      return;
+    }
+    var liveSelection = !!liveSelectionIn(root);
+    setEnabled(barParts.note.reattach, liveSelection);
+    barParts.note.reattach.setAttribute(
+      'title',
+      liveSelection ? 'Re-attach to selection' : 'Select text to re-attach',
+    );
+  }
+
+  function focusNoteSheet() {
+    if (!barParts || !barParts.note) {
+      return;
+    }
+    try {
+      barParts.note.root.focus();
+    } catch (error) {
+      /* jsdom and detached nodes */
+    }
+  }
+
+  /** §11.6 — the follow scroll's own centring, for the note's block. */
+  function scrollBlockIntoView(el) {
+    if (!el || !el.getBoundingClientRect) {
+      return;
+    }
+    try {
+      var rect = el.getBoundingClientRect();
+      var viewport = window.innerHeight || 0;
+      if (!viewport) {
+        return;
+      }
+      var target =
+        readScrollTop(window) + rect.top - viewport * core.FOLLOW_ANCHOR;
+      writeScrollTop(window, Math.max(0, target));
+    } catch (error) {
+      /* no layout */
+    }
+  }
+
+  /**
+   * §11.7 — open a note: from a marker, a marked word, the list, the view
+   * or the pager. `id` null opens the pending capture's sheet (§5.2).
+   */
+  function openNoteSheet(id, opener) {
+    if (!config.enabled || !config.notesAvailable) {
+      return;
+    }
+    if (id && !notes.byId[id]) {
+      return;
+    }
+    ensureBar();
+    closePopovers();
+    closeHelp('note');
+    closeNotesList('note');
+    closeClassroom('note');
+    closeModuleSheet('note');
+    hideFloat();
+    panelDismissed = false;
+    if (notes.open && notes.currentId !== id) {
+      flushMyNote();
+    }
+    notes.open = true;
+    notes.currentId = id;
+    notes.opener = opener || null;
+    notes.contextOpen = id ? noteIsOrphan(id) : false;
+    notes.renderedKey = '';
+    barParts.note.root.hidden = false;
+    renderNote();
+    showBar('');
+    if (id) {
+      var result = noteResult(id);
+      if (result && result.found && result.el) {
+        scrollBlockIntoView(result.el);
+      }
+    }
+    markMarkersActive();
+    syncNotesBar();
+    syncHelpButton();
+    focusNoteSheet();
+  }
+
+  function openNote(id, opener) {
+    if (!id || !notes.byId[id]) {
+      return;
+    }
+    openNoteSheet(id, opener);
+  }
+
+  /** §11.4 — Escape and ×; a pending My note is written first. */
+  function closeNote(reason) {
+    if (!notes.open) {
+      return;
+    }
+    flushMyNote();
+    if (record.scope === noteBody() && record.state !== 'idle') {
+      endJob({ next: 'idle', reason: 'note sheet closed (' + reason + ')' });
+    }
+    var opener = notes.opener;
+    notes.open = false;
+    notes.currentId = null;
+    notes.opener = null;
+    notes.pendingCreate = null;
+    notes.pendingMyNote = null;
+    notes.renderedKey = '';
+    notes.transient = '';
+    notes.transientTimer = clearTimer(notes.transientTimer);
+    if (barParts && barParts.note) {
+      barParts.note.root.hidden = true;
+    }
+    setNoteBodyHtml('');
+    markMarkersActive();
+    syncNotesBar();
+    syncHelpButton();
+    armPanelIdle();
+    var target =
+      opener && opener.isConnected
+        ? opener
+        : barParts && barParts.notesButton && !barParts.notesButton.hidden
+          ? barParts.notesButton
+          : null;
+    if (target) {
+      try {
+        target.focus();
+      } catch (error) {
+        /* the panel may be going away */
+      }
+    }
+  }
+
+  /** The open note vanished from the list: the next in order, or close. */
+  function pageOnFromMissing() {
+    var order = noteReadingOrder();
+    if (!order.length) {
+      closeNote('deleted');
+      return;
+    }
+    notes.currentId = order[0].id;
+    notes.contextOpen = noteIsOrphan(notes.currentId);
+    notes.renderedKey = '';
+  }
+
+  function stepNote(direction) {
+    var order = noteReadingOrder();
+    var current = noteById(notes.currentId);
+    var index = current ? order.indexOf(current) : -1;
+    var target = order[index + direction];
+    if (!target) {
+      return;
+    }
+    flushMyNote();
+    notes.currentId = target.id;
+    notes.contextOpen = noteIsOrphan(target.id);
+    notes.renderedKey = '';
+    renderNote();
+    var result = noteResult(target.id);
+    if (result && result.found && result.el) {
+      scrollBlockIntoView(result.el);
+    }
+    markMarkersActive();
+  }
+
+  // ---------------------------------------------------- My note and tags
+
+  function onMyNoteInput() {
+    var sheet = barParts.note;
+    autoGrowTextarea(sheet.textarea);
+    notes.myNoteTimer = clearTimer(notes.myNoteTimer);
+    notes.myNoteTimer = setTimeout(function () {
+      notes.myNoteTimer = 0;
+      flushMyNote();
+    }, NOTE_MY_NOTE_DEBOUNCE_MS);
+  }
+
+  /** Write the textarea's text now, if it differs from the note's (§11.1). */
+  function flushMyNote() {
+    if (!barParts || !barParts.note) {
+      return;
+    }
+    var hadTimer = notes.myNoteTimer !== 0;
+    notes.myNoteTimer = clearTimer(notes.myNoteTimer);
+    var value = barParts.note.textarea.value;
+    var note = noteById(notes.currentId);
+    if (!note) {
+      if (notes.pendingCreate && value) {
+        notes.pendingMyNote = value;
+      }
+      return;
+    }
+    if (!hadTimer && value === note.myNote) {
+      return;
+    }
+    if (value === note.myNote) {
+      return;
+    }
+    note.myNote = value;
+    post('readAloudNoteUpdate', [sourceUri, note.id, { myNote: value }]);
+    showNoteTransient('Saved');
+  }
+
+  function commitTagInput() {
+    var sheet = barParts.note;
+    var note = noteById(notes.currentId);
+    var raw = sheet.tagInput.value;
+    sheet.tagInput.value = '';
+    if (!note) {
+      return;
+    }
+    var tag = raw
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, '-')
+      .replace(/[^a-z0-9-]/g, '')
+      .replace(/-{2,}/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 32);
+    if (
+      !tag ||
+      note.tags.indexOf(tag) >= 0 ||
+      note.tags.length >= NOTE_TAGS_MAX
+    ) {
+      return;
+    }
+    var tags = note.tags.concat([tag]);
+    note.tags = tags;
+    post('readAloudNoteUpdate', [sourceUri, note.id, { tags: tags }]);
+    renderTags(tags);
+  }
+
+  function removeTag(tag) {
+    var note = noteById(notes.currentId);
+    if (!note || !tag) {
+      return;
+    }
+    var tags = note.tags.filter(function (candidate) {
+      return candidate !== tag;
+    });
+    if (tags.length === note.tags.length) {
+      return;
+    }
+    note.tags = tags;
+    post('readAloudNoteUpdate', [sourceUri, note.id, { tags: tags }]);
+    renderTags(tags);
+  }
+
+  /** §11.1 — Enter or a comma commits; Backspace on an empty input removes the last. */
+  function onTagInputKeydown(event) {
+    var sheet = barParts.note;
+    if (event.key === 'Enter' || event.key === ',') {
+      event.preventDefault();
+      commitTagInput();
+      return;
+    }
+    if (event.key === 'Backspace' && sheet.tagInput.value === '') {
+      var note = noteById(notes.currentId);
+      if (note && note.tags.length) {
+        event.preventDefault();
+        removeTag(note.tags[note.tags.length - 1]);
+      }
+    }
+  }
+
+  // ------------------------------------------------------------ actions
+
+  /** §11.5 — Play: pause a document read and read the sheet, bounded to it. */
+  function playNoteFromStart() {
+    if (!noteBlocks.length) {
+      return;
+    }
+    if (record.scope === root && record.state !== 'idle') {
+      var remembered = rememberResume();
+      if (remembered) {
+        notes.resume = remembered;
+      }
+    }
+    if (record.state === 'error') {
+      clearTransientError();
+    } else if (record.state !== 'idle') {
+      endJob({ next: 'idle', reason: 'note play' });
+    }
+    startBlockRead(noteBlocks[0], 0);
+    syncNoteSheet();
+  }
+
+  function resumeNoteRead() {
+    var resume = notes.resume;
+    if (!canResumeFrom(resume)) {
+      return;
+    }
+    notes.resume = null;
+    closeNote('resume');
+    resumeFrom(resume);
+  }
+
+  function regenerateNote() {
+    var note = noteById(notes.currentId);
+    if (!note || noteIsPending(note)) {
+      return;
+    }
+    var fields = null;
+    var result = noteResult(note.id);
+    if (result && result.found && result.el && result.el.isConnected) {
+      try {
+        fields = noteFieldsFrom(
+          buildHelpContextFor({
+            text: note.passage,
+            els: [result.el],
+            range: null,
+          }),
+        );
+      } catch (error) {
+        fields = null;
+      }
+    }
+    post('readAloudNoteRegenerate', [sourceUri, note.id, fields]);
+    setEnabled(barParts.note.regenerate, false);
+    barParts.note.regenerate.setAttribute('title', 'Being written');
+  }
+
+  function deleteCurrentNote() {
+    var note = noteById(notes.currentId);
+    if (!note) {
+      return;
+    }
+    flushMyNote();
+    post('readAloudNoteDelete', [sourceUri, note.id]);
+    showNoteChip(deleteChipText(), NOTE_UNDO_MS, note.id);
+    notes.deleting = notes.deleting.concat([note.id]);
+  }
+
+  function undoDelete(id) {
+    if (!id) {
+      return;
+    }
+    post('readAloudNoteUndoDelete', [sourceUri, id]);
+    hideNoteChip();
+  }
+
+  /** §11.3 — a fresh anchor from the live selection; the passage stays. */
+  function reattachNote() {
+    var note = noteById(notes.currentId);
+    if (!note) {
+      return;
+    }
+    var live = liveSelectionIn(root);
+    if (!live) {
+      showHint('Select text to re-attach', currentSelectionRect() || floatRect);
+      return;
+    }
+    var selection = window.getSelection();
+    var passage = {
+      text: live.text,
+      els: live.blocks.slice(),
+      range: selection && selection.rangeCount ? selection.getRangeAt(0) : null,
+    };
+    var anchor = noteAnchorForPassage(passage);
+    if (!anchor) {
+      return;
+    }
+    var context = buildHelpContextFor(passage);
+    post('readAloudNoteReattach', [
+      sourceUri,
+      note.id,
+      anchor,
+      context.breadcrumb.slice(),
+    ]);
+    hideFloat();
+  }
+
+  /** The note actions of `handleAction`; true when `action` was one. */
+  function handleNoteAction(action, element) {
+    if (action === 'notes') {
+      closePopovers();
+      toggleNotesList();
+      return true;
+    }
+    if (action === 'notesClose') {
+      closeNotesList('close');
+      return true;
+    }
+    if (action === 'notesShowAll') {
+      post('readAloudNotesShowAll', [sourceUri]);
+      return true;
+    }
+    if (action === 'noteOpen') {
+      var id = element ? element.getAttribute('data-mpe-ra-note') : null;
+      openNote(id, element);
+      return true;
+    }
+    if (action === 'noteClose') {
+      closeNote('close');
+      return true;
+    }
+    if (action === 'noteUndo') {
+      undoDelete(element ? element.getAttribute('data-mpe-ra-note') : null);
+      return true;
+    }
+    if (action === 'noteRegenerate') {
+      regenerateNote();
+      return true;
+    }
+    if (action === 'noteOpenEditor') {
+      if (notes.currentId) {
+        post('readAloudNoteOpen', [sourceUri, notes.currentId, 'editor']);
+      }
+      return true;
+    }
+    if (action === 'noteCopy') {
+      if (notes.currentId) {
+        post('readAloudNoteCopy', [sourceUri, notes.currentId]);
+        showNoteTransient('Copied');
+      }
+      return true;
+    }
+    if (action === 'noteDelete') {
+      deleteCurrentNote();
+      return true;
+    }
+    if (action === 'notePrev') {
+      stepNote(-1);
+      return true;
+    }
+    if (action === 'noteNext') {
+      stepNote(1);
+      return true;
+    }
+    if (action === 'notePlay') {
+      playNoteFromStart();
+      return true;
+    }
+    if (action === 'noteResume') {
+      resumeNoteRead();
+      return true;
+    }
+    if (action === 'noteReattach') {
+      reattachNote();
+      return true;
+    }
+    if (action === 'noteContext') {
+      notes.contextOpen = !notes.contextOpen;
+      syncNoteSheet();
+      return true;
+    }
+    if (action === 'noteTagRemove') {
+      removeTag(element ? element.getAttribute('data-tag') : null);
+      return true;
+    }
+    if (action === 'floatNote') {
+      saveNoteFromSelection();
+      return true;
+    }
+    return false;
+  }
+
+  // ------------------------------------------------ the Notes list sheet
+
+  function makeNotesListSheet() {
+    var sheet = document.createElement('div');
+    sheet.className = 'mpe-ra-ui mpe-ra-notes-list';
+    sheet.setAttribute('role', 'dialog');
+    sheet.setAttribute('aria-label', 'Notes in this document');
+    sheet.setAttribute('tabindex', '-1');
+    sheet.hidden = true;
+
+    var head = document.createElement('div');
+    head.className = 'mpe-ra-notes-list-head';
+    var title = document.createElement('span');
+    title.className = 'mpe-ra-notes-list-title';
+    title.textContent = 'Notes in this document';
+    var details = document.createElement('span');
+    details.className = 'mpe-ra-note-details';
+    details.textContent = 'Reading order';
+    var close = makeIconButton(
+      'notesClose',
+      'Close the notes list',
+      'mpe-ra-bar-btn mpe-ra-sheet-close',
+      'close',
+    );
+    head.appendChild(title);
+    head.appendChild(details);
+    head.appendChild(close);
+
+    var rows = document.createElement('div');
+    rows.className = 'mpe-ra-notes-list-rows';
+    rows.setAttribute('role', 'list');
+    var empty = document.createElement('p');
+    empty.className = 'mpe-ra-notes-list-empty';
+    empty.textContent = NOTES_EMPTY_TEXT;
+    empty.hidden = true;
+
+    var footer = document.createElement('div');
+    footer.className = 'mpe-ra-notes-list-footer';
+    var all = makeHelpButton(
+      'notesShowAll',
+      'All notes',
+      'mpe-ra-help-action mpe-ra-notes-all',
+    );
+    var hint = document.createElement('span');
+    hint.className = 'mpe-ra-notes-list-hint';
+    hint.textContent = 'Click a note to go to it';
+    footer.appendChild(all);
+    footer.appendChild(hint);
+
+    sheet.appendChild(head);
+    sheet.appendChild(rows);
+    sheet.appendChild(empty);
+    sheet.appendChild(footer);
+    return {
+      root: sheet,
+      title: title,
+      rows: rows,
+      empty: empty,
+      all: all,
+      close: close,
+    };
+  }
+
+  /** §12 — one row per note in reading order, orphans last with a badge. */
+  function syncNotesList() {
+    if (!barParts || !barParts.notesList) {
+      return;
+    }
+    var sheet = barParts.notesList;
+    var count = notes.list.length;
+    sheet.title.textContent =
+      'Notes in this document' + (count ? ' · ' + count : '');
+    if (!notes.listOpen) {
+      return;
+    }
+    var order = noteReadingOrder();
+    sheet.rows.innerHTML = '';
+    for (var i = 0; i < order.length; i++) {
+      var note = order[i];
+      var orphan = noteIsOrphan(note.id);
+      var row = makeButton('noteOpen', noteTitleText(note), 'mpe-ra-notes-row');
+      row.setAttribute('role', 'listitem');
+      row.setAttribute('data-mpe-ra-note', note.id);
+      row.removeAttribute('title');
+      var titleLine = document.createElement('span');
+      titleLine.className = 'mpe-ra-notes-row-title';
+      var titleText = document.createElement('span');
+      titleText.textContent = noteTitleText(note);
+      titleLine.appendChild(titleText);
+      if (orphan) {
+        var badge = document.createElement('span');
+        badge.className = 'mpe-ra-notes-badge';
+        badge.textContent = 'Not in this version';
+        titleLine.appendChild(badge);
+      }
+      var summary = document.createElement('span');
+      summary.className = 'mpe-ra-notes-row-summary';
+      summary.textContent =
+        note.summaryLine ||
+        (noteIsPending(note) ? 'Writing the note…' : note.passage);
+      var meta = document.createElement('span');
+      meta.className = 'mpe-ra-notes-row-meta';
+      var path = note.headings.length
+        ? note.headings[note.headings.length - 1]
+        : '';
+      var metaParts = [];
+      if (path) {
+        metaParts.push((orphan ? 'Was under ' : '') + path);
+      }
+      var date = noteDateText(note.created);
+      if (date) {
+        metaParts.push(date);
+      }
+      meta.textContent = metaParts.join(' · ');
+      row.appendChild(titleLine);
+      row.appendChild(summary);
+      row.appendChild(meta);
+      sheet.rows.appendChild(row);
+    }
+    sheet.empty.hidden = count > 0;
+    sheet.rows.hidden = count === 0;
+  }
+
+  function toggleNotesList() {
+    if (notes.listOpen) {
+      closeNotesList('button');
+      return;
+    }
+    openNotesList(
+      barParts && barParts.notesButton ? barParts.notesButton : null,
+    );
+  }
+
+  function openNotesList(opener) {
+    if (!config.enabled || !config.notesAvailable) {
+      return;
+    }
+    ensureBar();
+    closePopovers();
+    closeHelp('notes list');
+    closeNote('notes list');
+    closeClassroom('notes list');
+    closeModuleSheet('notes list');
+    hideFloat();
+    panelDismissed = false;
+    notes.listOpen = true;
+    notes.listOpener = opener || null;
+    barParts.notesList.root.hidden = false;
+    syncNotesList();
+    syncNotesBar();
+    showBar('');
+    try {
+      barParts.notesList.root.focus();
+    } catch (error) {
+      /* jsdom and detached nodes */
+    }
+  }
+
+  function closeNotesList(reason) {
+    if (!notes.listOpen) {
+      return;
+    }
+    var opener = notes.listOpener;
+    notes.listOpen = false;
+    notes.listOpener = null;
+    if (barParts && barParts.notesList) {
+      barParts.notesList.root.hidden = true;
+    }
+    syncNotesBar();
+    armPanelIdle();
+    if (reason !== 'note') {
+      var target =
+        opener && opener.isConnected
+          ? opener
+          : barParts && barParts.notesButton && !barParts.notesButton.hidden
+            ? barParts.notesButton
+            : null;
+      if (target) {
+        try {
+          target.focus();
+        } catch (error) {
+          /* the panel may be going away */
+        }
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // 12c. Classroom (featrues/13-classroom/spec.md)
+  //
+  // The fourth cluster button (§5.1), the Classroom sheet and its four states
+  // (§5.2–§5.4), _Teach me this_ on the help sheet (§5.5), and, in a module's
+  // own preview, the bar button, the Module sheet and the message line
+  // (§12.2) plus the reveal of the passage (§12.4). The host owns the build
+  // and the files; this layer renders the card from the progress messages
+  // alone and keeps no build state the host has not sent.
+  // ---------------------------------------------------------------------------
+
+  function applyClassroomConfig(message) {
+    if (typeof message.classroomAvailable === 'boolean') {
+      config.classroomAvailable = message.classroomAvailable;
+    }
+    // A broadcast leaves the field out; a module preview's own config carries
+    // an object, or null for any other document.
+    if (message.classroomModule === null) {
+      config.classroomModule = null;
+    } else if (
+      message.classroomModule &&
+      typeof message.classroomModule === 'object' &&
+      typeof message.classroomModule.id === 'string'
+    ) {
+      var module = message.classroomModule;
+      config.classroomModule = {
+        id: module.id,
+        title: typeof module.title === 'string' ? module.title : '',
+        status: typeof module.status === 'string' ? module.status : 'done',
+        chapters: Array.isArray(module.chapters) ? module.chapters : [],
+        documentTitle:
+          typeof module.documentTitle === 'string' ? module.documentTitle : '',
+        documentPath:
+          typeof module.documentPath === 'string' ? module.documentPath : '',
+        documentHeading:
+          typeof module.documentHeading === 'string'
+            ? module.documentHeading
+            : '',
+      };
+    }
+  }
+
+  /** The nearest heading before the passage's first block, by its `id`. */
+  function nearestHeadingId(els) {
+    if (!root || !els || !els.length) {
+      return null;
+    }
+    var first = els[0];
+    while (first && first.parentElement !== root) {
+      first = first.parentElement;
+    }
+    if (!first) {
+      return null;
+    }
+    var node = first.previousElementSibling;
+    while (node) {
+      if (/^H[1-6]$/.test(node.tagName) && node.id) {
+        return String(node.id).slice(0, 200);
+      }
+      node = node.previousElementSibling;
+    }
+    return null;
+  }
+
+  /** §5.4 step 1 — the help fields in `document` mode; the source is the host's. */
+  function classroomFieldsFrom(context) {
+    var fields = noteFieldsFrom(context);
+    fields.contextMode = 'document';
+    return fields;
+  }
+
+  function classroomDateText(iso) {
+    return noteDateText(iso);
+  }
+
+  function classroomMinutes(words) {
+    return Math.max(1, Math.round(words / CLASSROOM_WORDS_PER_MINUTE));
+  }
+
+  function makeField(labelText, control, className) {
+    var field = document.createElement('div');
+    field.className = 'mpe-ra-classroom-field ' + className;
+    var label = document.createElement('label');
+    label.className = 'mpe-ra-classroom-label';
+    label.textContent = labelText;
+    field.appendChild(label);
+    field.appendChild(control);
+    return field;
+  }
+
+  /** §5.2 — the Classroom sheet, in the help sheet's slot. */
+  function makeClassroomSheet() {
+    var sheet = document.createElement('div');
+    sheet.className = 'mpe-ra-ui mpe-ra-classroom';
+    sheet.setAttribute('role', 'dialog');
+    sheet.setAttribute('aria-label', 'Classroom');
+    sheet.setAttribute('tabindex', '-1');
+    sheet.hidden = true;
+
+    var head = document.createElement('div');
+    head.className = 'mpe-ra-classroom-head';
+    var title = document.createElement('span');
+    title.className = 'mpe-ra-classroom-title';
+    title.textContent = 'Classroom';
+    var details = document.createElement('span');
+    details.className = 'mpe-ra-note-details mpe-ra-classroom-details';
+    details.setAttribute('role', 'status');
+    details.setAttribute('aria-live', 'polite');
+    var close = makeIconButton(
+      'classroomClose',
+      'Close the classroom',
+      'mpe-ra-bar-btn mpe-ra-sheet-close',
+      'close',
+    );
+    head.appendChild(title);
+    head.appendChild(details);
+    head.appendChild(close);
+
+    var scroll = document.createElement('div');
+    scroll.className = 'mpe-ra-classroom-scroll';
+
+    var passage = document.createElement('div');
+    passage.className = 'mpe-ra-classroom-passage';
+    var path = document.createElement('div');
+    path.className = 'mpe-ra-classroom-path';
+    path.hidden = true;
+    var quote = document.createElement('div');
+    quote.className = 'mpe-ra-classroom-quote';
+    passage.appendChild(path);
+    passage.appendChild(quote);
+
+    var form = document.createElement('div');
+    form.className = 'mpe-ra-classroom-form';
+
+    var lever = document.createElement('div');
+    lever.className = 'mpe-ra-classroom-lever';
+    lever.setAttribute('role', 'radiogroup');
+    lever.setAttribute('aria-label', 'How lost are you?');
+    var rows = [];
+    for (var i = 0; i < CLASSROOM_LEVELS.length; i++) {
+      var row = makeButton(
+        'classroomLevel',
+        CLASSROOM_LEVELS[i].row,
+        'mpe-ra-lever-row',
+      );
+      row.textContent = CLASSROOM_LEVELS[i].row;
+      row.removeAttribute('title');
+      row.setAttribute('role', 'radio');
+      row.setAttribute('data-mpe-ra-level', String(CLASSROOM_LEVELS[i].level));
+      row.setAttribute('aria-checked', 'false');
+      lever.appendChild(row);
+      rows.push(row);
+    }
+
+    var note = document.createElement('input');
+    note.className = 'mpe-ra-ui mpe-ra-help-input mpe-ra-classroom-note';
+    note.type = 'text';
+    note.placeholder = CLASSROOM_NOTE_PLACEHOLDER;
+    note.setAttribute('maxlength', String(CLASSROOM_NOTE_MAX));
+    note.setAttribute('aria-label', 'In your own words, what is confusing?');
+
+    var persona = document.createElement('select');
+    persona.className =
+      'mpe-ra-ui mpe-ra-sheet-select mpe-ra-classroom-persona-select';
+    persona.setAttribute('aria-label', 'Instructor');
+
+    var audience = document.createElement('input');
+    audience.className =
+      'mpe-ra-ui mpe-ra-help-input mpe-ra-classroom-audience-input';
+    audience.type = 'text';
+    audience.setAttribute('maxlength', String(CLASSROOM_AUDIENCE_MAX));
+    audience.setAttribute('aria-label', 'Audience');
+
+    var engine = makeButton(
+      'helpModel',
+      'Change the help model',
+      'mpe-ra-help-model mpe-ra-classroom-engine',
+    );
+
+    var sending = document.createElement('div');
+    sending.className = 'mpe-ra-classroom-sending';
+    var sendingLine = document.createElement('p');
+    sendingLine.className = 'mpe-ra-classroom-sending-line';
+    var links = document.createElement('div');
+    links.className = 'mpe-ra-classroom-links';
+    sending.appendChild(sendingLine);
+    sending.appendChild(links);
+
+    var modules = document.createElement('div');
+    modules.className = 'mpe-ra-classroom-modules';
+    modules.hidden = true;
+    var modulesTitle = document.createElement('p');
+    modulesTitle.className = 'mpe-ra-classroom-modules-title';
+    modulesTitle.textContent = 'Modules for this document';
+    var moduleRows = document.createElement('div');
+    moduleRows.className = 'mpe-ra-classroom-module-rows';
+    moduleRows.setAttribute('role', 'list');
+    modules.appendChild(modulesTitle);
+    modules.appendChild(moduleRows);
+
+    form.appendChild(lever);
+    form.appendChild(
+      makeField('In your own words', note, 'mpe-ra-classroom-note-field'),
+    );
+    form.appendChild(
+      makeField('Instructor', persona, 'mpe-ra-classroom-persona'),
+    );
+    form.appendChild(
+      makeField('Audience', audience, 'mpe-ra-classroom-audience'),
+    );
+    form.appendChild(
+      makeField('Engine', engine, 'mpe-ra-classroom-engine-field'),
+    );
+    form.appendChild(sending);
+    form.appendChild(modules);
+
+    var card = document.createElement('div');
+    card.className = 'mpe-ra-classroom-card';
+    card.hidden = true;
+    var cardTitle = document.createElement('p');
+    cardTitle.className = 'mpe-ra-classroom-card-title';
+    var chapters = document.createElement('div');
+    chapters.className = 'mpe-ra-classroom-chapters';
+    chapters.setAttribute('role', 'list');
+    var elapsed = document.createElement('p');
+    elapsed.className = 'mpe-ra-classroom-elapsed';
+    elapsed.hidden = true;
+    var error = document.createElement('p');
+    error.className = 'mpe-ra-classroom-error';
+    error.setAttribute('role', 'alert');
+    error.hidden = true;
+    card.appendChild(cardTitle);
+    card.appendChild(chapters);
+    card.appendChild(elapsed);
+    card.appendChild(error);
+
+    scroll.appendChild(passage);
+    scroll.appendChild(form);
+    scroll.appendChild(card);
+
+    var footer = document.createElement('div');
+    footer.className = 'mpe-ra-classroom-footer';
+    var cancel = makeHelpButton(
+      'classroomCancel',
+      'Cancel',
+      'mpe-ra-help-action mpe-ra-classroom-cancel',
+    );
+    var open = makeHelpButton(
+      'classroomOpen',
+      'Open',
+      'mpe-ra-help-action mpe-ra-classroom-open',
+    );
+    var cont = makeHelpButton(
+      'classroomContinue',
+      'Continue',
+      'mpe-ra-help-action mpe-ra-classroom-continue',
+    );
+    var retry = makeHelpButton(
+      'classroomRetry',
+      'Retry',
+      'mpe-ra-help-action mpe-ra-classroom-retry',
+    );
+    var another = makeHelpButton(
+      'classroomAnother',
+      'Build another',
+      'mpe-ra-help-action mpe-ra-classroom-another',
+    );
+    var build = makeHelpButton(
+      'classroomBuild',
+      'Build',
+      'mpe-ra-help-action mpe-ra-classroom-build',
+    );
+    footer.appendChild(cancel);
+    footer.appendChild(open);
+    footer.appendChild(cont);
+    footer.appendChild(retry);
+    footer.appendChild(another);
+    footer.appendChild(build);
+
+    sheet.appendChild(head);
+    sheet.appendChild(scroll);
+    sheet.appendChild(footer);
+
+    return {
+      root: sheet,
+      details: details,
+      close: close,
+      scroll: scroll,
+      path: path,
+      quote: quote,
+      form: form,
+      lever: lever,
+      rows: rows,
+      note: note,
+      persona: persona,
+      audience: audience,
+      engine: engine,
+      sending: sending,
+      sendingLine: sendingLine,
+      links: links,
+      modules: modules,
+      moduleRows: moduleRows,
+      card: card,
+      cardTitle: cardTitle,
+      chapters: chapters,
+      elapsed: elapsed,
+      error: error,
+      footer: footer,
+      cancel: cancel,
+      open: open,
+      cont: cont,
+      retry: retry,
+      another: another,
+      build: build,
+    };
+  }
+
+  /** §12.2 — the Module sheet of a module preview. */
+  function makeModuleSheet() {
+    var sheet = document.createElement('div');
+    sheet.className = 'mpe-ra-ui mpe-ra-module';
+    sheet.setAttribute('role', 'dialog');
+    sheet.setAttribute('aria-label', 'This module');
+    sheet.setAttribute('tabindex', '-1');
+    sheet.hidden = true;
+
+    var head = document.createElement('div');
+    head.className = 'mpe-ra-module-head';
+    var title = document.createElement('span');
+    title.className = 'mpe-ra-module-title';
+    title.textContent = 'This module';
+    var details = document.createElement('span');
+    details.className = 'mpe-ra-note-details mpe-ra-module-details';
+    details.setAttribute('role', 'status');
+    details.setAttribute('aria-live', 'polite');
+    var close = makeIconButton(
+      'moduleClose',
+      'Close the module sheet',
+      'mpe-ra-bar-btn mpe-ra-sheet-close',
+      'close',
+    );
+    head.appendChild(title);
+    head.appendChild(details);
+    head.appendChild(close);
+
+    var from = document.createElement('p');
+    from.className = 'mpe-ra-module-from';
+    from.hidden = true;
+    var moduleTitle = document.createElement('p');
+    moduleTitle.className = 'mpe-ra-classroom-card-title mpe-ra-module-name';
+    var rows = document.createElement('div');
+    rows.className = 'mpe-ra-classroom-chapters mpe-ra-module-rows';
+    rows.setAttribute('role', 'list');
+    var error = document.createElement('p');
+    error.className = 'mpe-ra-classroom-error mpe-ra-module-error';
+    error.hidden = true;
+
+    var footer = document.createElement('div');
+    footer.className = 'mpe-ra-module-footer';
+    var cont = makeHelpButton(
+      'moduleContinue',
+      'Continue',
+      'mpe-ra-help-action mpe-ra-module-continue',
+    );
+    var cancel = makeHelpButton(
+      'moduleCancel',
+      'Cancel',
+      'mpe-ra-help-action mpe-ra-module-cancel',
+    );
+    var source = makeHelpButton(
+      'moduleOpenSource',
+      'Open the source passage',
+      'mpe-ra-help-action mpe-ra-module-source',
+    );
+    var folder = makeHelpButton(
+      'moduleOpenFolder',
+      'Open module folder',
+      'mpe-ra-help-action mpe-ra-module-folder',
+    );
+    footer.appendChild(cont);
+    footer.appendChild(cancel);
+    footer.appendChild(source);
+    footer.appendChild(folder);
+
+    sheet.appendChild(head);
+    sheet.appendChild(from);
+    sheet.appendChild(moduleTitle);
+    sheet.appendChild(rows);
+    sheet.appendChild(error);
+    sheet.appendChild(footer);
+    return {
+      root: sheet,
+      details: details,
+      close: close,
+      from: from,
+      name: moduleTitle,
+      rows: rows,
+      error: error,
+      cont: cont,
+      cancel: cancel,
+      source: source,
+      folder: folder,
+    };
+  }
+
+  // ----------------------------------------------------- the chapter rows
+
+  function chapterGlyphName(state) {
+    if (state.status === 'done') {
+      return state.flagged && state.flagged.length ? 'flag' : 'check';
+    }
+    if (state.status === 'writing') {
+      return 'loading';
+    }
+    if (state.status === 'failed') {
+      return 'warning';
+    }
+    return 'circle';
+  }
+
+  function chapterRowState(state) {
+    if (state.status === 'done' && state.flagged && state.flagged.length) {
+      return 'flagged';
+    }
+    return state.status || 'queued';
+  }
+
+  /** One row per planned chapter with its state glyph (§5.4, §12.2). */
+  function renderChapterRows(container, chapters) {
+    container.innerHTML = '';
+    for (var i = 0; i < chapters.length; i++) {
+      var state = chapters[i] || {};
+      var row = document.createElement('div');
+      row.className = 'mpe-ra-chapter-row';
+      row.setAttribute('role', 'listitem');
+      row.setAttribute('data-state', chapterRowState(state));
+      var glyph = document.createElement('span');
+      glyph.className = 'mpe-ra-chapter-glyph';
+      glyph.setAttribute('aria-hidden', 'true');
+      glyph.innerHTML = ICONS[chapterGlyphName(state)];
+      var text = document.createElement('span');
+      text.className = 'mpe-ra-chapter-title';
+      text.textContent = (state.n ? state.n + '. ' : '') + (state.title || '');
+      var stateText =
+        state.status === 'done'
+          ? state.flagged && state.flagged.length
+            ? 'done, flagged: ' + state.flagged.join(', ')
+            : 'done'
+          : state.status === 'writing'
+            ? 'being written'
+            : state.status === 'failed'
+              ? 'failed'
+              : 'queued';
+      row.setAttribute('title', stateText);
+      row.setAttribute('aria-label', text.textContent + ' (' + stateText + ')');
+      row.appendChild(glyph);
+      row.appendChild(text);
+      container.appendChild(row);
+    }
+  }
+
+  function progressElapsedSeconds() {
+    var progress = classroom.progress;
+    if (!progress) {
+      return 0;
+    }
+    var base = typeof progress.elapsedMs === 'number' ? progress.elapsedMs : 0;
+    return Math.max(
+      0,
+      Math.round((base + (Date.now() - classroom.progressAt)) / 1000),
+    );
+  }
+
+  function doneCount(chapters) {
+    var count = 0;
+    for (var i = 0; i < chapters.length; i++) {
+      if (chapters[i] && chapters[i].status === 'done') {
+        count++;
+      }
+    }
+    return count;
+  }
+
+  /** The details chip and the message line for one progress state (§5.2, §12.2). */
+  function progressChipText(progress) {
+    if (!progress) {
+      return '';
+    }
+    var chapters = Array.isArray(progress.chapters) ? progress.chapters : [];
+    var done = doneCount(chapters);
+    if (progress.status === 'queued') {
+      return 'Waiting: another module is being written';
+    }
+    if (progress.status === 'planning') {
+      return 'Planning the module…';
+    }
+    if (progress.status === 'writing') {
+      if (progress.chapter) {
+        return 'Writing chapter ' + progress.chapter + ' of ' + progress.of;
+      }
+      // Every chapter is done and the closing write is under way.
+      return chapters.length && done === chapters.length
+        ? 'Finishing the module…'
+        : 'Writing the module…';
+    }
+    if (progress.status === 'done') {
+      return (
+        'Ready · ' +
+        chapters.length +
+        ' chapters · about ' +
+        classroomMinutes(progress.words || 0) +
+        ' minutes'
+      );
+    }
+    if (progress.status === 'stopped') {
+      return 'Stopped after chapter ' + done;
+    }
+    if (progress.status === 'failed') {
+      return 'Failed: ' + (progress.error || 'the build did not finish');
+    }
+    return '';
+  }
+
+  // ------------------------------------------------------- the bar button
+
+  /** §12.2 — the module preview's button: the badge counts the chapters. */
+  function syncClassroomBar() {
+    if (!barParts || !barParts.classroomButton) {
+      return;
+    }
+    var button = barParts.classroomButton;
+    var module = config.classroomModule;
+    button.hidden = !module || !config.enabled;
+    if (!module) {
+      classroom.moduleOpen = false;
+      return;
+    }
+    var progress = classroom.moduleProgress;
+    var status = progress ? progress.status : module.status;
+    var chapters =
+      progress && Array.isArray(progress.chapters)
+        ? progress.chapters
+        : module.chapters;
+    var badge = barParts.classroomBadge;
+    badge.classList.remove('is-warning');
+    if (status === 'writing' || status === 'planning' || status === 'queued') {
+      // The chapter being written over the total (`3/6`), or the count done
+      // while nothing is being written yet.
+      var writing = null;
+      for (var w = 0; w < chapters.length; w++) {
+        if (chapters[w] && chapters[w].status === 'writing') {
+          writing = chapters[w];
+        }
+      }
+      badge.textContent =
+        (writing ? writing.n : doneCount(chapters)) + '/' + chapters.length;
+      badge.hidden = false;
+    } else if (status === 'stopped' || status === 'failed') {
+      badge.innerHTML = ICONS.warning;
+      badge.classList.add('is-warning');
+      badge.hidden = false;
+    } else {
+      badge.textContent = '';
+      badge.hidden = true;
+    }
+    button.classList.toggle('is-active', classroom.moduleOpen);
+    button.setAttribute(
+      'aria-expanded',
+      classroom.moduleOpen ? 'true' : 'false',
+    );
+    var label = classroom.moduleOpen
+      ? 'Close the module sheet'
+      : CLASSROOM_MODULE_TOOLTIP;
+    button.setAttribute('title', label);
+    button.setAttribute('aria-label', label);
+  }
+
+  // ---------------------------------------------------- the Classroom sheet
+
+  function classroomLinkedPaths() {
+    var prepared = classroom.prepared;
+    var out = [];
+    if (!prepared || !Array.isArray(prepared.linked)) {
+      return out;
+    }
+    for (var i = 0; i < prepared.linked.length; i++) {
+      var link = prepared.linked[i];
+      if (
+        link &&
+        typeof link.path === 'string' &&
+        !classroom.unticked[link.path]
+      ) {
+        out.push(link.path);
+      }
+    }
+    return out;
+  }
+
+  function renderClassroomForm(sheet) {
+    var prepared = classroom.prepared;
+    for (var i = 0; i < sheet.rows.length; i++) {
+      var level = Number(sheet.rows[i].getAttribute('data-mpe-ra-level'));
+      sheet.rows[i].setAttribute(
+        'aria-checked',
+        level === classroom.level ? 'true' : 'false',
+      );
+    }
+    if (sheet.note.value !== classroom.note) {
+      sheet.note.value = classroom.note;
+    }
+    // The instructor select: the installed personas, the configured one selected.
+    var personas =
+      prepared && Array.isArray(prepared.personas) ? prepared.personas : [];
+    var wanted =
+      classroom.personaId ||
+      (prepared && prepared.persona ? prepared.persona.id : '');
+    var key =
+      personas
+        .map(function (p) {
+          return p.id;
+        })
+        .join('|') +
+      '#' +
+      wanted;
+    if (sheet.persona.getAttribute('data-key') !== key) {
+      sheet.persona.innerHTML = '';
+      if (!personas.length) {
+        var placeholder = document.createElement('option');
+        placeholder.value = wanted || 'max';
+        placeholder.textContent = wanted ? wanted : 'Max';
+        sheet.persona.appendChild(placeholder);
+      }
+      for (var p = 0; p < personas.length; p++) {
+        var option = document.createElement('option');
+        option.value = personas[p].id;
+        option.textContent = personas[p].name || personas[p].id;
+        if (personas[p].tagline) {
+          option.setAttribute('title', personas[p].tagline);
+        }
+        option.selected = personas[p].id === wanted;
+        sheet.persona.appendChild(option);
+      }
+      sheet.persona.setAttribute('data-key', key);
+    }
+    if (sheet.audience.value !== classroom.audience) {
+      sheet.audience.value = classroom.audience;
+    }
+    var engineText =
+      prepared && prepared.engine
+        ? [
+            prepared.engine.engine,
+            prepared.engine.model,
+            prepared.engine.effort,
+          ]
+            .filter(function (part) {
+              return part && part !== 'n/a';
+            })
+            .join(' · ')
+        : helpLabelText();
+    sheet.engine.textContent = engineText;
+    sheet.engine.setAttribute('title', 'Help model: ' + engineText);
+    sheet.engine.setAttribute(
+      'aria-label',
+      'Help model: ' + engineText + '. Choose another.',
+    );
+
+    // Sending: one line, then a checkbox per linked document.
+    var linked =
+      prepared && Array.isArray(prepared.linked) ? prepared.linked : [];
+    if (!prepared) {
+      sheet.sendingLine.textContent = 'Preparing…';
+      sheet.sendingLine.classList.add('is-skeleton');
+      sheet.links.innerHTML = '';
+    } else {
+      sheet.sendingLine.classList.remove('is-skeleton');
+      var words =
+        typeof prepared.documentWords === 'number' ? prepared.documentWords : 0;
+      var engineName =
+        prepared.engine && prepared.engine.engine
+          ? prepared.engine.engine
+          : 'the engine';
+      var ticked = classroomLinkedPaths().length;
+      sheet.sendingLine.textContent =
+        'Sends this document (' +
+        words.toLocaleString() +
+        ' words)' +
+        (linked.length
+          ? ' and ' + ticked + ' linked document' + (ticked === 1 ? '' : 's')
+          : '') +
+        ' to ' +
+        engineName;
+      var linksKey = linked
+        .map(function (l) {
+          return l.path;
+        })
+        .join('|');
+      if (sheet.links.getAttribute('data-key') !== linksKey) {
+        sheet.links.innerHTML = '';
+        for (var l = 0; l < linked.length; l++) {
+          var link = linked[l];
+          var label = document.createElement('label');
+          label.className = 'mpe-ra-classroom-link';
+          var box = document.createElement('input');
+          box.className = 'mpe-ra-ui mpe-ra-classroom-link-box';
+          box.type = 'checkbox';
+          box.setAttribute('data-mpe-ra-path', link.path);
+          box.checked = !classroom.unticked[link.path];
+          box.addEventListener('change', onClassroomLinkToggle);
+          var text = document.createElement('span');
+          text.className = 'mpe-ra-classroom-link-text';
+          text.textContent =
+            (link.title || link.path) +
+            ' · ' +
+            link.path +
+            ' · ' +
+            (typeof link.words === 'number'
+              ? link.words.toLocaleString()
+              : '0') +
+            ' words';
+          label.appendChild(box);
+          label.appendChild(text);
+          sheet.links.appendChild(label);
+        }
+        sheet.links.setAttribute('data-key', linksKey);
+      }
+    }
+
+    // Modules for this document.
+    var modules =
+      prepared && Array.isArray(prepared.modules) ? prepared.modules : [];
+    sheet.modules.hidden = modules.length === 0;
+    var modulesKey = modules
+      .map(function (m) {
+        return m.id + ':' + m.status + ':' + m.done;
+      })
+      .join('|');
+    if (sheet.moduleRows.getAttribute('data-key') !== modulesKey) {
+      sheet.moduleRows.innerHTML = '';
+      for (var m = 0; m < modules.length; m++) {
+        var summary = modules[m];
+        var row = document.createElement('div');
+        row.className = 'mpe-ra-classroom-module-row';
+        row.setAttribute('role', 'listitem');
+        var titleText = document.createElement('span');
+        titleText.className = 'mpe-ra-classroom-module-title';
+        titleText.textContent = summary.title || 'Module';
+        var meta = document.createElement('span');
+        meta.className = 'mpe-ra-classroom-module-meta';
+        var metaParts = [];
+        var date = classroomDateText(summary.created);
+        if (date) {
+          metaParts.push(date);
+        }
+        metaParts.push(
+          summary.chapters + ' chapter' + (summary.chapters === 1 ? '' : 's'),
+        );
+        meta.textContent = metaParts.join(' · ');
+        var badge = document.createElement('span');
+        badge.className = 'mpe-ra-notes-badge mpe-ra-classroom-status';
+        badge.textContent = summary.status;
+        var openButton = makeHelpButton(
+          'classroomOpenModule',
+          'Open',
+          'mpe-ra-help-action mpe-ra-classroom-open-module',
+        );
+        openButton.setAttribute('data-mpe-ra-module', summary.id);
+        row.appendChild(titleText);
+        row.appendChild(meta);
+        row.appendChild(badge);
+        row.appendChild(openButton);
+        sheet.moduleRows.appendChild(row);
+      }
+      sheet.moduleRows.setAttribute('data-key', modulesKey);
+    }
+  }
+
+  function renderClassroomCard(sheet) {
+    var progress = classroom.progress;
+    var chapters =
+      progress && Array.isArray(progress.chapters) ? progress.chapters : [];
+    sheet.cardTitle.textContent =
+      progress && progress.title ? progress.title : '';
+    sheet.cardTitle.hidden = !sheet.cardTitle.textContent;
+    renderChapterRows(sheet.chapters, chapters);
+    var live =
+      progress &&
+      (progress.status === 'writing' ||
+        progress.status === 'planning' ||
+        progress.status === 'queued');
+    if (live) {
+      sheet.elapsed.textContent =
+        progressElapsedSeconds() +
+        ' s' +
+        (progress.status === 'writing' && progress.chapterTitle
+          ? ' · ' + progress.chapterTitle
+          : '');
+      sheet.elapsed.hidden = false;
+    } else {
+      sheet.elapsed.hidden = true;
+    }
+    var failed = progress && progress.status === 'failed';
+    sheet.error.textContent = failed
+      ? 'Failed: ' + (progress.error || 'the build did not finish')
+      : classroom.state === 'error'
+        ? classroom.message
+        : '';
+    sheet.error.hidden = !sheet.error.textContent;
+  }
+
+  /** §5.2 — render the sheet from its state; nothing is diffed. */
+  function syncClassroomSheet() {
+    if (!barParts || !barParts.classroom) {
+      return;
+    }
+    var sheet = barParts.classroom;
+    if (!classroom.open) {
+      stopClassroomTicker();
+      return;
+    }
+    var state = classroom.state;
+    var progress = classroom.progress;
+    var prepared = classroom.prepared;
+
+    // The passage, under its heading path.
+    var context = classroom.context;
+    var crumbs =
+      context && Array.isArray(context.breadcrumb) ? context.breadcrumb : [];
+    sheet.path.textContent = crumbs.join(' › ');
+    sheet.path.hidden = crumbs.length === 0;
+    var text = classroom.passage ? String(classroom.passage.text || '') : '';
+    var flat = text.replace(/\s+/g, ' ').trim();
+    sheet.quote.textContent =
+      flat.length > CLASSROOM_PASSAGE_CHARS
+        ? flat.slice(0, CLASSROOM_PASSAGE_CHARS).replace(/\s+\S*$/, '') + '…'
+        : flat;
+
+    // The details chip.
+    var chip = '';
+    var chipError = false;
+    if (state === 'preparing') {
+      chip = 'Preparing…';
+    } else if (state === 'ready') {
+      chip = prepared
+        ? 'This document · ' +
+          (typeof prepared.documentWords === 'number'
+            ? prepared.documentWords.toLocaleString()
+            : '0') +
+          ' words'
+        : '';
+    } else if (state === 'error') {
+      chip = classroom.message || 'Something went wrong';
+      chipError = true;
+    } else {
+      chip = progressChipText(progress);
+      chipError =
+        !!progress &&
+        (progress.status === 'failed' || progress.status === 'stopped');
+    }
+    sheet.details.textContent = chip;
+    sheet.details.classList.toggle('is-error', chipError);
+
+    var showForm = state === 'preparing' || state === 'ready';
+    sheet.form.hidden = !showForm;
+    sheet.card.hidden = showForm;
+    if (showForm) {
+      renderClassroomForm(sheet);
+    } else {
+      renderClassroomCard(sheet);
+    }
+
+    // The footer, by state.
+    var status = progress ? progress.status : '';
+    var live =
+      status === 'writing' || status === 'planning' || status === 'queued';
+    var hasChapter = !!(progress && progress.hasChapter);
+    sheet.build.hidden = !showForm;
+    setEnabled(sheet.build, state === 'ready');
+    sheet.build.setAttribute(
+      'title',
+      state === 'ready' ? 'Build the module' : 'Preparing',
+    );
+    sheet.cancel.hidden = !(state === 'building' && live);
+    sheet.open.hidden = !(
+      (state === 'building' && hasChapter) ||
+      (state === 'done' && progress)
+    );
+    sheet.cont.hidden = !(
+      state === 'building' &&
+      (status === 'stopped' || status === 'failed')
+    );
+    sheet.retry.hidden = state !== 'error';
+    sheet.another.hidden = !(
+      state === 'done' ||
+      state === 'error' ||
+      (state === 'building' && (status === 'stopped' || status === 'failed'))
+    );
+
+    if (state === 'building' && live) {
+      startClassroomTicker();
+    } else {
+      stopClassroomTicker();
+    }
+  }
+
+  function startClassroomTicker() {
+    if (classroom.timer) {
+      return;
+    }
+    classroom.timer = setInterval(function () {
+      if (!classroom.open || classroom.state !== 'building') {
+        stopClassroomTicker();
+        return;
+      }
+      if (
+        barParts &&
+        barParts.classroom &&
+        !barParts.classroom.elapsed.hidden
+      ) {
+        barParts.classroom.elapsed.textContent =
+          progressElapsedSeconds() +
+          ' s' +
+          (classroom.progress &&
+          classroom.progress.status === 'writing' &&
+          classroom.progress.chapterTitle
+            ? ' · ' + classroom.progress.chapterTitle
+            : '');
+      }
+    }, CLASSROOM_TICK_MS);
+  }
+
+  function stopClassroomTicker() {
+    if (classroom.timer) {
+      clearInterval(classroom.timer);
+      classroom.timer = 0;
+    }
+  }
+
+  function onClassroomLinkToggle(event) {
+    var box = event.target;
+    var linkPath =
+      box && box.getAttribute ? box.getAttribute('data-mpe-ra-path') : null;
+    if (!linkPath) {
+      return;
+    }
+    if (box.checked) {
+      delete classroom.unticked[linkPath];
+    } else {
+      classroom.unticked[linkPath] = true;
+    }
+    syncClassroomSheet();
+  }
+
+  function focusClassroomSheet() {
+    if (!barParts || !barParts.classroom) {
+      return;
+    }
+    try {
+      barParts.classroom.root.focus();
+    } catch (error) {
+      /* jsdom and detached nodes */
+    }
+  }
+
+  function toggleClassroom() {
+    if (classroom.open) {
+      closeClassroom('button');
+      return;
+    }
+    openClassroom(null, '', null);
+  }
+
+  /**
+   * §5.1–§5.3 — open the sheet for the passage: the live selection or the
+   * one handed over by the help sheet; post Prepare at once.
+   */
+  function openClassroom(passageOverride, prefillNote, opener) {
+    if (!config.enabled || !config.classroomAvailable) {
+      return;
+    }
+    var passage = passageOverride || helpPassage();
+    if (!passage) {
+      showHint(
+        CLASSROOM_HINT_NO_SELECTION,
+        currentSelectionRect() || floatRect,
+      );
+      return;
+    }
+    ensureBar();
+    var context =
+      passageOverride && passageOverride.context
+        ? passageOverride.context
+        : buildHelpContextFor(passage);
+    var anchor =
+      passageOverride && passageOverride.anchor
+        ? passageOverride.anchor
+        : noteAnchorForPassage(passage);
+    if (!anchor) {
+      showHint(
+        CLASSROOM_HINT_NO_SELECTION,
+        currentSelectionRect() || floatRect,
+      );
+      return;
+    }
+    panelDismissed = false;
+    closePopovers();
+    hideFloat();
+    closeHelp('classroom');
+    closeNote('classroom');
+    closeNotesList('classroom');
+    closeModuleSheet('classroom');
+
+    classroom.open = true;
+    classroom.state = 'preparing';
+    classroom.passage = {
+      text: passage.text,
+      els: passage.els ? passage.els.slice() : [],
+    };
+    classroom.context = context;
+    classroom.anchor = anchor;
+    classroom.headingId = nearestHeadingId(passage.els);
+    classroom.prepared = null;
+    classroom.progress = null;
+    classroom.moduleId = null;
+    classroom.level = CLASSROOM_DEFAULT_LEVEL;
+    classroom.note = (prefillNote || '').slice(0, CLASSROOM_NOTE_MAX);
+    classroom.personaId = '';
+    classroom.audience = '';
+    classroom.unticked = Object.create(null);
+    classroom.message = '';
+    classroom.opener = opener || null;
+    classroom.requestId = nextRequestId();
+    barParts.classroom.root.hidden = false;
+    barParts.classroom.persona.removeAttribute('data-key');
+    barParts.classroom.links.removeAttribute('data-key');
+    barParts.classroom.moduleRows.removeAttribute('data-key');
+    applyThemeAttributes();
+    syncClassroomSheet();
+    syncHelpButton();
+    showBar('');
+    post('readAloudClassroomPrepare', [
+      sourceUri,
+      classroom.requestId,
+      classroomFieldsFrom(context),
+    ]);
+    focusClassroomSheet();
+  }
+
+  /** §5.5 — _Teach me this_: the help passage, its material and its anchor. */
+  function openClassroomFromHelp() {
+    if (!config.classroomAvailable || help.state !== 'ready' || !help.context) {
+      return;
+    }
+    var override = {
+      text: help.context.passage,
+      els: [],
+      context: help.context,
+      anchor: help.anchor,
+    };
+    var question = help.question || (help.last && help.last.question) || '';
+    closeHelp('classroom');
+    openClassroom(override, question, null);
+  }
+
+  /** §5.4 step 6 — closing never cancels a build. */
+  function closeClassroom(reason) {
+    if (!classroom.open) {
+      return;
+    }
+    stopClassroomTicker();
+    var opener = classroom.opener;
+    classroom.open = false;
+    classroom.opener = null;
+    classroom.requestId = null;
+    if (barParts && barParts.classroom) {
+      barParts.classroom.root.hidden = true;
+    }
+    syncHelpButton();
+    armPanelIdle();
+    if (reason !== 'help' && reason !== 'note' && reason !== 'notes list') {
+      var target = opener && opener.isConnected ? opener : null;
+      if (target) {
+        try {
+          target.focus();
+        } catch (error) {
+          /* the panel may be going away */
+        }
+      }
+    }
+  }
+
+  /** §5.4 step 1 — the Build payload. */
+  function buildClassroom() {
+    if (
+      !classroom.open ||
+      classroom.state !== 'ready' ||
+      !classroom.passage ||
+      !classroom.context ||
+      !classroom.anchor
+    ) {
+      return;
+    }
+    var prepared = classroom.prepared;
+    var personaId =
+      classroom.personaId ||
+      (prepared && prepared.persona && prepared.persona.id) ||
+      'max';
+    var requestId = nextRequestId();
+    classroom.requestId = requestId;
+    classroom.state = 'building';
+    classroom.progress = null;
+    classroom.progressAt = Date.now();
+    classroom.moduleId = null;
+    classroom.message = '';
+    post('readAloudClassroomBuild', [
+      sourceUri,
+      requestId,
+      classroom.passage.text,
+      classroomFieldsFrom(classroom.context),
+      classroom.anchor,
+      {
+        level: classroom.level,
+        readerNote: classroom.note.slice(0, CLASSROOM_NOTE_MAX),
+        persona: personaId,
+        audience: classroom.audience.slice(0, CLASSROOM_AUDIENCE_MAX),
+        linked: classroomLinkedPaths(),
+        headingId: classroom.headingId,
+      },
+    ]);
+    syncClassroomSheet();
+  }
+
+  function cancelClassroomBuild(reason) {
+    if (classroom.moduleId) {
+      post('readAloudClassroomCancel', [
+        sourceUri,
+        classroom.moduleId,
+        reason || 'sheet',
+      ]);
+    }
+  }
+
+  function classroomBuildAnother() {
+    classroom.state = classroom.prepared ? 'ready' : 'preparing';
+    classroom.progress = null;
+    classroom.moduleId = null;
+    classroom.message = '';
+    if (!classroom.prepared && classroom.context) {
+      classroom.requestId = nextRequestId();
+      post('readAloudClassroomPrepare', [
+        sourceUri,
+        classroom.requestId,
+        classroomFieldsFrom(classroom.context),
+      ]);
+    }
+    syncClassroomSheet();
+  }
+
+  // -------------------------------------------------------- the Module sheet
+
+  function toggleModuleSheet() {
+    if (!config.classroomModule) {
+      showHint(CLASSROOM_NOT_MODULE_HINT, null);
+      return;
+    }
+    if (classroom.moduleOpen) {
+      closeModuleSheet('button');
+      return;
+    }
+    openModuleSheet(
+      barParts && barParts.classroomButton ? barParts.classroomButton : null,
+    );
+  }
+
+  function openModuleSheet(opener) {
+    if (!config.enabled || !config.classroomModule) {
+      return;
+    }
+    ensureBar();
+    closePopovers();
+    closeHelp('module');
+    closeNote('module');
+    closeNotesList('module');
+    closeClassroom('module');
+    hideFloat();
+    panelDismissed = false;
+    classroom.moduleOpen = true;
+    classroom.moduleOpener = opener || null;
+    barParts.module.root.hidden = false;
+    syncModuleSheet();
+    syncClassroomBar();
+    syncHelpButton();
+    showBar(barParts.status.textContent);
+    try {
+      barParts.module.root.focus();
+    } catch (error) {
+      /* jsdom and detached nodes */
+    }
+  }
+
+  function closeModuleSheet(reason) {
+    if (!classroom.moduleOpen) {
+      return;
+    }
+    var opener = classroom.moduleOpener;
+    classroom.moduleOpen = false;
+    classroom.moduleOpener = null;
+    if (barParts && barParts.module) {
+      barParts.module.root.hidden = true;
+    }
+    syncClassroomBar();
+    syncHelpButton();
+    armPanelIdle();
+    if (
+      reason !== 'help' &&
+      reason !== 'note' &&
+      reason !== 'notes list' &&
+      reason !== 'classroom'
+    ) {
+      var target =
+        opener && opener.isConnected
+          ? opener
+          : barParts &&
+              barParts.classroomButton &&
+              !barParts.classroomButton.hidden
+            ? barParts.classroomButton
+            : null;
+      if (target) {
+        try {
+          target.focus();
+        } catch (error) {
+          /* the panel may be going away */
+        }
+      }
+    }
+  }
+
+  /** §12.2 — the Module sheet from the config and the last progress. */
+  function syncModuleSheet() {
+    if (!barParts || !barParts.module) {
+      return;
+    }
+    var sheet = barParts.module;
+    var module = config.classroomModule;
+    if (!module) {
+      if (classroom.moduleOpen) {
+        closeModuleSheet('not a module');
+      }
+      return;
+    }
+    if (!classroom.moduleOpen) {
+      return;
+    }
+    var progress = classroom.moduleProgress;
+    var status = progress ? progress.status : module.status;
+    var chapters =
+      progress && Array.isArray(progress.chapters)
+        ? progress.chapters
+        : module.chapters;
+    var words =
+      progress && typeof progress.words === 'number' ? progress.words : 0;
+    var chip;
+    if (progress) {
+      chip = progressChipText(progress);
+    } else if (status === 'done') {
+      chip =
+        'Ready · ' +
+        chapters.length +
+        ' chapters' +
+        (words ? ' · about ' + classroomMinutes(words) + ' minutes' : '');
+    } else if (status === 'stopped') {
+      chip = 'Stopped after chapter ' + doneCount(chapters);
+    } else if (status === 'failed') {
+      chip = 'Failed';
+    } else {
+      chip =
+        'Writing chapter ' +
+        (doneCount(chapters) + 1) +
+        ' of ' +
+        chapters.length;
+    }
+    sheet.details.textContent = chip;
+    sheet.details.classList.toggle(
+      'is-error',
+      status === 'stopped' || status === 'failed',
+    );
+    var from = module.documentTitle
+      ? 'From "' +
+        module.documentTitle +
+        '"' +
+        (module.documentHeading
+          ? ', under "' + module.documentHeading + '"'
+          : '')
+      : module.documentPath
+        ? 'From ' + module.documentPath
+        : '';
+    sheet.from.textContent = from;
+    sheet.from.hidden = !from;
+    sheet.name.textContent = (progress && progress.title) || module.title || '';
+    renderChapterRows(sheet.rows, chapters);
+    var error = progress && progress.status === 'failed' ? progress.error : '';
+    sheet.error.textContent = error ? 'Failed: ' + error : '';
+    sheet.error.hidden = !error;
+    var live =
+      status === 'writing' || status === 'planning' || status === 'queued';
+    sheet.cont.hidden = !(status === 'stopped' || status === 'failed');
+    sheet.cancel.hidden = !live;
+  }
+
+  // ------------------------------------------------------ host -> classroom
+
+  function onClassroomPrepared(message) {
+    if (!classroom.open || message.requestId !== classroom.requestId) {
+      return;
+    }
+    classroom.prepared = {
+      persona: message.persona || null,
+      personas: Array.isArray(message.personas) ? message.personas : [],
+      audience: typeof message.audience === 'string' ? message.audience : '',
+      documentWords:
+        typeof message.documentWords === 'number' ? message.documentWords : 0,
+      linked: Array.isArray(message.linked) ? message.linked : [],
+      modules: Array.isArray(message.modules) ? message.modules : [],
+      engine: message.engine || null,
+    };
+    if (!classroom.personaId && message.persona && message.persona.id) {
+      classroom.personaId = message.persona.id;
+    }
+    if (!classroom.audience) {
+      classroom.audience = classroom.prepared.audience.slice(
+        0,
+        CLASSROOM_AUDIENCE_MAX,
+      );
+    }
+    if (message.building && typeof message.building === 'object') {
+      // A build is running for this document: show its card again (§5.4 step 6).
+      classroom.state = 'building';
+      classroom.progress = message.building;
+      classroom.progressAt = Date.now();
+      classroom.moduleId = message.building.moduleId || null;
+    } else if (classroom.state === 'preparing') {
+      classroom.state = 'ready';
+    }
+    syncClassroomSheet();
+  }
+
+  /** §5.4 step 3, §12.2 — the whole state, for the sheet and for the module preview. */
+  function onClassroomProgress(message) {
+    if (!message || typeof message.moduleId !== 'string') {
+      return;
+    }
+    var mine =
+      typeof message.documentUri === 'string' &&
+      sourceUri &&
+      message.documentUri === sourceUri;
+    if (mine) {
+      var tracking =
+        classroom.moduleId === message.moduleId ||
+        (classroom.state === 'building' && classroom.moduleId === null);
+      if (tracking) {
+        classroom.moduleId = message.moduleId;
+        classroom.progress = message;
+        classroom.progressAt = Date.now();
+        if (message.status === 'done') {
+          classroom.state = 'done';
+        } else {
+          classroom.state = 'building';
+        }
+        syncClassroomSheet();
+      } else if (classroom.open && classroom.state === 'ready') {
+        // Another module of this document finished or moved: the rows will
+        // refresh on the next Prepare; nothing to do now.
+      }
+    }
+    var module = config.classroomModule;
+    if (module && module.id === message.moduleId) {
+      classroom.moduleProgress = message;
+      config.classroomModule.status = message.status;
+      if (Array.isArray(message.chapters)) {
+        config.classroomModule.chapters = message.chapters;
+      }
+      if (typeof message.title === 'string' && message.title) {
+        config.classroomModule.title = message.title;
+      }
+      syncClassroomBar();
+      syncModuleSheet();
+      // The message line (§12.2): in the status slot's existing style.
+      if (message.status === 'writing' && message.chapter) {
+        showBar(
+          'Chapter ' +
+            message.chapter +
+            ' of ' +
+            message.of +
+            ' is being written',
+        );
+      } else if (message.status === 'planning') {
+        showBar('Planning the module…');
+      } else if (message.status === 'stopped') {
+        showBar(
+          'Stopped after chapter ' +
+            doneCount(message.chapters || []) +
+            ' · Continue in the module sheet',
+        );
+      } else if (message.status === 'failed') {
+        showBar('Failed: ' + (message.error || 'the build did not finish'));
+      } else if (message.status === 'done' && record.state === 'idle') {
+        showBar('');
+      }
+    }
+  }
+
+  function onClassroomError(message) {
+    var text =
+      typeof message.message === 'string' && message.message
+        ? message.message
+        : 'The classroom could not be built.';
+    if (
+      classroom.open &&
+      typeof message.requestId === 'string' &&
+      message.requestId === classroom.requestId
+    ) {
+      classroom.state = 'error';
+      classroom.message = text;
+      syncClassroomSheet();
+      showBar(text);
+      return;
+    }
+    if (
+      classroom.open &&
+      classroom.moduleId &&
+      message.moduleId === classroom.moduleId
+    ) {
+      // The progress message carries the failure; the chip is enough.
+      showBar(text);
+      return;
+    }
+    showNoteChip(text, NOTE_ERROR_CHIP_MS, null);
+  }
+
+  // --------------------------------------------------------- the reveal
+
+  function flashBlock(el) {
+    if (!el || !el.classList) {
+      return;
+    }
+    classroom.flashTimer = clearTimer(classroom.flashTimer);
+    mutateSilently(function () {
+      el.classList.add('mpe-ra-flash');
+    });
+    classroom.flashTimer = setTimeout(function () {
+      classroom.flashTimer = 0;
+      mutateSilently(function () {
+        el.classList.remove('mpe-ra-flash');
+      });
+    }, CLASSROOM_FLASH_MS);
+  }
+
+  /** §12.4 — _Open the source passage_: anchor, centre, flash; or the chip. */
+  function revealAnchor(message) {
+    if (
+      !root ||
+      !message ||
+      !message.anchor ||
+      typeof message.anchor !== 'object'
+    ) {
+      return;
+    }
+    var found = null;
+    try {
+      var results = core.anchorNotes(root, [
+        {
+          id:
+            typeof message.moduleId === 'string' ? message.moduleId : 'module',
+          anchor: message.anchor,
+        },
+      ]);
+      found = results && results.length ? results[0] : null;
+    } catch (error) {
+      found = null;
+    }
+    if (found && found.found && found.el) {
+      scrollBlockIntoView(found.el);
+      flashBlock(found.el);
+      return;
+    }
+    showNoteChip(CLASSROOM_ANCHOR_MISSING, NOTE_CHIP_MS, null);
+  }
+
+  // ------------------------------------------------------------- actions
+
+  function handleClassroomAction(action, element) {
+    if (action === 'floatClassroom') {
+      openClassroom(null, '', element || null);
+      return true;
+    }
+    if (action === 'classroomClose') {
+      closeClassroom('close');
+      return true;
+    }
+    if (action === 'classroomLevel') {
+      var level = element
+        ? Number(element.getAttribute('data-mpe-ra-level'))
+        : 0;
+      if (level === 1 || level === 2 || level === 3) {
+        classroom.level = level;
+        syncClassroomSheet();
+      }
+      return true;
+    }
+    if (action === 'classroomBuild') {
+      buildClassroom();
+      return true;
+    }
+    if (action === 'classroomCancel') {
+      cancelClassroomBuild('sheet');
+      return true;
+    }
+    if (action === 'classroomOpen') {
+      if (classroom.moduleId) {
+        post('readAloudClassroomOpen', [sourceUri, classroom.moduleId]);
+      }
+      return true;
+    }
+    if (action === 'classroomOpenModule') {
+      var id = element ? element.getAttribute('data-mpe-ra-module') : null;
+      if (id) {
+        post('readAloudClassroomOpen', [sourceUri, id]);
+      }
+      return true;
+    }
+    if (action === 'classroomContinue') {
+      if (classroom.moduleId) {
+        post('readAloudClassroomContinue', [sourceUri, classroom.moduleId]);
+      }
+      return true;
+    }
+    if (action === 'classroomRetry') {
+      classroom.state = 'ready';
+      classroom.message = '';
+      if (!classroom.prepared) {
+        classroom.state = 'preparing';
+        classroom.requestId = nextRequestId();
+        post('readAloudClassroomPrepare', [
+          sourceUri,
+          classroom.requestId,
+          classroomFieldsFrom(classroom.context),
+        ]);
+        syncClassroomSheet();
+        return true;
+      }
+      buildClassroom();
+      return true;
+    }
+    if (action === 'classroomAnother') {
+      classroomBuildAnother();
+      return true;
+    }
+    if (action === 'classroomModule') {
+      closePopovers();
+      toggleModuleSheet();
+      return true;
+    }
+    if (action === 'moduleClose') {
+      closeModuleSheet('close');
+      return true;
+    }
+    if (action === 'moduleContinue') {
+      if (config.classroomModule) {
+        post('readAloudClassroomContinue', [
+          sourceUri,
+          config.classroomModule.id,
+        ]);
+      }
+      return true;
+    }
+    if (action === 'moduleCancel') {
+      if (config.classroomModule) {
+        post('readAloudClassroomCancel', [
+          sourceUri,
+          config.classroomModule.id,
+          'module sheet',
+        ]);
+      }
+      return true;
+    }
+    if (action === 'moduleOpenSource') {
+      if (config.classroomModule) {
+        post('readAloudClassroomOpenSource', [
+          sourceUri,
+          config.classroomModule.id,
+        ]);
+      }
+      return true;
+    }
+    if (action === 'moduleOpenFolder') {
+      post('readAloudClassroomOpenFolder', [sourceUri]);
+      return true;
+    }
+    return false;
   }
 
   // ---------------------------------------------------------------------------
@@ -5543,6 +9594,10 @@
     }
     // A model or effort change re-labels an open sheet at once (§7.1).
     applyHelpConfig(message);
+    var decorationBefore = config.notesDecoration;
+    var notesBefore = config.notesAvailable;
+    applyNotesConfig(message);
+    applyClassroomConfig(message);
     if (typeof message.speed === 'number') {
       var incoming = normaliseRate(message.speed);
       if (incoming !== rate) {
@@ -5563,6 +9618,8 @@
       errorTimer = clearTimer(errorTimer);
       clearTransientError();
       closeHelp('read aloud disabled');
+      closeClassroom('read aloud disabled');
+      closeModuleSheet('read aloud disabled');
       removeDecorations();
       dismissBar();
       hideFloat();
@@ -5570,6 +9627,14 @@
     }
     if (!config.helpAvailable && help.open) {
       closeHelp('help unavailable');
+    }
+    if (!config.notesAvailable) {
+      closeNote('notes unavailable');
+      closeNotesList('notes unavailable');
+    }
+    if (!config.classroomAvailable) {
+      closeClassroom('classroom unavailable');
+      closeModuleSheet('classroom unavailable');
     }
     if (!wasEnabled) {
       decorate();
@@ -5581,15 +9646,27 @@
     // Dimming or the page may have changed mid-read (07 §8.4), and the
     // auto-hide may have been switched (07 §10).
     applyTiers();
+    if (
+      decorationBefore !== config.notesDecoration ||
+      notesBefore !== config.notesAvailable
+    ) {
+      anchorPass();
+    }
     armPanelIdle();
     syncSpeedControls();
     syncVolumeControls();
     syncSheet();
     syncHelpSheet();
     syncHelpButton();
+    syncNotesBar();
+    syncNoteSheet();
+    syncNotesList();
+    syncClassroomBar();
+    syncClassroomSheet();
+    syncModuleSheet();
   }
 
-  function handleControl(action) {
+  function handleControl(action, message) {
     if (!config.enabled) {
       return;
     }
@@ -5608,6 +9685,34 @@
     // §2 — `Alt+H`, the same thing the panel's ? button does.
     if (action === 'help') {
       toggleHelp();
+      return;
+    }
+    // 12 §5.1, §12, §13.1 — `Alt+N`, `Alt+Shift+N`, Reveal in preview.
+    if (action === 'note') {
+      saveNoteFromSelection();
+      return;
+    }
+    if (action === 'notesList') {
+      toggleNotesList();
+      return;
+    }
+    if (action === 'showNote') {
+      if (message && typeof message.noteId === 'string') {
+        openNote(message.noteId, null);
+      }
+      return;
+    }
+    // 13 §5.1, §12.2, §12.4 — `Alt+C`, `Alt+Shift+C`, Open the source passage.
+    if (action === 'classroom') {
+      toggleClassroom();
+      return;
+    }
+    if (action === 'classroomModule') {
+      toggleModuleSheet();
+      return;
+    }
+    if (action === 'revealAnchor') {
+      revealAnchor(message);
     }
   }
 
@@ -5626,7 +9731,22 @@
         applyConfig(message);
         return;
       case 'readAloudControl':
-        handleControl(message.action);
+        handleControl(message.action, message);
+        return;
+      case 'readAloudNotes':
+        onNotesMessage(message);
+        return;
+      case 'readAloudNoteError':
+        onNoteError(message);
+        return;
+      case 'readAloudClassroomPrepared':
+        onClassroomPrepared(message);
+        return;
+      case 'readAloudClassroomProgress':
+        onClassroomProgress(message);
+        return;
+      case 'readAloudClassroomError':
+        onClassroomError(message);
         return;
       case 'readAloudAudio':
         if (matchesRecord(message)) {
@@ -5675,7 +9795,11 @@
     // (04-help-module §5). It sits inside the panel, which is `.mpe-ra-ui`,
     // so it has to be recognised before the chrome branch below.
     var sheetBody = helpBody();
-    if (sheetBody && sheetBody.contains(element)) {
+    var noteSheetBody = noteBody();
+    if (
+      (sheetBody && sheetBody.contains(element)) ||
+      (noteSheetBody && noteSheetBody.contains(element))
+    ) {
       event.stopPropagation();
       closePopovers();
       hideFloat();
@@ -5693,6 +9817,13 @@
         hideFloat();
       }
       closePopovers();
+      // 12 §11.7 — a click on marked words opens the note, not a read.
+      var notedId = selectionIsLive() ? null : noteAtPoint(event);
+      if (notedId) {
+        cancelPendingClickRead();
+        openNote(notedId, null);
+        return;
+      }
       maybeClickToRead(event, element);
       return;
     }
@@ -5808,12 +9939,19 @@
     if (core.playerFontStack(config.font)) {
       wanted.push('mpe-ra-font');
     }
+    var gutter = notes.anyFound && config.notesDecoration !== 'none';
+    if (gutter) {
+      wanted.push('mpe-ra-notes-gutter');
+    }
     for (var i = 0; i < wanted.length; i++) {
       if (!root.classList.contains(wanted[i])) {
         applyClickClass();
         applyCanvasClasses();
         applyFontToRoot();
         applyGutter();
+        if (gutter) {
+          root.classList.add('mpe-ra-notes-gutter');
+        }
         return;
       }
     }
@@ -5859,7 +9997,9 @@
         if (
           element &&
           element.closest &&
-          element.closest('.mpe-ra-float, .mpe-ra-bar-help')
+          element.closest(
+            '.mpe-ra-float, .mpe-ra-bar-help, .mpe-ra-bar-notes, .mpe-ra-note-reattach',
+          )
         ) {
           // Keep the selection alive until the click handler reads it. The
           // help button needs this for the same reason the float does: a
@@ -5897,7 +10037,11 @@
         // A scroll of the help sheet body (07 §7.6) does not bubble, but it
         // is seen here in the capture phase.
         var target = event.target;
-        if (target && target.nodeType === 1 && target === helpBody()) {
+        if (
+          target &&
+          target.nodeType === 1 &&
+          (target === helpBody() || target === noteScrollBox())
+        ) {
           onContainerScroll(target);
           // A selection inside the sheet is the one case where a scroll does
           // move the affordance relative to its text (09 §9).
@@ -5906,6 +10050,8 @@
       },
       true,
     );
+    // The markers follow their line boxes when the pane is resized (12 §10.1).
+    window.addEventListener('resize', scheduleMarkerLayout, { passive: true });
     window.addEventListener(
       'keydown',
       function (event) {

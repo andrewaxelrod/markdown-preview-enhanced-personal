@@ -65,6 +65,9 @@ const nativeConfig = {
   target: 'node16',
   format: 'cjs',
   external: ['vscode'],
+  // Classroom personas (src/classroom/personas/*/persona.md) are imported as
+  // text, so the packaged extension needs no runtime file lookup for them.
+  loader: { '.md': 'text' },
   plugins: [xhrSyncWorkerExternalPlugin],
 };
 
@@ -105,6 +108,7 @@ const webConfig = {
   // ESM internals (node:crypto/os) into the browser build, which the node
   // polyfills cannot satisfy (sharp >= 0.35 broke the web bundle).
   external: ['vscode', 'node-tikzjax', 'stream/promises', 'stream', 'sharp'],
+  loader: { '.md': 'text' },
   plugins: [
     polyfillNode({
       polyfills: {

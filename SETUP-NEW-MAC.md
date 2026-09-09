@@ -46,6 +46,12 @@ verifies through the macOS keychain instead of its bundled roots (the failure ot
 `invalid peer certificate: UnknownIssuer` while fetching torch), and it downloads the voice
 model with `curl` and checks both files against their pinned SHA-256.
 
+Without a C compiler this is handled too. One dependency, `pyopenjtalk` (Japanese phonemes),
+is source-only on PyPI, and on a Mac with no Xcode tools, or an Xcode whose licence was never
+accepted (that takes an administrator), its build dies with _/usr/bin/cc is broken_. The script
+leaves it out and installs `pyopenjtalk-plus`, the fork upstream itself uses on Windows, which
+ships an arm64 wheel and provides the same module. Everything else is a wheel.
+
 Use `--server-only`: a zip download carries no `.vsix`, so the plain run would finish the
 server and then stop with _no .vsix found_.
 
@@ -185,17 +191,18 @@ CLIs it spawns see the variable after VS Code is next launched.
 
 ## 8. If something is wrong
 
-| Symptom                                                         | What to do                                                                                                                                     |
-| --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `invalid peer certificate: UnknownIssuer` from `uv`             | You have an old copy of the script. Re-download the zip (§1) or refresh just the script with `curl` and rerun `--server-only`.                 |
-| `certificate verify failed` from `copilot`, `claude` or `npm`   | §7.                                                                                                                                            |
-| _no .vsix found_                                                | §3: send or build the `.vsix`, then `--extension-only --vsix PATH`.                                                                            |
-| _You have not agreed to the Xcode license_                      | Something ran `git`. Use the zip route; nothing here needs git.                                                                                |
-| `uv`: _Failed to patch the install name of the dynamic library_ | Harmless; nothing is compiled from source.                                                                                                     |
-| Read aloud says it cannot reach the server                      | `launchctl kickstart -k gui/$(id -u)/com.andrew.kokoro-fastapi`, then `tail -30 ~/Library/Logs/kokoro-fastapi.log`.                            |
-| Help says _Could not find the copilot command_                  | The message names the CLIs that are installed; install (§4) or switch with **Choose Help Engine**. The VS Code launcher is skipped on purpose. |
-| Help says _… not available on this Copilot plan_                | **Choose Help Model** → `sonnet`.                                                                                                              |
-| Port 8880 is taken                                              | `lsof -nP -iTCP:8880 -sTCP:LISTEN`; set `KOKORO_PORT` to move it.                                                                              |
+| Symptom                                                               | What to do                                                                                                                                     |
+| --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `invalid peer certificate: UnknownIssuer` from `uv`                   | You have an old copy of the script. Re-download the zip (§1) or refresh just the script with `curl` and rerun `--server-only`.                 |
+| `certificate verify failed` from `copilot`, `claude` or `npm`         | §7.                                                                                                                                            |
+| _Failed to build pyopenjtalk_, _/usr/bin/cc is broken_, Xcode licence | Old copy of the script too: re-download the zip (§1) or refresh the script, then rerun `--server-only`.                                        |
+| _no .vsix found_                                                      | §3: send or build the `.vsix`, then `--extension-only --vsix PATH`.                                                                            |
+| _You have not agreed to the Xcode license_                            | Something ran `git`. Use the zip route; nothing here needs git.                                                                                |
+| `uv`: _Failed to patch the install name of the dynamic library_       | Harmless; nothing is compiled from source.                                                                                                     |
+| Read aloud says it cannot reach the server                            | `launchctl kickstart -k gui/$(id -u)/com.andrew.kokoro-fastapi`, then `tail -30 ~/Library/Logs/kokoro-fastapi.log`.                            |
+| Help says _Could not find the copilot command_                        | The message names the CLIs that are installed; install (§4) or switch with **Choose Help Engine**. The VS Code launcher is skipped on purpose. |
+| Help says _… not available on this Copilot plan_                      | **Choose Help Model** → `sonnet`.                                                                                                              |
+| Port 8880 is taken                                                    | `lsof -nP -iTCP:8880 -sTCP:LISTEN`; set `KOKORO_PORT` to move it.                                                                              |
 
 The refresh-only-the-script line, for the first row:
 

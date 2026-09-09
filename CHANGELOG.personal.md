@@ -718,6 +718,17 @@ flag is not available`): on this Mac on 2026-09-09 it refused `claude-fable-5.1`
 
 ### Fixed
 
+- **`setup/setup-new-mac.sh` on a managed Mac** (2026-09-09, run for real on one): behind a
+  TLS-inspecting proxy `uv` failed with _invalid peer certificate: UnknownIssuer_ fetching
+  torch, so the script sets `UV_SYSTEM_CERTS=1` and fetches the voice model with `curl`
+  (which trusts the keychain) against the pinned SHA-256 of both files instead of through uv's
+  Python; and with no working C compiler (Xcode's licence unaccepted, which takes an
+  administrator) the source-only `pyopenjtalk` failed to build, so it is removed through the
+  project's own `tool.uv` override marker — a `--override` on the command line is merged with
+  that, not put in its place — and `pyopenjtalk-plus`, upstream's own Windows answer, is
+  installed from its arm64 wheel; verified on a fresh copy with `CC=/usr/bin/false`.
+  `SETUP-NEW-MAC.md` and `setup/GUIDE.md` say so.
+
 - **The spoken word was painted in the wrong block after a click into a cached read**
   (`featrues/14-bug-placement/bug.md`, the screenshot: pills on the numbered list, the marked
   word in the bullet list above it). The webview shifted every chunk's word

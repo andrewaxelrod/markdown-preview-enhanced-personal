@@ -146,6 +146,12 @@ Safari, VS Code) are fine; tools that carry their own root list fail with a mess
 `UV_SYSTEM_CERTS=1` so `uv` uses the macOS verifier, and it fetches the voice model with
 `curl` and checks the pinned SHA-256 of both files.
 
+A managed Mac may also have no working C compiler (no Xcode tools, or an Xcode whose licence
+was never accepted, which takes an administrator). The one dependency that needs one,
+`pyopenjtalk`, is left out and `pyopenjtalk-plus` — the fork upstream uses on Windows, which
+ships wheels and provides the same module — is installed in its place; the server imports it
+only for Japanese.
+
 The headless CLIs are Node programs and read `NODE_EXTRA_CA_CERTS`. If `claude` or
 `copilot login` fails with a certificate error, export the keychain once and point them at it:
 

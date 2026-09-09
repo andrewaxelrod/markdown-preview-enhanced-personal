@@ -129,7 +129,24 @@ if [[ $do_server -eq 1 ]]; then
   # Every compiled dependency (torch, spacy, av, soundfile, unicode-segmentation-rs,
   # espeakng-loader) ships a macOS arm64 wheel, so nothing is built from source and
   # no C compiler is required. espeak-ng arrives inside its wheel, not from Homebrew.
+  #
+  # The one exception is pyopenjtalk (Japanese phonemes, required by misaki[ja]):
+  # source-only on PyPI, it needs cmake and a C compiler, and on a Mac without the
+  # Xcode tools — or with an Xcode whose licence was never accepted, which takes an
+  # administrator — the build dies with "/usr/bin/cc is broken". Upstream sidesteps
+  # this on Windows with pyopenjtalk-plus, a fork that ships wheels and installs the
+  # same `pyopenjtalk` module; this does the same on macOS. The requirement is
+  # misaki's, so it is removed the one place uv honours, the project's own override
+  # marker (a --override on the command line is merged with it, not put in its
+  # place), and the fork is installed after. The server imports it only for Japanese.
+  if grep -q "\"pyopenjtalk ; sys_platform != 'win32'\"" pyproject.toml; then
+    sed -i '' "s/\"pyopenjtalk ; sys_platform != 'win32'\"/\"pyopenjtalk ; sys_platform == 'never'\"/" pyproject.toml
+    info "pyopenjtalk (source-only) left out; pyopenjtalk-plus takes its place"
+  fi
   uv pip install -e ".[cpu]"
+  if ! .venv/bin/python -c 'import pyopenjtalk' >/dev/null 2>&1; then
+    uv pip install --only-binary pyopenjtalk-plus "pyopenjtalk-plus>=0.4.1"
+  fi
 
   say "4/6  Voice model (~312 MB)"
   model_dir=api/src/models/v1_0

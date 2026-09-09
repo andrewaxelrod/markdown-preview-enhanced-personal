@@ -132,6 +132,36 @@ absolute path. VS Code launched from the Dock inherits a bare environment and of
 
 ---
 
+## On a managed Mac (corporate TLS proxy)
+
+A work Mac often sits behind a proxy that re-signs every HTTPS connection with a company
+root certificate installed in the system keychain. Tools that trust the keychain (`curl`,
+Safari, VS Code) are fine; tools that carry their own root list fail with a message such as
+`invalid peer certificate: UnknownIssuer` or `certificate verify failed`.
+
+`setup-new-mac.sh` already handles the two places this bites the speech server: it sets
+`UV_SYSTEM_CERTS=1` so `uv` uses the macOS verifier, and it fetches the voice model with
+`curl` and checks the pinned SHA-256 of both files.
+
+The headless CLIs are Node programs and read `NODE_EXTRA_CA_CERTS`. If `claude` or
+`copilot login` fails with a certificate error, export the keychain once and point them at it:
+
+```bash
+security find-certificate -a -p /Library/Keychains/System.keychain \
+  /System/Library/Keychains/SystemRootCertificates.keychain > ~/.local/share/mac-roots.pem
+echo 'export NODE_EXTRA_CA_CERTS="$HOME/.local/share/mac-roots.pem"' >> ~/.zprofile
+```
+
+VS Code on macOS reads your login shell's environment at startup, so the extension host and
+the CLIs it spawns see the variable after the next launch of VS Code.
+
+Two side notes from a managed Mac: `uv`'s warning _Failed to patch the install name of the
+dynamic library_ while it installs its Python is harmless here, because nothing is compiled;
+and if Xcode is installed but its licence was never accepted, `git` prints _You have not
+agreed to the Xcode license_ and stops, which is one more reason the scripts fetch tarballs.
+
+---
+
 ## What does not follow you between Macs
 
 Deliberately, because these describe a machine rather than a person:

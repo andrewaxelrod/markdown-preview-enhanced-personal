@@ -96,6 +96,11 @@ if [[ $do_server -eq 1 ]]; then
 
   say "1/6  uv (downloads its own Python; no system Python or Homebrew)"
   export PATH="$HOME/.local/bin:$PATH"
+  # A managed Mac often sits behind a TLS-inspecting proxy whose root lives in
+  # the system keychain. uv verifies against bundled Mozilla roots by default and
+  # then fails with "invalid peer certificate: UnknownIssuer" on pytorch.org;
+  # this makes it use the platform verifier instead (uv 0.12+). Harmless elsewhere.
+  export UV_SYSTEM_CERTS=1
   if command -v uv >/dev/null 2>&1; then
     info "already installed: $(command -v uv)"
   else
@@ -127,10 +132,31 @@ if [[ $do_server -eq 1 ]]; then
   uv pip install -e ".[cpu]"
 
   say "4/6  Voice model (~312 MB)"
-  if [[ -f api/src/models/v1_0/kokoro-v1_0.pth ]]; then
+  model_dir=api/src/models/v1_0
+  if [[ -f "$model_dir/kokoro-v1_0.pth" ]]; then
     info "already downloaded"
   else
-    uv run --no-sync python docker/scripts/download_model.py --output api/src/models/v1_0
+    # curl rather than the repo's docker/scripts/download_model.py: curl trusts
+    # the macOS keychain, so a proxy's root is honoured, while uv's Python reads
+    # /etc/ssl/cert.pem alone and fails behind one with "certificate verify
+    # failed". The URLs and the checksums are the ones that script pins at
+    # KOKORO_COMMIT; the checksum is what rejects an error page saved as a model.
+    mkdir -p "$model_dir"
+    base_url="https://github.com/remsky/Kokoro-FastAPI/releases/download/v0.1.4"
+    for f in kokoro-v1_0.pth config.json; do
+      info "downloading $f ..."
+      curl -fL --retry 3 --progress-bar -o "$model_dir/$f.download" "$base_url/$f"
+    done
+    (
+      cd "$model_dir"
+      printf '%s  %s\n' \
+        "496dba118d1a58f5f3db2efc88dbdc216e0483fc89fe6e47ee1f2c53f18ad1e4" kokoro-v1_0.pth.download \
+        "5abb01e2403b072bf03d04fde160443e209d7a0dad49a423be15196b9b43c17f" config.json.download \
+        | shasum -a 256 -c --status
+    ) || die "voice model checksum mismatch; delete $KOKORO_DIR/$model_dir and run again"
+    mv "$model_dir/kokoro-v1_0.pth.download" "$model_dir/kokoro-v1_0.pth"
+    mv "$model_dir/config.json.download" "$model_dir/config.json"
+    info "verified and in place"
   fi
 
   say "5/6  Start script and login agent"

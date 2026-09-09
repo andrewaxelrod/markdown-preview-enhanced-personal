@@ -27,3 +27,4 @@ gulpfile.js
 install.sh
 .env
 .env.*
+setup/**

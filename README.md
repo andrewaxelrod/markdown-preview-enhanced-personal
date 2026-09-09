@@ -34,6 +34,16 @@ preview webview; the synthesis requests are made by the extension host.
 
 ### Kokoro server setup (once)
 
+**[`setup/GUIDE.md`](setup/GUIDE.md) does all of this in one run**, on a Mac where you have no
+administrator rights, and covers the rest of a fresh machine too:
+
+```bash
+./setup/setup-new-mac.sh --server-only
+```
+
+It refuses early on an Intel Mac, because the server pins PyTorch 2.8.0 and that release
+publishes macOS wheels for `arm64` only. The manual equivalent follows.
+
 [`uv`](https://docs.astral.sh/uv/) downloads its own Python and every dependency (espeak is
 bundled), so nothing else needs to be installed. Keep the checkout **outside** `~/Documents`,
 `~/Desktop` and `~/Downloads`: macOS privacy protection stops a launchd agent from reading

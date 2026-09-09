@@ -230,15 +230,48 @@ PLISTEOF
 
   # gui/<uid> is the per-user domain. This is not the system domain, so it needs
   # no administrator and touches nothing outside this account.
+  # Import the app once in the foreground before the agent is loaded: a broken
+  # environment then shows its traceback here, instead of restarting silently
+  # under KeepAlive while the wait below times out. Four seconds; no model load.
+  import_log="$(mktemp)"
+  if (
+    cd "$KOKORO_DIR" &&
+      PYTHONPATH="$PWD:$PWD/api" MODEL_DIR=src/models VOICES_DIR=src/voices/v1_0 \
+      .venv/bin/python -c 'import api.src.main' >"$import_log" 2>&1
+  ); then
+    info "the app imports"
+    rm -f "$import_log"
+  else
+    tail -n 30 "$import_log" >&2
+    rm -f "$import_log"
+    die "the server's Python cannot import the app; the traceback above says why."
+  fi
+
   launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
   launchctl bootstrap "gui/$(id -u)" "$PLIST"
   info "agent $LABEL loaded (RunAtLoad + KeepAlive)"
 
   say "6/6  Waiting for the server, then a timestamped-speech smoke test"
-  if ! curl -fsS --retry 40 --retry-delay 3 --retry-connrefused --max-time 200 \
-       "http://127.0.0.1:$PORT/health" >/dev/null; then
-    die "the server never became healthy. Look at $LOGFILE, then:
-       launchctl print gui/$(id -u)/$LABEL | grep -E 'state|pid|last exit'"
+  # A first start loads torch and the model; on a managed Mac whose endpoint
+  # security scans every new file it can take minutes. Up to five, quietly.
+  printf '    waiting'
+  healthy=0
+  for _ in $(seq 1 100); do
+    if curl -fsS --max-time 3 "http://127.0.0.1:$PORT/health" >/dev/null 2>&1; then
+      healthy=1
+      break
+    fi
+    printf '.'
+    sleep 3
+  done
+  echo
+  if [[ $healthy -ne 1 ]]; then
+    echo "    agent state:" >&2
+    launchctl print "gui/$(id -u)/$LABEL" 2>&1 | grep -E 'state|pid|last exit' | sed 's/^/      /' >&2
+    echo "    last lines of $LOGFILE:" >&2
+    tail -n 40 "$LOGFILE" 2>/dev/null | sed 's/^/      /' >&2
+    die "the server never became healthy in five minutes. To watch it start in the foreground:
+       launchctl bootout gui/$(id -u)/$LABEL; $KOKORO_DIR/start-local.sh"
   fi
   info "health: $(curl -fsS "http://127.0.0.1:$PORT/health")"
 

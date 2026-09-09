@@ -101,6 +101,13 @@ export const READ_ALOUD_SETTING_KEYS = [
   // 13 §6.1 and §12.5: the term budgets and the module marker.
   'classroomShortTermModules',
   'classroomMarker',
+  // Retell (`featrues/15-convert-readable/spec.md` §14.1). `retellEnabled`
+  // and `retellMarker` ride in `readAloudConfig`; the other two are read per
+  // Prepare or Build.
+  'retellEnabled',
+  'retellDirectory',
+  'retellAutoOpen',
+  'retellMarker',
 ] as const;
 
 export type ReadAloudSettingKey = (typeof READ_ALOUD_SETTING_KEYS)[number];
@@ -156,6 +163,16 @@ export interface ReadAloudClassroomSettings {
   marker: boolean;
 }
 
+/** 15 §14.1 — the four retell settings. */
+export interface ReadAloudRetellSettings {
+  enabled: boolean;
+  /** The root, `~` expanded; '' means `<globalConfigPath>/retell` (§11.1). */
+  directory: string;
+  autoOpen: boolean;
+  /** 15 §12.5 — the ear marker in the source document. */
+  marker: boolean;
+}
+
 export const CLASSROOM_PERSONA_SETTING_RE = /^[a-z0-9][a-z0-9-]{0,39}$/;
 export const DEFAULT_CLASSROOM_PERSONA = 'max';
 
@@ -177,6 +194,7 @@ export interface ReadAloudSettings {
   help: ReadAloudHelpSettings;
   notes: ReadAloudNotesSettings;
   classroom: ReadAloudClassroomSettings;
+  retell: ReadAloudRetellSettings;
 }
 
 const SETTINGS_NAMESPACE = 'markdown-preview-enhanced';
@@ -382,6 +400,34 @@ export function readClassroomSettings(): ReadAloudClassroomSettings {
   };
 }
 
+/**
+ * 15 §14.1 — the retell settings. `retellDirectory` is machine scope for the
+ * reason `notesDirectory` is; a relative path is ignored.
+ */
+export function readRetellSettings(): ReadAloudRetellSettings {
+  const enabledRaw = getMPEConfig<boolean>('retellEnabled');
+  const directoryRaw = getMPEConfig<string>('retellDirectory');
+  const autoOpenRaw = getMPEConfig<boolean>('retellAutoOpen');
+  const markerRaw = getMPEConfig<boolean>('retellMarker');
+  let directory = '';
+  if (typeof directoryRaw === 'string' && directoryRaw.trim()) {
+    const expanded = directoryRaw.trim().replace(/^~(?=$|[\\/])/, os.homedir());
+    if (path.isAbsolute(expanded)) {
+      directory = expanded;
+    } else {
+      readAloudLog(
+        `ignoring retellDirectory ${JSON.stringify(directoryRaw)}: not an absolute path; using the default root`,
+      );
+    }
+  }
+  return {
+    enabled: typeof enabledRaw === 'boolean' ? enabledRaw : true,
+    directory,
+    autoOpen: typeof autoOpenRaw === 'boolean' ? autoOpenRaw : true,
+    marker: typeof markerRaw === 'boolean' ? markerRaw : true,
+  };
+}
+
 /** All settings, normalised. Never throws; every value is range-checked. */
 export function readReadAloudSettings(): ReadAloudSettings {
   const enabledRaw = getMPEConfig<boolean>('readAloudEnabled');
@@ -438,6 +484,7 @@ export function readReadAloudSettings(): ReadAloudSettings {
     help: readHelpSettings(),
     notes: readNotesSettings(),
     classroom: readClassroomSettings(),
+    retell: readRetellSettings(),
   };
 }
 

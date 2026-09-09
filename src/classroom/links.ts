@@ -42,7 +42,9 @@ const PATH_LINK_RE =
   /(!?)\[[^\]\n]*\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"\n]*")?\s*\)/g;
 const WIKILINK_RE = /\[\[([^\]\n]+?)\]\]/g;
 
-function headingLevelOf(line: string): { level: number; text: string } | null {
+export function headingLevelOf(
+  line: string,
+): { level: number; text: string } | null {
   const match = /^(#{1,6})\s+(.*?)\s*#*\s*$/.exec(line);
   if (!match) {
     return null;
@@ -92,7 +94,7 @@ export function sectionRangeFor(
 }
 
 /** Fences blanked but their length kept, so indexes still point into `source`. */
-function maskFencesKeepingLength(source: string): { prose: string } {
+export function maskFencesKeepingLength(source: string): { prose: string } {
   const masked = maskFences(source);
   if (masked.tags.length === 0) {
     return { prose: source };

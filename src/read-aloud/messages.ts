@@ -260,6 +260,15 @@ export interface ReadAloudConfigMessage {
    * from a broadcast, which leaves the webview's value alone.
    */
   classroomModule?: ClassroomModuleConfig | null;
+  /** Retell (15 §14.3): desktop and `retellEnabled`. */
+  retellAvailable: boolean;
+  /** 15 §12.5 — the ear marker in the margin of a retold section's heading. */
+  retellMarker: boolean;
+  /**
+   * 15 §12.2 — present (or null) in the config of an edition preview; absent
+   * from a broadcast, which leaves the webview's value alone.
+   */
+  retellEdition?: RetellEditionConfig | null;
 }
 
 export type ReadAloudControlAction =
@@ -278,8 +287,12 @@ export type ReadAloudControlAction =
   | 'classroom'
   /** 13 §12.2 — `Alt+Shift+C` and the `readAloud.classroomModule` command. */
   | 'classroomModule'
-  /** 13 §12.4 — _Open the source passage_; carries `anchor` and `moduleId`. */
-  | 'revealAnchor';
+  /** 13 §12.4 — _Open the source passage_; carries `anchor` and `moduleId` (or `editionId`, 15 §12.4). */
+  | 'revealAnchor'
+  /** 15 §5.1 — `Alt+T` and the `readAloud.retell` command; `scope: 'document'` from `retell.document`. */
+  | 'retell'
+  /** 15 §12.2 — `Alt+Shift+T` and the `readAloud.retellEdition` command. */
+  | 'retellEdition';
 
 export interface ReadAloudControlMessage {
   command: 'readAloudControl';
@@ -287,6 +300,10 @@ export interface ReadAloudControlMessage {
   noteId?: string;
   anchor?: NoteAnchorPayload;
   moduleId?: string;
+  /** 15 §12.4 — `revealAnchor` for an edition's unit. */
+  editionId?: string;
+  /** 15 §13 — `retell` from the whole-document command opens the sheet in document scope. */
+  scope?: RetellScope;
 }
 
 /** §9 — the rendered explanation, plus the markdown a follow-up sends back. */
@@ -321,7 +338,11 @@ export type HostToWebviewMessage =
   | ReadAloudClassroomPreparedMessage
   | ReadAloudClassroomProgressMessage
   | ReadAloudClassroomErrorMessage
-  | ReadAloudClassroomModulesMessage;
+  | ReadAloudClassroomModulesMessage
+  | ReadAloudRetellPreparedMessage
+  | ReadAloudRetellProgressMessage
+  | ReadAloudRetellErrorMessage
+  | ReadAloudRetellEditionsMessage;
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -1741,4 +1762,384 @@ export function parseClassroomOpenFolderArgs(
     return undefined;
   }
   return isSourceUri(args[0]) ? args[0] : undefined;
+}
+
+// ---------------------------------------------------------------------------
+// Retell (`featrues/15-convert-readable/spec.md` §14)
+//
+// Nine webview -> host messages, every one parsed here before the retell
+// controller sees it, and the four host -> webview shapes. The fields take
+// help's caps; the anchor the notes'; the two line numbers are one-based
+// integers in 1…1,000,000 with `startLine ≤ endLine`; the scope is one of two
+// words; the edition id has the note id's shape; `n` is a small integer.
+// ---------------------------------------------------------------------------
+
+export const RETELL_SCOPES = ['selection', 'document'] as const;
+export type RetellScope = (typeof RETELL_SCOPES)[number];
+
+export const RETELL_LINE_MAX = 1000000;
+export const RETELL_UNIT_MAX = 1000;
+
+export const RETELL_STATUSES = [
+  'planning',
+  'writing',
+  'done',
+  'stopped',
+  'failed',
+  'queued',
+] as const;
+export type RetellStatus = (typeof RETELL_STATUSES)[number];
+
+export const RETELL_SECTION_STATUSES = [
+  'queued',
+  'writing',
+  'done',
+  'failed',
+] as const;
+export type RetellSectionStatus = (typeof RETELL_SECTION_STATUSES)[number];
+
+export interface RetellPrepareRequest {
+  sourceUri: string;
+  requestId: string;
+  fields: HelpFieldsPayload;
+  /** One-based, as crossnote's `data-source-line` is (§6.1). */
+  startLine: number;
+  endLine: number;
+  scope: RetellScope;
+}
+
+export interface RetellBuildRequest {
+  sourceUri: string;
+  requestId: string;
+  fields: HelpFieldsPayload;
+  /** Null only in `document` scope, which has no webview selection (§12.5). */
+  anchor: NoteAnchorPayload | null;
+  startLine: number;
+  endLine: number;
+  scope: RetellScope;
+  /** Null for a new edition; an id for Rebuild (§9.8). */
+  editionId: string | null;
+}
+
+export interface RetellCancelRequest {
+  sourceUri: string;
+  editionId: string;
+  reason: string;
+}
+
+export interface RetellEditionRequest {
+  sourceUri: string;
+  editionId: string;
+}
+
+export interface RetellOpenSourceRequest {
+  editionUri: string;
+  editionId: string;
+  /** The unit whose anchor to reveal, 1-based. */
+  n: number;
+}
+
+/** 15 §14.3 — one h2 unit as the sheet lists it. */
+export interface RetellUnit {
+  n: number;
+  heading: string;
+  level: number;
+  line: number;
+  endLine: number;
+  words: number;
+  codeWords: number;
+  tableWords: number;
+  proseWords: number;
+  /** How many fenced blocks and tables the counts came from (§7.2). */
+  fences: number;
+  tables: number;
+}
+
+/** 15 §14.3 — one unit's state in a progress message. */
+export interface RetellSectionState {
+  n: number;
+  heading: string;
+  status: RetellSectionStatus;
+  flagged: string[];
+  /** Copied forward by a Rebuild (§9.8): the _unchanged_ glyph. */
+  cached: boolean;
+}
+
+/** 15 §14.3 — the whole build state, every time; the webview diffs nothing. */
+export interface RetellProgress {
+  editionId: string;
+  documentUri: string;
+  editionUri: string;
+  status: RetellStatus;
+  title: string;
+  /** The unit being retold (1-based), or 0 when none is. */
+  section: number;
+  of: number;
+  sectionHeading: string;
+  sections: RetellSectionState[];
+  elapsedMs: number;
+  words: number;
+  queuePosition: number;
+  /** Whether a section is on disk, so Open has somewhere to go. */
+  hasSection: boolean;
+  error: string | null;
+}
+
+/** 15 §14.3 — what the sheets' rows, the marker and the quick pick show for an edition. */
+export interface EditionSummary {
+  id: string;
+  title: string;
+  created: string;
+  status: RetellStatus;
+  /** How many units the edition has. */
+  sections: number;
+  done: number;
+  minutes: number;
+  /** One anchor per unit, in order; the first is the marker's (§12.5). */
+  anchors: NoteAnchorPayload[];
+  /** The document's heading path above the first unit. */
+  headings: string[];
+  documentTitle: string;
+  /** The units' headings, in order, for the rows and the tooltip. */
+  unitHeadings: string[];
+}
+
+/** 15 §12.2 — what an edition preview's config carries. */
+export interface RetellEditionConfig {
+  id: string;
+  title: string;
+  status: RetellStatus;
+  sections: RetellSectionState[];
+  documentTitle: string;
+  documentPath: string;
+}
+
+export interface ReadAloudRetellPreparedMessage {
+  command: 'readAloudRetellPrepared';
+  requestId: string;
+  units: RetellUnit[];
+  sourceWords: number;
+  estimate: { words: number; minutes: number };
+  ceiling: number;
+  widened: boolean;
+  shape: string;
+  engine: { engine: string; model: string; effort: string };
+  editions: EditionSummary[];
+  /** The edition a Rebuild would reuse, when one already covers every unit. */
+  rebuildOf: string | null;
+  building: RetellProgress | null;
+}
+
+export interface ReadAloudRetellProgressMessage extends RetellProgress {
+  command: 'readAloudRetellProgress';
+}
+
+export interface ReadAloudRetellErrorMessage {
+  command: 'readAloudRetellError';
+  requestId?: string;
+  editionId?: string;
+  message: string;
+  retryable: boolean;
+}
+
+/** 15 §12.5 — the document's editions, the whole list every time. */
+export interface ReadAloudRetellEditionsMessage {
+  command: 'readAloudRetellEditions';
+  sourceUri: string;
+  editions: EditionSummary[];
+  deleting: string[];
+  deleteMode: 'trash' | 'permanent';
+}
+
+function isRetellLine(value: unknown): value is number {
+  return (
+    typeof value === 'number' &&
+    Number.isInteger(value) &&
+    value >= 1 &&
+    value <= RETELL_LINE_MAX
+  );
+}
+
+function isRetellScope(value: unknown): value is RetellScope {
+  return (
+    typeof value === 'string' &&
+    (RETELL_SCOPES as readonly string[]).includes(value)
+  );
+}
+
+/** The `{ startLine, endLine, scope }` part shared by Prepare and Build. */
+function parseRetellRange(
+  raw: Record<string, unknown>,
+): { startLine: number; endLine: number; scope: RetellScope } | undefined {
+  const { startLine, endLine, scope } = raw;
+  if (!isRetellLine(startLine) || !isRetellLine(endLine)) {
+    return undefined;
+  }
+  if (startLine > endLine) {
+    return undefined;
+  }
+  if (!isRetellScope(scope)) {
+    return undefined;
+  }
+  return { startLine, endLine, scope };
+}
+
+/** `readAloudRetellPrepare` -> `[sourceUri, requestId, fields, { startLine, endLine, scope }]`. */
+export function parseRetellPrepareArgs(
+  args: unknown,
+): RetellPrepareRequest | undefined {
+  if (!Array.isArray(args) || args.length !== 4) {
+    return undefined;
+  }
+  const [sourceUri, requestId, rawFields, rawOptions] = args as unknown[];
+  if (!isSourceUri(sourceUri)) {
+    return undefined;
+  }
+  if (typeof requestId !== 'string' || !REQUEST_ID_RE.test(requestId)) {
+    return undefined;
+  }
+  if (!isPlainObject(rawFields) || !isPlainObject(rawOptions)) {
+    return undefined;
+  }
+  const fields = parseHelpFieldsObject(rawFields);
+  if (!fields) {
+    return undefined;
+  }
+  const range = parseRetellRange(rawOptions);
+  if (!range) {
+    return undefined;
+  }
+  return { sourceUri, requestId, fields, ...range };
+}
+
+/**
+ * `readAloudRetellBuild` -> `[sourceUri, requestId, fields, anchor,
+ * { startLine, endLine, scope, editionId }]`. The anchor may be null in
+ * `document` scope only; `editionId` is null for a new edition.
+ */
+export function parseRetellBuildArgs(
+  args: unknown,
+): RetellBuildRequest | undefined {
+  if (!Array.isArray(args) || args.length !== 5) {
+    return undefined;
+  }
+  const [sourceUri, requestId, rawFields, rawAnchor, rawOptions] =
+    args as unknown[];
+  if (!isSourceUri(sourceUri)) {
+    return undefined;
+  }
+  if (typeof requestId !== 'string' || !REQUEST_ID_RE.test(requestId)) {
+    return undefined;
+  }
+  if (!isPlainObject(rawFields) || !isPlainObject(rawOptions)) {
+    return undefined;
+  }
+  const fields = parseHelpFieldsObject(rawFields);
+  if (!fields) {
+    return undefined;
+  }
+  const range = parseRetellRange(rawOptions);
+  if (!range) {
+    return undefined;
+  }
+  let anchor: NoteAnchorPayload | null = null;
+  if (rawAnchor !== null && rawAnchor !== undefined) {
+    const parsed = parseNoteAnchor(rawAnchor);
+    if (!parsed) {
+      return undefined;
+    }
+    anchor = parsed;
+  } else if (range.scope !== 'document') {
+    return undefined;
+  }
+  let editionId: string | null = null;
+  if (rawOptions.editionId !== null && rawOptions.editionId !== undefined) {
+    if (!isNoteId(rawOptions.editionId)) {
+      return undefined;
+    }
+    editionId = rawOptions.editionId;
+  }
+  return { sourceUri, requestId, fields, anchor, ...range, editionId };
+}
+
+/** `readAloudRetellCancel` -> `[sourceUri, editionId, reason]` (either uri). */
+export function parseRetellCancelArgs(
+  args: unknown,
+): RetellCancelRequest | undefined {
+  const parsed = parseClassroomCancelArgs(args);
+  return parsed
+    ? {
+        sourceUri: parsed.sourceUri,
+        editionId: parsed.moduleId,
+        reason: parsed.reason,
+      }
+    : undefined;
+}
+
+function parseRetellEditionArgs(
+  args: unknown,
+): RetellEditionRequest | undefined {
+  if (!Array.isArray(args) || args.length !== 2) {
+    return undefined;
+  }
+  const [sourceUri, editionId] = args as unknown[];
+  if (!isSourceUri(sourceUri) || !isNoteId(editionId)) {
+    return undefined;
+  }
+  return { sourceUri, editionId };
+}
+
+/** `readAloudRetellContinue` -> `[sourceUri, editionId]` (either uri). */
+export function parseRetellContinueArgs(
+  args: unknown,
+): RetellEditionRequest | undefined {
+  return parseRetellEditionArgs(args);
+}
+
+/** `readAloudRetellOpen` -> `[sourceUri, editionId]` (either uri). */
+export function parseRetellOpenArgs(
+  args: unknown,
+): RetellEditionRequest | undefined {
+  return parseRetellEditionArgs(args);
+}
+
+/** `readAloudRetellDelete` -> `[sourceUri, editionId]` (either uri, §11.3). */
+export function parseRetellDeleteArgs(
+  args: unknown,
+): RetellEditionRequest | undefined {
+  return parseRetellEditionArgs(args);
+}
+
+/** `readAloudRetellUndoDelete` -> `[sourceUri, editionId]` (either uri). */
+export function parseRetellUndoDeleteArgs(
+  args: unknown,
+): RetellEditionRequest | undefined {
+  return parseRetellEditionArgs(args);
+}
+
+/** `readAloudRetellOpenSource` -> `[editionUri, editionId, n]` (§12.4). */
+export function parseRetellOpenSourceArgs(
+  args: unknown,
+): RetellOpenSourceRequest | undefined {
+  if (!Array.isArray(args) || args.length !== 3) {
+    return undefined;
+  }
+  const [editionUri, editionId, n] = args as unknown[];
+  if (!isSourceUri(editionUri) || !isNoteId(editionId)) {
+    return undefined;
+  }
+  if (
+    typeof n !== 'number' ||
+    !Number.isInteger(n) ||
+    n < 1 ||
+    n > RETELL_UNIT_MAX
+  ) {
+    return undefined;
+  }
+  return { editionUri, editionId, n };
+}
+
+/** `readAloudRetellOpenFolder` -> `[sourceUri]`. */
+export function parseRetellOpenFolderArgs(args: unknown): string | undefined {
+  return parseClassroomOpenFolderArgs(args);
 }

@@ -465,13 +465,16 @@ suite('read-aloud notes layer (12-notes)', function () {
     const classroom = buttons.findIndex((c) =>
       c.includes('mpe-ra-bar-classroom'),
     );
+    const retell = buttons.findIndex((c) => c.includes('mpe-ra-bar-retell'));
     const close = buttons.findIndex((c) => c.includes('mpe-ra-bar-close'));
-    // 13 §12.2: the module preview's button sits between notes and the ×.
+    // 13 §12.2: the module preview's button sits between notes and the ×;
+    // 15 §12.2: the edition preview's between it and the ×.
     assert.ok(
       help >= 0 &&
         notes === help + 1 &&
         classroom === notes + 1 &&
-        close === classroom + 1,
+        retell === classroom + 1 &&
+        close === retell + 1,
       buttons.join(' | '),
     );
     assert.strictEqual(q('.mpe-ra-bar-notes').hidden, false);

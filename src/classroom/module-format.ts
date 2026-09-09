@@ -699,19 +699,38 @@ export function relativeLink(fromDir: string, absolute: string): string {
   return /^\.\./.test(joined) ? joined : `./${joined}`;
 }
 
+/** What a back link points at: the source document and a one-based line. */
+export interface BackLinkTarget {
+  absolute: string;
+  line: number | null;
+}
+
 /**
  * §12.4 — the back link. crossnote's `data-source-line` is the one-based
  * source line and `clickTagA` reads an `L` fragment as one-based too, so the
  * anchor's line goes into the fragment as it is; no fragment when unknown.
+ * Generalised for the spoken editions of 15 §10.3: the target is the source
+ * document's absolute path and a line, and `text` may replace the label.
  */
 export function backLink(
+  target: BackLinkTarget,
+  fromDir: string,
+  text: string = BACK_LINK_TEXT,
+): string {
+  const destination = relativeLink(fromDir, target.absolute);
+  const fragment = target.line === null ? '' : `#L${target.line}`;
+  return `[${text}](${destination}${fragment})`;
+}
+
+/** The back link of a module: its document at its passage's line. */
+function moduleBackLink(
   module: Pick<ParsedModule, 'document' | 'passage'>,
   moduleDir: string,
 ): string {
-  const target = relativeLink(moduleDir, module.document.absolute);
-  const fragment =
-    module.passage.line === null ? '' : `#L${module.passage.line}`;
-  return `[${BACK_LINK_TEXT}](${target}${fragment})`;
+  return backLink(
+    { absolute: module.document.absolute, line: module.passage.line },
+    moduleDir,
+  );
 }
 
 /** The module's title: the body's `h1`, else the plan's, else the provisional one. */
@@ -735,7 +754,7 @@ export function frameFor(
   const where =
     `You were reading "${module.document.title.replace(/"/g, '”')}"` +
     (heading ? `, under "${heading.replace(/"/g, '”')}",` : '') +
-    ` and stopped at this passage. ${backLink(module, moduleDir)}`;
+    ` and stopped at this passage. ${moduleBackLink(module, moduleDir)}`;
   return `# ${title.replace(/\s+/g, ' ').trim()}\n\n${where}\n\n${toBlockquote(module.passage.exact)}\n`;
 }
 
@@ -767,7 +786,7 @@ export function appendClosingLink(
   module: Pick<ParsedModule, 'document' | 'passage'>,
   moduleDir: string,
 ): string {
-  const link = backLink(module, moduleDir);
+  const link = moduleBackLink(module, moduleDir);
   if (body.replace(/\s+$/, '').endsWith(link)) {
     return body;
   }

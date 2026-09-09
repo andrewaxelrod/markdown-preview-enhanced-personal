@@ -232,8 +232,9 @@ suite('read-aloud control panel (F3)', function () {
     assert.strictEqual(strip.hidden, true);
     // 04-help-module §2: help sits between the speed and the ×; 12-notes §12:
     // the Notes button between help and the ×; 13-classroom §12.2: the module
-    // preview's Classroom button between notes and the ×, so the × is still
-    // the last.
+    // preview's Classroom button between notes and the ×; 15-retell §12.2:
+    // the edition preview's Retell button between classroom and the ×, so
+    // the × is still the last.
     assert.deepStrictEqual(order, [
       'volume',
       'theme',
@@ -244,14 +245,16 @@ suite('read-aloud control panel (F3)', function () {
       'help',
       'notes',
       'classroomModule',
+      'retellEdition',
       'close',
     ]);
-    // With no `helpAvailable`, `notesAvailable` or `classroomModule` in the
-    // config — the web build, and this fixture — none of the three is on
-    // screen at all.
+    // With no `helpAvailable`, `notesAvailable`, `classroomModule` or
+    // `retellEdition` in the config — the web build, and this fixture — none
+    // of the four is on screen at all.
     assert.strictEqual(button('help').hidden, true);
     assert.strictEqual(button('notes').hidden, true);
     assert.strictEqual(button('classroom').hidden, true);
+    assert.strictEqual(button('retell').hidden, true);
     assert.strictEqual(button('speed').textContent, '1×');
     assert.strictEqual(button('back10').disabled, true, 'nothing to skip yet');
     assert.strictEqual(button('forward10').disabled, true);

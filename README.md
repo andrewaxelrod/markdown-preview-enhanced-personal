@@ -395,6 +395,40 @@ instructor in force and `classroomAudience` the audience line; the sheet writes 
 
 A five-word selection gets a **small module** (two chapters at the first lever row, four at the second); the size line under the lever says what a row buys, and `markdown-preview-enhanced.classroomShortTermModules` restores the full budgets. Every module shows as a **mortarboard marker** in the right margin of the paragraph it was built from, under a note marker when both are there; a click opens it, and the marker, the sheet's rows, the Module sheet and _Delete Classroom Module_ can **delete** it, with six seconds of Undo before the file goes to the OS trash (`classroomMarker` hides the markers).
 
+### Retell: a spoken edition of the section
+
+The fifth button of the selection cluster, **Retell** (`Alt+T`), and **Retell the section** on
+the Help sheet are for a section that reads well on the page and badly out loud: tables, code
+blocks and identifiers the voice skips or mangles. They make a **spoken edition** of the h2
+section the selection sits in (the request is always widened to whole sections; the sheet says
+when it widened): the same content, in the same order, under the same headings, with every
+table said as sentences, every code block said as what the code does, and every identifier said
+as a spoken name. Nothing is added and no rule is dropped. The sheet names the sections that will
+be sent with their word counts by kind, the engine label and the estimate (1.4 times the source's
+words, at the measured 142 words a minute), and **Build** runs one help-engine call per section,
+in order, each answer checked mechanically (no em dashes, tables, links, inline code, HTML, emoji
+or fences; no identifier with a dot, slash, tilde or angle bracket in it; the source's headings
+verbatim and in order; a runaway ceiling at 1.8 times the source) with one retry, then appended
+to a markdown file. The edition opens beside the document as soon as its first section is on
+disk and is a document like any other from then on: read aloud, followed, dimmed, explained,
+noted, taught. Every section ends with a link back to its own source line, and the section's
+heading gets an **ear marker** in the margin, under the note and classroom markers, that opens
+the edition. In an edition's preview the bar's ear button (`Alt+Shift+T`) opens the **Edition
+sheet**: progress, the section list, Cancel, Continue for a stopped or failed build, _Open the
+source section_ and Delete (six seconds of Undo, then the OS trash). Each section records a
+content hash, so **Rebuild** re-calls only what changed. _Retell Document for Listening_ runs
+the same loop over the whole document into one edition; _Open Spoken Edition_ lists every
+edition. Measured on a 1,246-word section at `claude · sonnet · low`: 10 to 35 seconds and 1.5
+to 6.3 cents a section, the edition 1.24 to 1.6 times the source.
+
+**Retell sends the section's markdown source** — the selected section, or every section of the
+document — plus the title, the heading breadcrumb and the document's outline, to the configured
+engine, on Build only; nothing is sent by selecting, by opening the sheet or by Prepare. Editions
+live under `~/.crossnote/retell/editions/<workspace folder>/<relative path>/`
+(`retellDirectory`, machine scope), so an edition copies document text into your home directory,
+like a note. `retellAutoOpen` turns the opening beside off (the sheet shows Open instead), and
+`retellMarker` hides the markers. The engine, model and effort are the help settings.
+
 ### What exactly is sent
 
 The text comes from the rendered preview, so markdown syntax is already gone, and before the
@@ -434,6 +468,8 @@ scripts from being injected at all.
 | Play/pause            | `⌥Space` / `Alt+Space` | same                                         |
 | Stop                  | `⌥Esc` / `Alt+Esc`     | same                                         |
 | Explain the selection | `⌥H` / `Alt+H`         | same                                         |
+| Retell this section   | `⌥T` / `Alt+T`         | same                                         |
+| This spoken edition   | `⌥⇧T` / `Alt+Shift+T`  | same, in a spoken edition's preview          |
 
 With the control panel focused, <kbd>Space</kbd> plays/pauses, <kbd>Esc</kbd> closes an open
 slider and otherwise stops, and <kbd>[</kbd>/<kbd>]</kbd> step through the speed stops.

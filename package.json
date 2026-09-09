@@ -37,7 +37,7 @@
     "run-in-browser:watch": "node build.js --web-dev && concurrently \"vscode-test-web --browser none --extensionDevelopmentPath=. ${SERVE_DIR:-.}\" \"npx http-server ./crossnote -p 6789 --cors\" \"node build.js --watch\"",
     "run-in-vscode-dev": "npx serve --cors -l 5000 --ssl-cert $HOME/certs/localhost.pem --ssl-key $HOME/certs/localhost-key.pem",
     "test": "pnpm test:unit",
-    "test:unit": "mocha --ui tdd --reporter spec test/find-fragment-target-line.test.js test/block-id-helpers.test.js test/rank-by-closeness.test.js test/read-aloud/word-spans.test.js test/read-aloud/chunker.test.js test/read-aloud/speakable.test.js test/read-aloud/error-mapping.test.js test/read-aloud/messages.test.js test/read-aloud/cache.test.js test/read-aloud/block-eligibility.test.js test/read-aloud/text-extraction.test.js test/read-aloud/selection.test.js test/read-aloud/click-to-read.test.js test/read-aloud/continuous-read.test.js test/read-aloud/player.test.js test/read-aloud/control-panel.test.js test/read-aloud/theme-settings.test.js test/read-aloud/reading-decoration.test.js test/read-aloud/kokoro-client.test.js test/read-aloud/kokoro-alignment.test.js test/read-aloud/help-prompt.test.js test/read-aloud/help-engine.test.js test/read-aloud/help-sheet.test.js test/read-aloud/help-context.test.js test/read-aloud/page-tokens.test.js test/read-aloud/page-theme.test.js test/read-aloud/page-typography.test.js test/read-aloud/follow-scroll.test.js test/read-aloud/dim-tiers.test.js test/read-aloud/word-marker.test.js test/read-aloud/chunk-timeline.test.js test/read-aloud/panel-autohide.test.js test/notes/note-format.test.js test/notes/notes-store.test.js test/notes/note-prompt.test.js test/read-aloud/note-anchor.test.js test/read-aloud/notes-sheet.test.js test/classroom/persona.test.js test/classroom/plan-prompt.test.js test/classroom/chapter-prompt.test.js test/classroom/ledger.test.js test/classroom/checks.test.js test/classroom/module-format.test.js test/classroom/module-store.test.js test/classroom/links.test.js test/read-aloud/classroom-sheet.test.js test/read-aloud/classroom-markers.test.js",
+    "test:unit": "mocha --ui tdd --reporter spec test/find-fragment-target-line.test.js test/block-id-helpers.test.js test/rank-by-closeness.test.js test/read-aloud/word-spans.test.js test/read-aloud/chunker.test.js test/read-aloud/speakable.test.js test/read-aloud/error-mapping.test.js test/read-aloud/messages.test.js test/read-aloud/cache.test.js test/read-aloud/block-eligibility.test.js test/read-aloud/text-extraction.test.js test/read-aloud/selection.test.js test/read-aloud/click-to-read.test.js test/read-aloud/continuous-read.test.js test/read-aloud/player.test.js test/read-aloud/control-panel.test.js test/read-aloud/theme-settings.test.js test/read-aloud/reading-decoration.test.js test/read-aloud/kokoro-client.test.js test/read-aloud/kokoro-alignment.test.js test/read-aloud/help-prompt.test.js test/read-aloud/help-engine.test.js test/read-aloud/help-sheet.test.js test/read-aloud/help-context.test.js test/read-aloud/page-tokens.test.js test/read-aloud/page-theme.test.js test/read-aloud/page-typography.test.js test/read-aloud/follow-scroll.test.js test/read-aloud/dim-tiers.test.js test/read-aloud/word-marker.test.js test/read-aloud/chunk-timeline.test.js test/read-aloud/panel-autohide.test.js test/notes/note-format.test.js test/notes/notes-store.test.js test/notes/note-prompt.test.js test/read-aloud/note-anchor.test.js test/read-aloud/notes-sheet.test.js test/classroom/persona.test.js test/classroom/plan-prompt.test.js test/classroom/chapter-prompt.test.js test/classroom/ledger.test.js test/classroom/checks.test.js test/classroom/module-format.test.js test/classroom/module-store.test.js test/classroom/links.test.js test/read-aloud/classroom-sheet.test.js test/read-aloud/classroom-markers.test.js test/retell/sections.test.js test/retell/estimate.test.js test/retell/retell-prompt.test.js test/retell/checks.test.js test/retell/edition-format.test.js test/retell/edition-store.test.js test/read-aloud/retell-sheet.test.js test/read-aloud/retell-markers.test.js",
     "vscode:prepublish": "pnpm install --frozen-lockfile && pnpm build",
     "watch": "gulp copy-files && gulp clean-out && node build.js --watch"
   },
@@ -317,6 +317,46 @@
       {
         "command": "markdown-preview-enhanced.classroom.delete",
         "title": "%markdown-preview-enhanced.classroom.delete.title%",
+        "enablement": "!isWeb"
+      },
+      {
+        "command": "markdown-preview-enhanced.readAloud.retell",
+        "title": "%markdown-preview-enhanced.readAloud.retell.title%",
+        "enablement": "!isWeb"
+      },
+      {
+        "command": "markdown-preview-enhanced.readAloud.retellEdition",
+        "title": "%markdown-preview-enhanced.readAloud.retellEdition.title%",
+        "enablement": "!isWeb"
+      },
+      {
+        "command": "markdown-preview-enhanced.retell.document",
+        "title": "%markdown-preview-enhanced.retell.document.title%",
+        "enablement": "!isWeb"
+      },
+      {
+        "command": "markdown-preview-enhanced.retell.open",
+        "title": "%markdown-preview-enhanced.retell.open.title%",
+        "enablement": "!isWeb"
+      },
+      {
+        "command": "markdown-preview-enhanced.retell.openFolder",
+        "title": "%markdown-preview-enhanced.retell.openFolder.title%",
+        "enablement": "!isWeb"
+      },
+      {
+        "command": "markdown-preview-enhanced.retell.continue",
+        "title": "%markdown-preview-enhanced.retell.continue.title%",
+        "enablement": "!isWeb"
+      },
+      {
+        "command": "markdown-preview-enhanced.retell.cancel",
+        "title": "%markdown-preview-enhanced.retell.cancel.title%",
+        "enablement": "!isWeb"
+      },
+      {
+        "command": "markdown-preview-enhanced.retell.delete",
+        "title": "%markdown-preview-enhanced.retell.delete.title%",
         "enablement": "!isWeb"
       }
     ],
@@ -1296,6 +1336,27 @@
           "description": "%markdown-preview-enhanced.classroomMarker.description%",
           "default": true,
           "type": "boolean"
+        },
+        "markdown-preview-enhanced.retellEnabled": {
+          "description": "%markdown-preview-enhanced.retellEnabled.description%",
+          "default": true,
+          "type": "boolean"
+        },
+        "markdown-preview-enhanced.retellDirectory": {
+          "description": "%markdown-preview-enhanced.retellDirectory.description%",
+          "default": "",
+          "type": "string",
+          "scope": "machine"
+        },
+        "markdown-preview-enhanced.retellAutoOpen": {
+          "description": "%markdown-preview-enhanced.retellAutoOpen.description%",
+          "default": true,
+          "type": "boolean"
+        },
+        "markdown-preview-enhanced.retellMarker": {
+          "description": "%markdown-preview-enhanced.retellMarker.description%",
+          "default": true,
+          "type": "boolean"
         }
       }
     },
@@ -1406,6 +1467,16 @@
       {
         "command": "markdown-preview-enhanced.readAloud.classroomModule",
         "key": "alt+shift+c",
+        "when": "activeWebviewPanelId == 'markdown-preview-enhanced' || activeCustomEditorId == 'markdown-preview-enhanced'"
+      },
+      {
+        "command": "markdown-preview-enhanced.readAloud.retell",
+        "key": "alt+t",
+        "when": "activeWebviewPanelId == 'markdown-preview-enhanced' || activeCustomEditorId == 'markdown-preview-enhanced'"
+      },
+      {
+        "command": "markdown-preview-enhanced.readAloud.retellEdition",
+        "key": "alt+shift+t",
         "when": "activeWebviewPanelId == 'markdown-preview-enhanced' || activeCustomEditorId == 'markdown-preview-enhanced'"
       }
     ],

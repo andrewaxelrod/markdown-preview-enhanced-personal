@@ -2864,11 +2864,501 @@ html {
 }
 
 /* --------------------------------------------------------------------------
+ * 3g. Retell (`featrues/15-convert-readable/spec.md` §5, §12)
+ *
+ * Two more sheets in the help sheet's slot: the Retell sheet (the section
+ * rows with their word counts by kind, the widened line, the shape, the
+ * estimate, the engine, what will be sent, the document's editions, then the
+ * progress card) and the Edition sheet of an edition's own preview. Both
+ * repeat the classroom sheets' container and take the page's size and
+ * measure in media/read-aloud-page.css. Every region is chrome
+ * (`.mpe-ra-ui`): neither sheet is a reading scope. The ear marker takes the
+ * note tokens, so it dims with the tiers and passes the same contrast.
+ * ----------------------------------------------------------------------- */
+
+.mpe-ra-retell,
+.mpe-ra-edition {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 10px);
+  transform: translateX(-50%);
+  z-index: 0;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 680px;
+  max-width: calc(100vw - 32px);
+  max-height: 60vh;
+  padding: 16px 20px 18px;
+  border: 1px solid var(--mpe-ra-panel-border);
+  border-radius: 16px;
+  background: var(--mpe-ra-panel-bg);
+  color: var(--mpe-ra-panel-fg);
+  box-shadow: var(--mpe-ra-panel-shadow);
+  font-family: var(--vscode-font-family, sans-serif);
+  font-size: 13px;
+  line-height: 1.35;
+  text-align: left;
+}
+
+.mpe-ra-retell[hidden] {
+  display: none;
+}
+
+.mpe-ra-edition[hidden] {
+  display: none;
+}
+
+.mpe-ra-retell:focus-visible,
+.mpe-ra-edition:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, #007fd4);
+  outline-offset: 2px;
+}
+
+.mpe-ra-retell-head,
+.mpe-ra-edition-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+}
+
+.mpe-ra-retell-title,
+.mpe-ra-edition-title {
+  flex: 1 1 auto;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+/* Everything between the head and the footer scrolls as one column. */
+.mpe-ra-retell-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-right: 2px;
+}
+
+.mpe-ra-retell-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.mpe-ra-retell-form[hidden] {
+  display: none;
+}
+
+/* The section rows (§5.2): the heading, and the quiet word line under it. */
+.mpe-ra-retell-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mpe-ra-retell-sections[hidden] {
+  display: none;
+}
+
+.mpe-ra-retell-section-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mpe-ra-retell-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 0;
+}
+
+.mpe-ra-retell-row[hidden] {
+  display: none;
+}
+
+.mpe-ra-retell-row-heading {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.mpe-ra-retell-row-words {
+  font-size: 12px;
+  line-height: 1.4;
+  opacity: 0.75;
+}
+
+.mpe-ra-retell-more {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  opacity: 0.7;
+}
+
+.mpe-ra-retell-more[hidden] {
+  display: none;
+}
+
+.mpe-ra-retell-widened,
+.mpe-ra-retell-shape,
+.mpe-ra-retell-estimate,
+.mpe-ra-retell-sending {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.mpe-ra-retell-widened {
+  padding-left: 10px;
+  border-left: 3px solid var(--mpe-ra-panel-track);
+  opacity: 0.85;
+}
+
+.mpe-ra-retell-widened[hidden] {
+  display: none;
+}
+
+.mpe-ra-retell-shape[hidden] {
+  display: none;
+}
+
+.mpe-ra-retell-estimate {
+  font-weight: 600;
+}
+
+.mpe-ra-retell-estimate[hidden] {
+  display: none;
+}
+
+.mpe-ra-retell-engine-field[hidden] {
+  display: none;
+}
+
+.mpe-ra-retell-sending[hidden] {
+  display: none;
+}
+
+.mpe-ra-retell-sending.is-skeleton {
+  opacity: 0.6;
+}
+
+/* The document's editions (§5.2, §11.3). */
+.mpe-ra-retell-editions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--mpe-ra-panel-border);
+}
+
+.mpe-ra-retell-editions[hidden] {
+  display: none;
+}
+
+.mpe-ra-retell-editions-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.mpe-ra-retell-edition-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mpe-ra-retell-edition-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.mpe-ra-retell-edition-row[hidden] {
+  display: none;
+}
+
+.mpe-ra-retell-edition-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.mpe-ra-retell-edition-meta {
+  flex: none;
+  font-size: 11px;
+  opacity: 0.65;
+  white-space: nowrap;
+}
+
+.mpe-ra-retell-orphan {
+  flex: none;
+}
+
+/* The progress card (§5.4). */
+.mpe-ra-retell-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mpe-ra-retell-card[hidden] {
+  display: none;
+}
+
+.mpe-ra-retell-card-title[hidden] {
+  display: none;
+}
+
+/* A unit a Rebuild copied forward (§9.8): the check, muted. */
+.mpe-ra-chapter-row[data-state='cached'] .mpe-ra-chapter-glyph {
+  color: var(--mpe-ra-accent);
+  opacity: 0.55;
+}
+
+.mpe-ra-retell-elapsed {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.4;
+  opacity: 0.7;
+}
+
+.mpe-ra-retell-elapsed[hidden] {
+  display: none;
+}
+
+.mpe-ra-retell-error {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--mpe-ra-error, #c62828);
+}
+
+.mpe-ra-retell-error[hidden] {
+  display: none;
+}
+
+/* The Edition sheet (§12.2): every row is a button that opens the source. */
+.mpe-ra-edition-from {
+  margin: 0;
+  flex: none;
+  font-size: 12px;
+  line-height: 1.45;
+  opacity: 0.8;
+}
+
+.mpe-ra-edition-from[hidden] {
+  display: none;
+}
+
+.mpe-ra-edition-rows {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.mpe-ra-bar .mpe-ra-edition-row {
+  box-sizing: border-box;
+  width: 100%;
+  margin: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.mpe-ra-bar .mpe-ra-edition-row:hover {
+  background: var(--mpe-ra-panel-hover);
+}
+
+.mpe-ra-bar .mpe-ra-edition-row:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, #007fd4);
+  outline-offset: 1px;
+}
+
+.mpe-ra-edition-error[hidden] {
+  display: none;
+}
+
+/* Footers: the classroom footer's shape; Build (or Rebuild) is the primary
+ * and comes last, so a wrapped footer at 600 px keeps it on the final row
+ * (§18 C7). */
+.mpe-ra-retell-footer,
+.mpe-ra-edition-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  flex: none;
+  padding-top: 10px;
+  border-top: 1px solid var(--mpe-ra-panel-border);
+}
+
+.mpe-ra-bar .mpe-ra-retell-build,
+.mpe-ra-bar .mpe-ra-retell-rebuild {
+  order: 9;
+  margin-left: auto;
+}
+
+.mpe-ra-bar .mpe-ra-retell-build:not([disabled]),
+.mpe-ra-bar .mpe-ra-retell-rebuild:not([disabled]),
+.mpe-ra-bar .mpe-ra-retell-continue:not([disabled]),
+.mpe-ra-bar .mpe-ra-edition-continue:not([disabled]) {
+  border-color: transparent;
+  background: var(--mpe-ra-accent);
+  color: var(--mpe-ra-accent-fg);
+}
+
+.mpe-ra-bar .mpe-ra-retell-build:not([disabled]):hover,
+.mpe-ra-bar .mpe-ra-retell-rebuild:not([disabled]):hover,
+.mpe-ra-bar .mpe-ra-retell-continue:not([disabled]):hover,
+.mpe-ra-bar .mpe-ra-edition-continue:not([disabled]):hover {
+  background: var(--mpe-ra-accent-hover);
+}
+
+/* The edition preview's bar button (§12.2): a badge that counts, or warns. */
+.mpe-ra-bar .mpe-ra-bar-retell {
+  position: relative;
+}
+
+.mpe-ra-bar .mpe-ra-bar-retell[hidden] {
+  display: none;
+}
+
+.mpe-ra-bar .mpe-ra-bar-retell.is-active {
+  background: var(--mpe-ra-panel-hover);
+}
+
+/* §12.5 — the ear marker: the note marker's box in the right margin, the
+ * note tokens for ink and badge. Under a note marker or a module marker on
+ * the same block it sits 1.6em lower (`is-below-note`, the top set inline);
+ * under both, 3.2em lower (`is-below-two`). */
+.mpe-ra-retell-marker {
+  position: absolute;
+  top: 0.1em;
+  right: -1.9em;
+  z-index: 2;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5em;
+  height: 1.5em;
+  min-width: 24px;
+  min-height: 24px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--mpe-ra-note-ink);
+  font-size: inherit;
+  line-height: 1;
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.mpe-ra-retell-marker svg {
+  width: 1em;
+  height: 1em;
+  min-width: 16px;
+  min-height: 16px;
+}
+
+.mpe-ra-retell-marker:hover {
+  color: var(--mpe-ra-note-ink-strong);
+  background: var(--mpe-ra-note-hover-surface);
+}
+
+.mpe-ra-retell-marker:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, #007fd4);
+  outline-offset: 1px;
+}
+
+.mpe-ra-retell-marker.is-active {
+  color: var(--mpe-ra-note-badge-fg);
+  background: var(--mpe-ra-note-ink-strong);
+}
+
+.mpe-ra-retell-marker.is-stopped {
+  color: var(--mpe-ra-classroom-warning);
+}
+
+.mpe-ra-retell-marker.is-below-note {
+  top: 1.7em;
+}
+
+.mpe-ra-retell-marker.is-below-two {
+  top: 3.3em;
+}
+
+.mpe-ra-retell-count,
+.mpe-ra-retell-progress {
+  position: absolute;
+  right: -0.3em;
+  box-sizing: border-box;
+  min-width: 1.4em;
+  padding: 0 0.3em;
+  border-radius: 999px;
+  background: var(--mpe-ra-note-badge-bg);
+  color: var(--mpe-ra-note-badge-fg);
+  font-family: var(--vscode-font-family, sans-serif);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.5;
+  text-align: center;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.mpe-ra-retell-count {
+  top: -0.3em;
+}
+
+/* The writing badge (`3/18`) sits at the foot, the count at the head. */
+.mpe-ra-retell-progress {
+  bottom: -0.3em;
+  font-size: 9px;
+  background: var(--mpe-ra-accent);
+  color: var(--mpe-ra-accent-fg);
+}
+
+@media (forced-colors: active) {
+  .mpe-ra-retell,
+  .mpe-ra-edition {
+    border-color: CanvasText;
+    background: Canvas;
+    color: CanvasText;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mpe-ra-retell-marker,
+  .mpe-ra-retell-card .mpe-ra-chapter-row[data-state='writing'] .mpe-ra-chapter-glyph svg {
+    transition: none;
+    animation: none;
+  }
+}
+
+/* --------------------------------------------------------------------------
  * 4. Selection affordance and hints (F2)
  * ----------------------------------------------------------------------- */
 
-/* The affordance is a cluster (09 §10; 12 §5.1; 13 §5.1): _Read aloud_,
- * _Explain_, _Note_ and _Classroom_. _Explain_ is the only way to reach help
+/* The affordance is a cluster (09 §10; 12 §5.1; 13 §5.1; 15 §5.1): _Read
+ * aloud_, _Explain_, _Note_, _Classroom_ and _Retell_. _Explain_ is the only way to reach help
  * while the panel is faded out or dismissed. The container keeps the
  * appearance the single button had; at the column's widest text size it
  * wraps to two rows rather than shrinking the buttons (13 §5.1). */
@@ -2935,7 +3425,8 @@ html {
 
 .mpe-ra-float-help svg,
 .mpe-ra-float-note svg,
-.mpe-ra-float-classroom svg {
+.mpe-ra-float-classroom svg,
+.mpe-ra-float-retell svg {
   width: 14px;
   height: 14px;
 }
@@ -3003,6 +3494,7 @@ html {
   .mpe-ra-btn,
   .mpe-ra-note-marker,
   .mpe-ra-classroom-marker,
+  .mpe-ra-retell-marker,
   .mpe-ra-bar,
   .mpe-ra-float,
   .mpe-ra-hint {

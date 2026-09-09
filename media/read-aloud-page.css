@@ -1158,6 +1158,58 @@ html[data-mpe-ra-page]
 }
 
 /* --------------------------------------------------------------------------
+ * 7f. Retell on the page (15 §5.2, §12.2, §12.5, §18 C6–C7)
+ *
+ * The two sheets take the help sheet's size and measure (7c); the ear
+ * marker takes the note tokens of 7d, so it dims with the tiers and passes
+ * the same contrast; the warning tint is the warning pair. The chrome
+ * inside keeps its px sizes.
+ * ----------------------------------------------------------------------- */
+
+html[data-mpe-ra-page] body :is(.mpe-ra-retell, .mpe-ra-edition) {
+  font-size: calc(var(--mpe-ra-page-text-size, 20) * 1rem / 16);
+  line-height: var(--mpe-ra-page-line-height, 1.6);
+  width: calc(var(--mpe-ra-page-measure, 33em) + 40px);
+  max-height: 70vh;
+  --mpe-ra-panel-track: var(--rule);
+  transition:
+    color 150ms ease,
+    background-color 150ms ease;
+}
+
+html[data-mpe-ra-page] body .mpe-ra-retell-marker {
+  color: var(--mpe-ra-note-ink);
+}
+
+html[data-mpe-ra-page] body .mpe-ra-retell-marker:hover {
+  color: var(--mpe-ra-note-ink-strong);
+}
+
+html[data-mpe-ra-page] body .mpe-ra-retell-marker.is-active {
+  color: var(--mpe-ra-note-badge-fg);
+  background: var(--mpe-ra-note-ink-strong);
+}
+
+html[data-mpe-ra-page] body .mpe-ra-retell-marker.is-stopped {
+  color: var(--warning-text);
+}
+
+html[data-mpe-ra-page] body .mpe-ra-retell-progress {
+  background: var(--focus);
+  color: var(--surface);
+}
+
+html[data-mpe-ra-page]
+  :is(
+    .mpe-ra-retell,
+    .mpe-ra-edition,
+    .mpe-ra-edition-row,
+    .mpe-ra-retell-marker
+  ):focus-visible {
+  outline-color: var(--focus);
+}
+
+/* --------------------------------------------------------------------------
  * 8. Transitions (requirement 3.5)
  *
  * Colour and background only, 150 ms, on the surfaces that repaint when the

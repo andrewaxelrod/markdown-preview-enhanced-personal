@@ -72,6 +72,7 @@ import {
 } from './log';
 import {
   type ClassroomModuleConfig,
+  type RetellEditionConfig,
   HELP_FIELD_CAPS,
   type CancelRequest,
   type HelpRequest,
@@ -130,6 +131,13 @@ const CLASSROOM_WEB_BUILD_MESSAGE =
 const CLASSROOM_CONTROL_ACTIONS: ReadAloudControlAction[] = [
   'classroom',
   'classroomModule',
+];
+/** Retell (15 §3) — desktop only; `Alt+T` and `Alt+Shift+T` say so on the web. */
+const RETELL_WEB_BUILD_MESSAGE =
+  'Retell is not available in the web extension.';
+const RETELL_CONTROL_ACTIONS: ReadAloudControlAction[] = [
+  'retell',
+  'retellEdition',
 ];
 const NOTE_CONTROL_ACTIONS: ReadAloudControlAction[] = [
   'note',
@@ -341,6 +349,12 @@ export class ReadAloudController implements vscode.Disposable {
    */
   public moduleConfigFor:
     ((sourceUri: vscode.Uri) => ClassroomModuleConfig | null) | null = null;
+  /**
+   * Retell (15 §12.2): what an edition preview's config carries, or null for
+   * any other document. Set by `extension-common.ts`.
+   */
+  public editionConfigFor:
+    ((sourceUri: vscode.Uri) => RetellEditionConfig | null) | null = null;
 
   public addConfigListener(listener: (sourceUri: vscode.Uri) => void): void {
     this.configListeners.push(listener);
@@ -463,6 +477,7 @@ export class ReadAloudController implements vscode.Disposable {
   public async control(
     action: ReadAloudControlAction,
     noteId?: string,
+    extra?: Partial<ReadAloudControlMessage>,
   ): Promise<void> {
     if (action === 'help' && this.deps.isWebBuild) {
       // §11 check 12 — the web build has no help button, and `Alt+H` says why
@@ -478,6 +493,10 @@ export class ReadAloudController implements vscode.Disposable {
       void vscode.window.showInformationMessage(CLASSROOM_WEB_BUILD_MESSAGE);
       return;
     }
+    if (RETELL_CONTROL_ACTIONS.includes(action) && this.deps.isWebBuild) {
+      void vscode.window.showInformationMessage(RETELL_WEB_BUILD_MESSAGE);
+      return;
+    }
     if (this.guardWebBuild()) {
       return;
     }
@@ -488,6 +507,9 @@ export class ReadAloudController implements vscode.Disposable {
       };
       if (noteId) {
         message.noteId = noteId;
+      }
+      if (extra) {
+        Object.assign(message, extra);
       }
       await this.deps.postToAll(message);
     } catch (error) {
@@ -1079,6 +1101,9 @@ export class ReadAloudController implements vscode.Disposable {
       classroomAvailable: !this.deps.isWebBuild && settings.classroom.enabled,
       // 13 §12.5 — the module marker, live like the other switches.
       classroomMarker: settings.classroom.marker,
+      // Retell (15 §14.3): the same reasons as classroom.
+      retellAvailable: !this.deps.isWebBuild && settings.retell.enabled,
+      retellMarker: settings.retell.marker,
     };
     // A module preview learns what it shows (13 §12.2). A broadcast (no
     // `sourceUri`) leaves the field out, so the webview keeps its value.
@@ -1088,6 +1113,15 @@ export class ReadAloudController implements vscode.Disposable {
       } catch (error) {
         readAloudLog(`classroom: module config failed: ${String(error)}`);
         config.classroomModule = null;
+      }
+    }
+    // An edition preview learns what it shows (15 §12.2), the same way.
+    if (sourceUri && this.editionConfigFor) {
+      try {
+        config.retellEdition = this.editionConfigFor(sourceUri);
+      } catch (error) {
+        readAloudLog(`retell: edition config failed: ${String(error)}`);
+        config.retellEdition = null;
       }
     }
     return config;

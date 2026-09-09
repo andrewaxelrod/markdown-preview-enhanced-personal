@@ -1818,4 +1818,252 @@ suite('read-aloud/messages', function () {
       }
     });
   });
+
+  suite('retell parsers (15 §14.2)', function () {
+    const EDITION_ID = '20260907T104512Z-9a3f';
+    const anchor = () => ({
+      block: 'b7c1a904',
+      line: 208,
+      exact: '7. Specs, ADRs, constitution',
+      prefix: '',
+      suffix: '',
+      offset: 0,
+      blocks: 1,
+    });
+    const fields = (overrides) =>
+      Object.assign(
+        {
+          title: 'Agent-Ready Repos',
+          breadcrumb: ['Agent-Ready Repos', '7. Specs, ADRs, constitution'],
+          before: '',
+          after: '',
+          section: '',
+          enclosing: '',
+          mentions: '',
+          contextMode: 'section',
+        },
+        overrides || {},
+      );
+    const range = (overrides) =>
+      Object.assign(
+        { startLine: 208, endLine: 377, scope: 'selection' },
+        overrides || {},
+      );
+
+    test('parseRetellPrepareArgs takes the uri, the request id, the fields and the one-based range', function () {
+      const request = messages.parseRetellPrepareArgs([
+        URI,
+        REQUEST_ID,
+        fields(),
+        range(),
+      ]);
+      assert.ok(request);
+      assert.strictEqual(request.sourceUri, URI);
+      assert.strictEqual(request.requestId, REQUEST_ID);
+      assert.strictEqual(request.fields.title, 'Agent-Ready Repos');
+      assert.strictEqual(request.startLine, 208);
+      assert.strictEqual(request.endLine, 377);
+      assert.strictEqual(request.scope, 'selection');
+      const whole = messages.parseRetellPrepareArgs([
+        URI,
+        REQUEST_ID,
+        fields(),
+        range({ startLine: 1, endLine: 1, scope: 'document' }),
+      ]);
+      assert.ok(whole);
+      assert.strictEqual(whole.scope, 'document');
+      const same = messages.parseRetellPrepareArgs([
+        URI,
+        REQUEST_ID,
+        fields(),
+        range({ startLine: 40, endLine: 40 }),
+      ]);
+      assert.ok(same, 'startLine may equal endLine');
+    });
+
+    test('parseRetellPrepareArgs refuses every bad field', function () {
+      for (const args of [
+        [URI, REQUEST_ID, fields()],
+        [URI, REQUEST_ID, fields(), range(), 'extra'],
+        ['', REQUEST_ID, fields(), range()],
+        [URI, 'bad id!', fields(), range()],
+        [URI, REQUEST_ID, 'fields', range()],
+        [URI, REQUEST_ID, fields({ contextMode: 'odd' }), range()],
+        [URI, REQUEST_ID, fields(), range({ startLine: 377, endLine: 208 })],
+        [URI, REQUEST_ID, fields(), range({ startLine: 0 })],
+        [URI, REQUEST_ID, fields(), range({ startLine: 2.5 })],
+        [URI, REQUEST_ID, fields(), range({ endLine: '377' })],
+        [URI, REQUEST_ID, fields(), range({ endLine: 1000001 })],
+        [URI, REQUEST_ID, fields(), range({ scope: 'block' })],
+        [URI, REQUEST_ID, fields(), range({ scope: undefined })],
+        [URI, REQUEST_ID, fields(), null],
+        null,
+      ]) {
+        assert.strictEqual(
+          messages.parseRetellPrepareArgs(args),
+          undefined,
+          JSON.stringify(args),
+        );
+      }
+    });
+
+    test('parseRetellBuildArgs takes the anchor and the edition id, null for a new edition', function () {
+      const request = messages.parseRetellBuildArgs([
+        URI,
+        REQUEST_ID,
+        fields(),
+        anchor(),
+        range({ editionId: null }),
+      ]);
+      assert.ok(request);
+      assert.deepStrictEqual(request.anchor, anchor());
+      assert.strictEqual(request.editionId, null);
+      assert.strictEqual(request.startLine, 208);
+      assert.strictEqual(request.scope, 'selection');
+      const rebuild = messages.parseRetellBuildArgs([
+        URI,
+        REQUEST_ID,
+        fields(),
+        anchor(),
+        range({ editionId: EDITION_ID }),
+      ]);
+      assert.ok(rebuild);
+      assert.strictEqual(rebuild.editionId, EDITION_ID);
+      const omitted = messages.parseRetellBuildArgs([
+        URI,
+        REQUEST_ID,
+        fields(),
+        anchor(),
+        range(),
+      ]);
+      assert.ok(omitted, 'editionId may be omitted');
+      assert.strictEqual(omitted.editionId, null);
+      // The whole-document command has no selection: a null anchor is fine
+      // in document scope only (§12.5).
+      const document = messages.parseRetellBuildArgs([
+        URI,
+        REQUEST_ID,
+        fields(),
+        null,
+        range({ startLine: 1, endLine: 1, scope: 'document' }),
+      ]);
+      assert.ok(document);
+      assert.strictEqual(document.anchor, null);
+      assert.strictEqual(document.scope, 'document');
+    });
+
+    test('parseRetellBuildArgs refuses every bad field', function () {
+      for (const args of [
+        [URI, REQUEST_ID, fields(), anchor()],
+        [URI, REQUEST_ID, fields(), anchor(), range(), 'extra'],
+        ['', REQUEST_ID, fields(), anchor(), range()],
+        [URI, 'bad id!', fields(), anchor(), range()],
+        [URI, REQUEST_ID, fields({ contextMode: 'odd' }), anchor(), range()],
+        [URI, REQUEST_ID, fields(), null, range()],
+        [URI, REQUEST_ID, fields(), { block: 'nope' }, range()],
+        [URI, REQUEST_ID, fields(), anchor(), range({ startLine: 400 })],
+        [URI, REQUEST_ID, fields(), anchor(), range({ startLine: -1 })],
+        [URI, REQUEST_ID, fields(), anchor(), range({ scope: 'page' })],
+        [URI, REQUEST_ID, fields(), anchor(), range({ editionId: 'x' })],
+        [URI, REQUEST_ID, fields(), anchor(), range({ editionId: 5 })],
+        [URI, REQUEST_ID, fields(), anchor(), 'range'],
+      ]) {
+        assert.strictEqual(
+          messages.parseRetellBuildArgs(args),
+          undefined,
+          JSON.stringify(args),
+        );
+      }
+    });
+
+    test('cancel, continue, open, delete, undo delete, open source and open folder', function () {
+      assert.deepStrictEqual(
+        messages.parseRetellCancelArgs([URI, EDITION_ID, 'sheet']),
+        { sourceUri: URI, editionId: EDITION_ID, reason: 'sheet' },
+      );
+      assert.deepStrictEqual(
+        messages.parseRetellCancelArgs([URI, EDITION_ID]),
+        { sourceUri: URI, editionId: EDITION_ID, reason: '' },
+      );
+      assert.strictEqual(
+        messages.parseRetellCancelArgs([URI, EDITION_ID, 'x'.repeat(300)])
+          .reason.length,
+        200,
+      );
+      assert.strictEqual(
+        messages.parseRetellCancelArgs([URI, 'nope', 'x']),
+        undefined,
+      );
+      for (const fn of [
+        'parseRetellContinueArgs',
+        'parseRetellOpenArgs',
+        'parseRetellDeleteArgs',
+        'parseRetellUndoDeleteArgs',
+      ]) {
+        assert.deepStrictEqual(messages[fn]([URI, EDITION_ID]), {
+          sourceUri: URI,
+          editionId: EDITION_ID,
+        });
+        for (const args of [
+          [URI],
+          [URI, EDITION_ID, 'x'],
+          [URI, 'note-1'],
+          ['', EDITION_ID],
+          [URI, 42],
+          null,
+        ]) {
+          assert.strictEqual(
+            messages[fn](args),
+            undefined,
+            fn + ' ' + JSON.stringify(args),
+          );
+        }
+      }
+      assert.deepStrictEqual(
+        messages.parseRetellOpenSourceArgs(['file:///e.md', EDITION_ID, 3]),
+        { editionUri: 'file:///e.md', editionId: EDITION_ID, n: 3 },
+      );
+      for (const args of [
+        ['file:///e.md', EDITION_ID],
+        ['file:///e.md', EDITION_ID, 0],
+        ['file:///e.md', EDITION_ID, 1001],
+        ['file:///e.md', EDITION_ID, 1.5],
+        ['file:///e.md', EDITION_ID, '3'],
+        ['', EDITION_ID, 1],
+        ['file:///e.md', 'nope', 1],
+      ]) {
+        assert.strictEqual(
+          messages.parseRetellOpenSourceArgs(args),
+          undefined,
+          JSON.stringify(args),
+        );
+      }
+      assert.strictEqual(messages.parseRetellOpenFolderArgs([URI]), URI);
+      assert.strictEqual(messages.parseRetellOpenFolderArgs([]), undefined);
+      assert.strictEqual(
+        messages.parseRetellOpenFolderArgs([URI, 'x']),
+        undefined,
+      );
+    });
+
+    test('the scopes, statuses and caps are the ones the spec names', function () {
+      assert.deepStrictEqual(messages.RETELL_SCOPES, ['selection', 'document']);
+      assert.deepStrictEqual(messages.RETELL_STATUSES, [
+        'planning',
+        'writing',
+        'done',
+        'stopped',
+        'failed',
+        'queued',
+      ]);
+      assert.deepStrictEqual(messages.RETELL_SECTION_STATUSES, [
+        'queued',
+        'writing',
+        'done',
+        'failed',
+      ]);
+      assert.strictEqual(messages.RETELL_LINE_MAX, 1000000);
+      assert.strictEqual(messages.RETELL_UNIT_MAX, 1000);
+    });
+  });
 });

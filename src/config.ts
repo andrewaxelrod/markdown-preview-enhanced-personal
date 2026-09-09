@@ -87,7 +87,11 @@ type VSCodeMPEConfigKey =
   | 'classroomFollowLinks'
   | 'classroomAutoOpen'
   | 'classroomShortTermModules'
-  | 'classroomMarker';
+  | 'classroomMarker'
+  | 'retellEnabled'
+  | 'retellDirectory'
+  | 'retellAutoOpen'
+  | 'retellMarker';
 
 type ConfigKey = keyof NotebookConfig | VSCodeMPEConfigKey;
 

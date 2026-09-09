@@ -504,6 +504,85 @@ off` mid-read dropped the page, its properties and every tier class and kept the
     cases in `messages.test.js`, `help-engine.test.js`, `help-sheet.test.js`,
     `control-panel.test.js`; `classroom=1` and `module=1` in `test/harness/`.
 
+- **Retell** (`featrues/15-convert-readable/spec.md`, suggestions and measurements beside
+  it): a **Retell** button on the selection cluster (`Alt+T`) and **Retell the section** on
+  the Help sheet, for a section that reads well on the page and badly out loud. It writes a
+  **spoken edition** of the section: the same content, in the same order, under the same
+  headings, with every table said as sentences, every code block said as what the code does,
+  and every identifier said as a spoken name. Nothing is added and no rule is dropped. A sheet
+  names the sections that will be sent with their word counts by kind, the engine label, and
+  the estimate (1.4 times the source's words, and the minutes at the measured 142 words a
+  minute, against 150 for a classroom module), and **Build** runs one help-engine call per h2
+  section, in order, each answer checked mechanically — no em dashes, tables, links, inline
+  code, HTML, emoji or fences; no identifier with a dot, slash, tilde or angle bracket in it;
+  the source's headings verbatim and in order (a uniform level shift is put back, never
+  retried); sentences of twenty words on average and none over thirty-five; a runaway ceiling
+  at 1.8 times the source — with one retry on a hard failure (the two sentence and length
+  rules are soft: flagged, never retried on their own), then appended to a markdown file
+  under `~/.crossnote/retell/editions/<workspace>/<relative path>/` (`retellDirectory`,
+  machine scope). The edition opens **beside** the source document as soon as its first
+  section is on disk and is a document like any other from then on: read aloud, followed,
+  dimmed, explained, noted, taught. Every section carries a link back to its own source line,
+  and the section's heading gets a quiet **ear marker** in the margin that opens the edition,
+  stacked under the note and classroom markers. In an edition's preview a bar button
+  (`Alt+Shift+T`) opens the **Edition sheet** with progress, the section list, Cancel,
+  **Continue** for a stopped or failed build, and _Open the source section_. Each section
+  records a content hash, so **Rebuild** re-calls only the sections that changed and
+  re-running it after no edit costs nothing. _Retell Document for Listening_ runs the same
+  loop over a whole document, section by section, into one edition (with a preview open the
+  sheet shows all its rows first; with none, a modal confirms and a progress notification
+  follows the build); _Open Spoken Edition_ lists every edition across documents. Settings
+  `retellEnabled`, `retellDirectory`, `retellAutoOpen`, `retellMarker`; the engine, model and
+  effort are the help settings, at `claude · sonnet · low` by default. Measured in the
+  Extension Development Host on the experiment's document: section 7 in 67 seconds over two
+  calls and 7 cents, its edition 1.40 times the source; the whole document (18 sections) in
+  about four minutes of engine time and 31 cents, ratios 1.13 to 1.80; a Rebuild after no
+  edit in 2 seconds and no call, after one edit one section re-called
+  (`featrues/15-convert-readable/experiment/README.md` has the table). Desktop only. Retell sends the selected section, or every
+  section of the document, to the engine on Build only, and copies document text outside the
+  repository; both are said in the settings' descriptions.
+  - Two numbers differ from the spec as written, measured while building. The sheet counts
+    the section's **markdown source** (fence markers, table pipes, bullets and heading marks
+    included, so the three kinds always sum), which makes section 7 of the experiment
+    1,323 words (722 prose, 242 in 3 tables, 359 in 7 code blocks) rather than the 1,246 the
+    experiment counted on the rendered text; the estimate follows (about 1,850 words · 13
+    minutes, ceiling 2,381). And with heading lines excluded from the sentence rule (D19)
+    the runs' averages are 25.7 / 27.0 / 13.1 / 21.6 / 22.6 words, so run 5 is flagged
+    `sentence-length` (soft) rather than passing. The preamble unit — the text under a
+    document's `h1`, before its first `h2` — is written one heading level deeper than the
+    source, so an edition file keeps exactly one `h1`, the frame's. Three refinements came
+    out of the Dev Host runs: an answer whose first heading is the document's title (the
+    engine echoing the breadcrumb) loses that line (`title-heading` fix) before the headings
+    are compared; headings whose texts line up but whose levels wander (an `h1` unit heading
+    over `h3` sub-headings) pass fidelity and take the source's own levels (`heading-level`
+    fix) instead of being flagged and written with two `h1`s; and the `empty` floor is half
+    of a short unit's own words (never under 10, never over 50), because a 48-word section
+    legitimately comes back at thirty. Two more from first use: the §6.3 cover check
+    reduces both the preview's selection and the file's lines to letters and digits
+    (`coverText`) rather than only dropping whitespace, because the selection is a render
+    and the file is markdown — under the spec's rule any selection starting in `**bold**`,
+    a link or a code span was refused as "out of step"; and a section a Rebuild re-calls is
+    written back in its place (`placeSection`), not appended, since appending put the file
+    out of order and made the next Rebuild re-call every section after it.
+  - Messages: webview → host `readAloudRetellPrepare`, `readAloudRetellBuild`,
+    `readAloudRetellCancel`, `readAloudRetellContinue`, `readAloudRetellOpen`,
+    `readAloudRetellOpenSource`, `readAloudRetellOpenFolder`, `readAloudRetellDelete`,
+    `readAloudRetellUndoDelete`; host → webview `readAloudRetellPrepared`,
+    `readAloudRetellProgress`, `readAloudRetellError`, `readAloudRetellEditions`;
+    `readAloudControl` actions `retell` (with `scope: 'document'` from the whole-document
+    command) and `retellEdition`, `revealAnchor` with an `editionId`; `readAloudConfig`
+    carries `retellAvailable`, `retellMarker` and, in an edition preview, `retellEdition`.
+    Every payload is validated in `messages.ts` first. `backLink` in
+    `classroom/module-format.ts` is generalised to `{ absolute, line }` with a label; the
+    classroom's rule predicates and the heading parser of `links.ts` are exported.
+  - Files: `src/retell/{sections,estimate,retell-prompt,checks,edition-format,edition-store,retell-controller}.ts`,
+    the retell layer of `media/read-aloud.js`, §3g of `media/read-aloud.css`, the tokens in
+    `media/read-aloud-page.css`, the commands and settings in `package.json`; suites
+    `test/retell/*.test.js` (fixtures copied from the experiment),
+    `test/read-aloud/{retell-sheet,retell-markers}.test.js` and new cases in
+    `messages.test.js` and `control-panel.test.js`; `retell=1` and `edition=1` in
+    `test/harness/`.
+
 ### Changed
 
 - `engines.vscode` raised from `^1.70.0` to `^1.82.0` and `@types/vscode` to `1.82.0`, so the

@@ -371,8 +371,27 @@ suite('classroom/module-format', function () {
       'Classroom: Then the human path, and it…',
     );
     assert.strictEqual(
-      format.backLink(m, MODULE_DIR),
+      format.backLink(
+        { absolute: m.document.absolute, line: m.passage.line },
+        MODULE_DIR,
+      ),
       '[Back to the passage](' + BACK + '#L393)',
+    );
+    // 15 §10.3 — generalised: any document and line, an optional label.
+    assert.strictEqual(
+      format.backLink(
+        { absolute: m.document.absolute, line: 208 },
+        MODULE_DIR,
+        'Back to the section',
+      ),
+      '[Back to the section](' + BACK + '#L208)',
+    );
+    assert.strictEqual(
+      format.backLink(
+        { absolute: m.document.absolute, line: null },
+        MODULE_DIR,
+      ),
+      '[Back to the passage](' + BACK + ')',
     );
     // A module beside its document links down; a space is percent-encoded.
     assert.strictEqual(

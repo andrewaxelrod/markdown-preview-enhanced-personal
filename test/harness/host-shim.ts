@@ -18,7 +18,7 @@
  * `[harness]` prefix, and `window.mpeHarness` exposes `checks()`,
  * `rerender()`, `charsPerLine(el)` and the event log.
  *
- * Query parameters: theme=light|dark|auto|off, size=16..28,
+ * Query parameters (the retell ones in §18 of 15): theme=light|dark|auto|off, size=16..28,
  * marker=underline|box|off, dim=0|1, autohide=0|1, font=<id>,
  * palette=blue|pink|red|green|orange, speed=<rate>, vscode=light|dark
  * (the body class `auto` follows), audio=kokoro|silent,
@@ -41,6 +41,7 @@ import type {
   CaptionedSpeechResponseWire,
 } from '../../src/read-aloud/kokoro-types';
 import planAnswer from '../classroom/fixtures/plan-answer.md';
+import run3Edition from '../retell/fixtures/run-3-retry-sonnet-low.md';
 import { budgetFor, parsePlan } from '../../src/classroom/plan-prompt';
 import type { ModuleSummary } from '../../src/classroom/module-format';
 import {
@@ -74,6 +75,15 @@ import {
   parseNoteUpdateArgs,
   parsePlayingArgs,
   parseResetPageArgs,
+  parseRetellBuildArgs,
+  parseRetellCancelArgs,
+  parseRetellContinueArgs,
+  parseRetellDeleteArgs,
+  parseRetellOpenArgs,
+  parseRetellOpenFolderArgs,
+  parseRetellOpenSourceArgs,
+  parseRetellPrepareArgs,
+  parseRetellUndoDeleteArgs,
   parseSetFontArgs,
   parseSetGlobalThemeArgs,
   parseSetHighlightThemeArgs,
@@ -84,7 +94,11 @@ import {
   parseSynthesizeArgs,
   type ClassroomChapterState,
   type ClassroomProgress,
+  type EditionSummary,
   type NoteSummary,
+  type RetellProgress,
+  type RetellSectionState,
+  type RetellUnit,
   type ReadAloudAudioMessage,
   type ReadAloudConfigMessage,
   type ReadAloudErrorMessage,
@@ -198,6 +212,11 @@ const config: ReadAloudConfigMessage & { helpContextMode: string } = {
   // 13 §12.5 — `classroommarker=0` hides the module markers.
   classroomMarker: flag('classroommarker', true),
   classroomModule: null,
+  // Retell (15 §18): `retell=1` answers Prepare and Build with canned
+  // messages; `edition=1` makes the fixture itself an edition preview.
+  retellAvailable: flag('retell', false),
+  retellMarker: flag('retellmarker', true),
+  retellEdition: null,
 };
 
 let helpTimer = 0;
@@ -755,6 +774,9 @@ function handleMessage(message: { command?: unknown; args?: unknown }): void {
       if (handleClassroomMessage(command, args)) {
         return;
       }
+      if (handleRetellMessage(command, args)) {
+        return;
+      }
       log('unknown message', command);
   }
 }
@@ -1260,6 +1282,752 @@ function seedModule(): void {
     words: status === 'done' ? 3000 : 1043,
   };
   postClassroomProgress(state, 3);
+}
+
+// ------------------------------------------------------------ the retell end
+
+/**
+ * 15 §18 — the host's part of a retell build, in memory. Prepare is answered
+ * at once with a canned `Prepared`: three units (section 7 of the experiment
+ * with its real counts, then the two smaller sections of runs 4 and 5), the
+ * estimate and the ceiling computed from their words the way
+ * `src/retell/estimate.ts` does, `retellwidened=1` for the widened line, the
+ * engine label and the document's seeded editions; `retellunits=1` sends
+ * section 7 alone (1,740 words · 12 minutes, ceiling 2,243). Build is
+ * answered with a sequence of `Progress` messages, one every `retelldelay` ms
+ * (default 800): starting, then each unit writing and done, then done, the
+ * first unit's words being those of the experiment's run 3 edition, imported
+ * as text; `retellfail=<n>` fails unit n with a canned reason; Cancel stops
+ * the sequence and posts stopped; Continue resumes from the first unit not
+ * done. `edition=1` puts a canned `retellEdition` into the config, with
+ * `editionstatus=writing|done|stopped|failed`, and posts one progress so the
+ * message line follows.
+ */
+const RETELL_DELAY_MS = Number(param('retelldelay') ?? 800);
+const RETELL_FAIL_AT = Number(param('retellfail') ?? 0);
+const RETELL_EDITION_ID = '20260907T104512Z-9a3f';
+const RETELL_EDITION_URI =
+  'file:///harness/retell/editions/harness/fixture.md/20260907T104512Z-9a3f-7-specs-adrs.md';
+const RETELL_ESTIMATE_RATIO = 1.4;
+const RETELL_CEILING_RATIO = 1.8;
+const RETELL_WORDS_PER_MINUTE = 142;
+
+const RETELL_UNITS: (RetellUnit & { tables: number; fences: number })[] = [
+  {
+    n: 1,
+    heading: '7. Specs, ADRs, constitution',
+    level: 2,
+    line: 208,
+    endLine: 377,
+    words: 1246,
+    codeWords: 349,
+    tableWords: 242,
+    proseWords: 655,
+    tables: 3,
+    fences: 7,
+  },
+  {
+    n: 2,
+    heading: '3. What goes where',
+    level: 2,
+    line: 60,
+    endLine: 80,
+    words: 304,
+    codeWords: 0,
+    tableWords: 290,
+    proseWords: 14,
+    tables: 1,
+    fences: 0,
+  },
+  {
+    n: 3,
+    heading: '9. Enforcement ladder',
+    level: 2,
+    line: 420,
+    endLine: 500,
+    words: 426,
+    codeWords: 200,
+    tableWords: 0,
+    proseWords: 226,
+    tables: 0,
+    fences: 5,
+  },
+];
+
+/** The words of each canned unit's edition: run 3, run 4, run 5. */
+const RETELL_EDITION_WORDS = [
+  (run3Edition.match(/\S+/g) ?? []).length,
+  480,
+  630,
+];
+
+function retellUnits(): (RetellUnit & { tables: number; fences: number })[] {
+  return param('retellunits') === '1' ? RETELL_UNITS.slice(0, 1) : RETELL_UNITS;
+}
+
+function retellTitle(units: RetellUnit[]): string {
+  return units.length === 1
+    ? '"' + units[0].heading + '": the spoken edition'
+    : 'Reading on a screen, without the strain: the spoken edition';
+}
+
+interface RetellBuildState {
+  sections: RetellSectionState[];
+  status: RetellProgress['status'];
+  documentUri: string;
+  title: string;
+  startedAt: number;
+  timer: number;
+  error: string | null;
+  words: number;
+}
+
+let retellBuild: RetellBuildState | null = null;
+let lastRetellBuild: RetellBuildState | null = null;
+
+function retellProgressOf(
+  state: RetellBuildState,
+  section: number,
+): RetellProgress {
+  const writing = state.sections.find((s) => s.status === 'writing');
+  return {
+    editionId: RETELL_EDITION_ID,
+    documentUri: state.documentUri,
+    editionUri: RETELL_EDITION_URI,
+    status: state.status,
+    title: state.title,
+    section: writing ? writing.n : section,
+    of: state.sections.length,
+    sectionHeading: writing ? writing.heading : '',
+    sections: state.sections.map((s) => ({ ...s, flagged: s.flagged.slice() })),
+    elapsedMs: performance.now() - state.startedAt,
+    words: state.words,
+    queuePosition: 0,
+    hasSection: state.sections.some((s) => s.status === 'done'),
+    error: state.error,
+  };
+}
+
+function postRetellProgress(state: RetellBuildState, section = 0): void {
+  const progress = retellProgressOf(state, section);
+  log('retell', progress.status + ' ' + progress.section + '/' + progress.of);
+  postToPlayer({ command: 'readAloudRetellProgress', ...progress });
+  const seeded = retellEditions.get(RETELL_EDITION_ID);
+  if (seeded) {
+    seeded.status = progress.status;
+    seeded.done = progress.sections.filter((s) => s.status === 'done').length;
+  }
+}
+
+/** One step of the canned sequence, `RETELL_DELAY_MS` after the last. */
+function retellStep(state: RetellBuildState): void {
+  if (retellBuild !== state) {
+    return;
+  }
+  const writing = state.sections.findIndex((s) => s.status === 'writing');
+  if (writing >= 0) {
+    if (RETELL_FAIL_AT === writing + 1) {
+      state.sections[writing].status = 'failed';
+      state.status = 'failed';
+      state.error =
+        'claude exited with code 1: canned failure for section ' +
+        (writing + 1);
+      postRetellProgress(state);
+      retellBuild = null;
+      lastRetellBuild = state;
+      return;
+    }
+    state.sections[writing].status = 'done';
+    // Run 4 missed the sentence average by nine tenths of a word (§9.3).
+    state.sections[writing].flagged = writing === 1 ? ['sentence-length'] : [];
+    state.words += RETELL_EDITION_WORDS[writing] ?? 500;
+  }
+  const next = state.sections.findIndex((s) => s.status !== 'done');
+  if (next < 0) {
+    state.status = 'done';
+    postRetellProgress(state);
+    retellBuild = null;
+    lastRetellBuild = state;
+    postRetellEditions();
+    return;
+  }
+  state.sections[next].status = 'writing';
+  state.status = 'writing';
+  postRetellProgress(state, next + 1);
+  state.timer = window.setTimeout(() => retellStep(state), RETELL_DELAY_MS);
+}
+
+function startRetellBuild(
+  documentUri: string,
+  resume: RetellBuildState | null,
+): void {
+  const units = retellUnits();
+  const sections: RetellSectionState[] = resume
+    ? resume.sections.map((s) => ({
+        ...s,
+        status: s.status === 'done' ? 'done' : 'queued',
+      }))
+    : units.map((u) => ({
+        n: u.n,
+        heading: u.heading,
+        status: 'queued',
+        flagged: [],
+        cached: false,
+      }));
+  const state: RetellBuildState = {
+    sections,
+    status: resume ? 'writing' : 'planning',
+    documentUri,
+    title: retellTitle(units),
+    startedAt: performance.now(),
+    timer: 0,
+    error: null,
+    words: resume ? resume.words : 0,
+  };
+  retellBuild = state;
+  if (!resume) {
+    // Starting shows before the first call returns.
+    postRetellProgress(state);
+  }
+  if (!retellEditions.has(RETELL_EDITION_ID)) {
+    // The file exists from Build (§5.4 step 2): the marker appears at once.
+    retellEditions.set(
+      RETELL_EDITION_ID,
+      retellSummaryOf(RETELL_EDITION_ID, state.title, 'writing', 0, units),
+    );
+    postRetellEditions();
+  }
+  state.timer = window.setTimeout(() => retellStep(state), RETELL_DELAY_MS);
+}
+
+// 15 §12.5 — the document's editions, with the anchors the markers hang on.
+const retellEditions = new Map<string, EditionSummary>();
+const retellDeleting = new Map<string, number>();
+
+function retellSummaryOf(
+  id: string,
+  title: string,
+  status: EditionSummary['status'],
+  done: number,
+  units: RetellUnit[],
+  anchor?: EditionSummary['anchors'][number],
+): EditionSummary {
+  const first = units[0];
+  return {
+    id,
+    title,
+    created: '2026-09-07T10:' + id.slice(11, 13) + ':12Z',
+    status,
+    sections: units.length,
+    done,
+    minutes: Math.max(
+      1,
+      Math.round(
+        (done * (RETELL_EDITION_WORDS[0] ?? 1500)) / RETELL_WORDS_PER_MINUTE,
+      ),
+    ),
+    // The whole-document command's anchor: the heading text, no block key
+    // (§12.5), so `anchorNotes` finds the heading by its own text.
+    anchors: [
+      anchor ?? {
+        exact: first ? first.heading : '',
+        block: '',
+        line: first ? first.line : null,
+        prefix: '',
+        suffix: '',
+        offset: 0,
+        blocks: 1,
+      },
+    ],
+    headings: ['Reading on a screen, without the strain'],
+    documentTitle: 'Reading on a screen, without the strain',
+    unitHeadings: units.map((u) => u.heading),
+  };
+}
+
+function postRetellEditions(): void {
+  const deleting = Array.from(retellDeleting.keys());
+  const editions = Array.from(retellEditions.values()).filter(
+    (e) => !deleting.includes(e.id),
+  );
+  postToPlayer({
+    command: 'readAloudRetellEditions',
+    sourceUri: NOTES_SOURCE_URI,
+    editions,
+    deleting,
+    deleteMode: 'trash',
+  });
+  log('retell', 'editions posted ' + editions.length);
+}
+
+/**
+ * Seed two canned editions once the fixture is in the page: one on the
+ * first h2 heading, anchored by its text alone with no block key (the
+ * whole-document command's anchor), and one on the noted paragraph, so its
+ * ear marker sits third in the stack under the note and module markers.
+ */
+function seedRetellEditions(): void {
+  if (!config.retellAvailable || param('count') === '0') {
+    return;
+  }
+  const core = (window as unknown as { MpeReadAloudCore: any })
+    .MpeReadAloudCore;
+  const target = root();
+  if (!core || !target) {
+    return;
+  }
+  const children = Array.from(target.children);
+  const heading = children.find((el) => el.tagName === 'H2');
+  if (heading) {
+    const text = core.extractText(heading).text as string;
+    const unit: RetellUnit = {
+      n: 1,
+      heading: text,
+      level: 2,
+      line: Number(heading.getAttribute('data-source-line') ?? 0) || 1,
+      endLine: 18,
+      words: 120,
+      codeWords: 0,
+      tableWords: 0,
+      proseWords: 120,
+    };
+    retellEditions.set(
+      '20260907T100000Z-aaaa',
+      retellSummaryOf(
+        '20260907T100000Z-aaaa',
+        '"' + text + '": the spoken edition',
+        param('editionstatus') === 'stopped' ? 'stopped' : 'done',
+        param('editionstatus') === 'stopped' ? 0 : 1,
+        [unit],
+      ),
+    );
+  }
+  const noted = children.find(
+    (el) =>
+      el.tagName === 'P' &&
+      (el.textContent ?? '').includes('sixty-six is the figure'),
+  );
+  if (noted) {
+    const text = core.extractText(noted).text as string;
+    const passage = 'sixty-six is the figure that appears most often';
+    const offset = Math.max(0, text.indexOf(passage));
+    retellEditions.set(
+      '20260907T101500Z-bbbb',
+      retellSummaryOf(
+        '20260907T101500Z-bbbb',
+        'The Measure, Retold',
+        'done',
+        1,
+        [
+          {
+            n: 1,
+            heading: 'The measure',
+            level: 2,
+            line: 7,
+            endLine: 18,
+            words: 120,
+            codeWords: 0,
+            tableWords: 0,
+            proseWords: 120,
+          },
+        ],
+        {
+          exact: passage,
+          block: core.blockKey(noted, text) as string,
+          line: Number(noted.getAttribute('data-source-line') ?? 0) || null,
+          prefix: text.slice(Math.max(0, offset - 64), offset),
+          suffix: text.slice(
+            offset + passage.length,
+            offset + passage.length + 64,
+          ),
+          offset,
+          blocks: 1,
+        },
+      ),
+    );
+  }
+  log('retell', 'seeded ' + retellEditions.size + ' editions');
+  postRetellEditions();
+}
+
+function handleRetellMessage(command: string, args: unknown): boolean {
+  switch (command) {
+    case 'readAloudRetellPrepare': {
+      const request = parseRetellPrepareArgs(args);
+      if (!request) {
+        log('dropped invalid readAloudRetellPrepare message');
+        return true;
+      }
+      const units = retellUnits();
+      const sourceWords = units.reduce((sum, u) => sum + u.words, 0);
+      const words = Math.round((RETELL_ESTIMATE_RATIO * sourceWords) / 10) * 10;
+      log(
+        'retell',
+        'prepared lines ' +
+          request.startLine +
+          '–' +
+          request.endLine +
+          ' ' +
+          request.scope +
+          ' (' +
+          units.length +
+          ' units, ' +
+          sourceWords +
+          ' words)',
+      );
+      postToPlayer({
+        command: 'readAloudRetellPrepared',
+        requestId: request.requestId,
+        units: units.map((u) => ({ ...u })),
+        sourceWords,
+        estimate: {
+          words,
+          minutes: Math.max(1, Math.round(words / RETELL_WORDS_PER_MINUTE)),
+        },
+        ceiling: Math.round(RETELL_CEILING_RATIO * sourceWords),
+        widened: flag('retellwidened', false),
+        shape: 'full',
+        engine: { engine: 'claude', model: 'sonnet', effort: 'low' },
+        editions: Array.from(retellEditions.values()),
+        rebuildOf: param('retellrebuild') === '1' ? RETELL_EDITION_ID : null,
+        building: retellBuild ? retellProgressOf(retellBuild, 0) : null,
+      });
+      return true;
+    }
+    case 'readAloudRetellBuild': {
+      const request = parseRetellBuildArgs(args);
+      if (!request) {
+        log('dropped invalid readAloudRetellBuild message');
+        return true;
+      }
+      log(
+        'retell',
+        'build ' +
+          request.scope +
+          ' lines ' +
+          request.startLine +
+          '–' +
+          request.endLine +
+          (request.editionId ? ' rebuild ' + request.editionId : '') +
+          (request.anchor ? ' anchor ' + request.anchor.block : ' no anchor'),
+      );
+      startRetellBuild(request.sourceUri, null);
+      return true;
+    }
+    case 'readAloudRetellCancel': {
+      const request = parseRetellCancelArgs(args);
+      if (!request) {
+        log('dropped invalid readAloudRetellCancel message');
+        return true;
+      }
+      if (retellBuild) {
+        window.clearTimeout(retellBuild.timer);
+        const state = retellBuild;
+        retellBuild = null;
+        for (const section of state.sections) {
+          if (section.status === 'writing') {
+            section.status = 'queued';
+          }
+        }
+        state.status = 'stopped';
+        lastRetellBuild = state;
+        log('retell', 'cancelled (' + request.reason + ')');
+        postRetellProgress(state);
+      }
+      return true;
+    }
+    case 'readAloudRetellContinue': {
+      const request = parseRetellContinueArgs(args);
+      if (!request) {
+        log('dropped invalid readAloudRetellContinue message');
+        return true;
+      }
+      const resume = lastRetellBuild;
+      if (resume && !retellBuild) {
+        for (const section of resume.sections) {
+          if (section.status === 'failed') {
+            section.status = 'queued';
+          }
+        }
+        resume.error = null;
+        log(
+          'retell',
+          'continue from ' +
+            (resume.sections.filter((s) => s.status === 'done').length + 1),
+        );
+        startRetellBuild(resume.documentUri, resume);
+      }
+      return true;
+    }
+    case 'readAloudRetellDelete': {
+      const request = parseRetellDeleteArgs(args);
+      if (!request || !retellEditions.has(request.editionId)) {
+        log('dropped readAloudRetellDelete');
+        return true;
+      }
+      const timer = window.setTimeout(() => {
+        retellDeleting.delete(request.editionId);
+        retellEditions.delete(request.editionId);
+        log('retell', 'trashed ' + request.editionId);
+        postRetellEditions();
+      }, 6000);
+      retellDeleting.set(request.editionId, timer);
+      log('retell', 'deleting ' + request.editionId);
+      postRetellEditions();
+      return true;
+    }
+    case 'readAloudRetellUndoDelete': {
+      const request = parseRetellUndoDeleteArgs(args);
+      const timer = request ? retellDeleting.get(request.editionId) : undefined;
+      if (request && timer !== undefined) {
+        window.clearTimeout(timer);
+        retellDeleting.delete(request.editionId);
+        log('retell', 'undo delete ' + request.editionId);
+      }
+      postRetellEditions();
+      return true;
+    }
+    case 'readAloudRetellOpen':
+      log(
+        'retell',
+        'open ' + JSON.stringify(parseRetellOpenArgs(args) ?? 'invalid'),
+      );
+      return true;
+    case 'readAloudRetellOpenSource':
+      log(
+        'retell',
+        'open source ' +
+          JSON.stringify(parseRetellOpenSourceArgs(args) ?? 'invalid'),
+      );
+      return true;
+    case 'readAloudRetellOpenFolder':
+      log(
+        'retell',
+        'open folder ' +
+          JSON.stringify(parseRetellOpenFolderArgs(args) ?? 'invalid'),
+      );
+      return true;
+    default:
+      return false;
+  }
+}
+
+/** `edition=1` — the fixture is an edition preview; the message line follows. */
+function seedEdition(): void {
+  if (!flag('edition', false)) {
+    return;
+  }
+  const status = (param('editionstatus') ??
+    'writing') as RetellProgress['status'];
+  const sections: RetellSectionState[] = [];
+  for (let i = 0; i < 18; i++) {
+    sections.push({
+      n: i + 1,
+      heading: 'Section ' + (i + 1),
+      status:
+        status === 'done'
+          ? 'done'
+          : i < 2
+            ? 'done'
+            : i === 2
+              ? status === 'writing'
+                ? 'writing'
+                : status === 'failed'
+                  ? 'failed'
+                  : 'queued'
+              : 'queued',
+      flagged: i === 1 ? ['sentence-length'] : [],
+      cached: i === 0 && status === 'done',
+    });
+  }
+  config.retellEdition = {
+    id: RETELL_EDITION_ID,
+    title: 'Agent-Ready Repos: the spoken edition',
+    status,
+    sections,
+    documentTitle: 'Agent-Ready Repos',
+    documentPath: '___fractal___/courses/markdown/agent-ready-repos.md',
+  };
+  echoConfig();
+  const state: RetellBuildState = {
+    sections,
+    status,
+    documentUri: 'file:///harness/source.md',
+    title: 'Agent-Ready Repos: the spoken edition',
+    startedAt: performance.now(),
+    timer: 0,
+    error:
+      status === 'failed' ? 'claude exited with code 1: canned failure' : null,
+    words: status === 'done' ? 6980 : 1100,
+  };
+  postRetellProgress(state, 3);
+}
+
+/** 15 §18 — the cluster, the sheets' measure, the rows' contrast, the marker stack, the bar's count. */
+function retellChecks(): Record<string, unknown> {
+  const float = document.querySelector('.mpe-ra-float') as HTMLElement | null;
+  const floatRect =
+    float && !float.hidden ? float.getBoundingClientRect() : null;
+  const floatButtons = float
+    ? (
+        Array.from(float.querySelectorAll('.mpe-ra-float-btn')) as HTMLElement[]
+      ).filter((b) => !b.hidden)
+    : [];
+  const tops = new Set(
+    floatButtons.map((b) => Math.round(b.getBoundingClientRect().top)),
+  );
+  const column = root();
+  const columnRect = column ? column.getBoundingClientRect() : null;
+  const sheet = document.querySelector('.mpe-ra-retell') as HTMLElement | null;
+  const editionSheet = document.querySelector(
+    '.mpe-ra-edition',
+  ) as HTMLElement | null;
+  const measureOf = (el: HTMLElement | null) => {
+    if (!el || el.hidden) {
+      return null;
+    }
+    const style = getComputedStyle(el);
+    return {
+      width: el.getBoundingClientRect().width,
+      fontSize: style.fontSize,
+      lineHeight: style.lineHeight,
+      maxHeight: style.maxHeight,
+      scrollHeight: el.scrollHeight,
+    };
+  };
+  const surface = sheet ? getComputedStyle(sheet).backgroundColor : '';
+  const rowText = (selector: string) => {
+    const el = document.querySelector(selector) as HTMLElement | null;
+    if (!el || !sheet || sheet.hidden) {
+      return null;
+    }
+    const style = getComputedStyle(el);
+    return {
+      color: style.color,
+      composited: compositeOver(style.color, surface),
+      contrast: contrast(compositeOver(style.color, surface), surface),
+      fontSize: style.fontSize,
+    };
+  };
+  const badge = document.querySelector(
+    '.mpe-ra-bar-retell-badge',
+  ) as HTMLElement | null;
+  const badgeStyle = badge && !badge.hidden ? getComputedStyle(badge) : null;
+  // The marker stack (§12.5, C14): every block carrying a retell marker,
+  // with the computed and measured tops of every marker on it.
+  const stack = (
+    Array.from(
+      document.querySelectorAll('.mpe-ra-retell-marker'),
+    ) as HTMLElement[]
+  ).map((marker) => {
+    const block = marker.parentElement as HTMLElement;
+    const blockRect = block.getBoundingClientRect();
+    const markerOf = (selector: string) => {
+      const el = block.querySelector(selector) as HTMLElement | null;
+      if (!el) {
+        return null;
+      }
+      const style = getComputedStyle(el);
+      return {
+        top: style.top,
+        right: style.right,
+        topPx: Math.round(el.getBoundingClientRect().top - blockRect.top),
+        color: style.color,
+        contrast: contrast(
+          compositeOver(style.color, getComputedStyle(block).backgroundColor),
+          getComputedStyle(block).backgroundColor,
+        ),
+      };
+    };
+    return {
+      block: block.tagName.toLowerCase() + (block.id ? '#' + block.id : ''),
+      note: markerOf('.mpe-ra-note-marker'),
+      module: markerOf('.mpe-ra-classroom-marker'),
+      retell: markerOf('.mpe-ra-retell-marker'),
+      below: marker.getAttribute('data-mpe-ra-below'),
+      title: marker.getAttribute('title'),
+      count: marker.querySelector('.mpe-ra-retell-count')?.textContent ?? null,
+      progress:
+        marker.querySelector('.mpe-ra-retell-progress')?.textContent ?? null,
+      writing: marker.classList.contains('is-writing'),
+      stopped: marker.classList.contains('is-stopped'),
+      active: marker.classList.contains('is-active'),
+    };
+  });
+  return {
+    cluster: floatRect
+      ? {
+          width: floatRect.width,
+          rows: tops.size,
+          buttons: floatButtons.length,
+          insideColumn: columnRect
+            ? floatRect.right <= columnRect.right + 1
+            : null,
+        }
+      : null,
+    sheet: measureOf(sheet),
+    editionSheet: measureOf(editionSheet),
+    rows: {
+      heading: rowText('.mpe-ra-retell-row-heading'),
+      words: rowText('.mpe-ra-retell-row-words'),
+      estimate: rowText('.mpe-ra-retell-estimate'),
+      count: document.querySelectorAll('.mpe-ra-retell-row').length,
+      more:
+        (document.querySelector('.mpe-ra-retell-more') as HTMLElement | null)
+          ?.hidden === false
+          ? document.querySelector('.mpe-ra-retell-more')?.textContent
+          : null,
+    },
+    badge: badgeStyle
+      ? {
+          text: badge ? badge.textContent : '',
+          color: badgeStyle.color,
+          background: badgeStyle.backgroundColor,
+          contrast: contrast(badgeStyle.color, badgeStyle.backgroundColor),
+        }
+      : null,
+    markers: stack,
+    gutter: column ? column.classList.contains('mpe-ra-notes-gutter') : null,
+    barButtons: Array.from(
+      document.querySelectorAll('.mpe-ra-bar > .mpe-ra-bar-btn'),
+    ).filter((b) => !(b as HTMLElement).hidden).length,
+    state: {
+      sheetOpen: !!sheet && !sheet.hidden,
+      editionOpen: !!editionSheet && !editionSheet.hidden,
+      details:
+        document.querySelector('.mpe-ra-retell-details')?.textContent ?? null,
+      editionDetails:
+        document.querySelector('.mpe-ra-edition-details')?.textContent ?? null,
+      widened:
+        (document.querySelector('.mpe-ra-retell-widened') as HTMLElement | null)
+          ?.hidden === false,
+      cardRows: document.querySelectorAll(
+        '.mpe-ra-retell-card .mpe-ra-chapter-row',
+      ).length,
+      editionRows: document.querySelectorAll('.mpe-ra-edition-row').length,
+      message:
+        document.querySelector('.mpe-ra-bar-status')?.textContent ?? null,
+      chip:
+        (document.querySelector('.mpe-ra-note-chip') as HTMLElement | null)
+          ?.hidden === false
+          ? document.querySelector('.mpe-ra-note-chip-text')?.textContent
+          : null,
+      footer: Array.from(
+        document.querySelectorAll(
+          '.mpe-ra-retell-footer > button, .mpe-ra-edition-footer > button',
+        ),
+      )
+        .filter((b) => !(b as HTMLElement).hidden)
+        .map((b) => b.getAttribute('data-mpe-ra-action')),
+    },
+    stored: Array.from(retellEditions.values()).map((e) => ({
+      id: e.id,
+      title: e.title,
+      status: e.status,
+      done: e.done,
+      deleting: retellDeleting.has(e.id),
+    })),
+  };
 }
 
 // ------------------------------------------------------------ the notes end
@@ -2142,6 +2910,7 @@ function checks(): Record<string, unknown> {
     audio: audioModePromise ? 'probed' : 'not probed',
     notes: notesChecks(target),
     classroom: classroomChecks(),
+    retell: retellChecks(),
     config: { ...config },
   };
 }
@@ -2434,6 +3203,8 @@ function notesChecks(target: HTMLElement | null): Record<string, unknown> {
   postNotes,
   modules: classroomModules,
   postClassroomModules,
+  editions: retellEditions,
+  postRetellEditions,
   get scrollIntoViewCalls() {
     return scrollIntoViewCalls;
   },
@@ -2451,6 +3222,9 @@ document.addEventListener('DOMContentLoaded', () => {
     window.setTimeout(seedNotes, 100);
     window.setTimeout(seedModule, 150);
     window.setTimeout(seedClassroomModules, 200);
+    // The retell layer last (15 §12.5): its marker sits under both others.
+    window.setTimeout(seedEdition, 225);
+    window.setTimeout(seedRetellEditions, 250);
   });
   void audioMode();
 });

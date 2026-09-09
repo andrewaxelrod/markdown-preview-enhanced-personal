@@ -147,6 +147,30 @@
   var CLASSROOM_MARKER_BELOW_NOTE = '1.6em';
   var CLASSROOM_DELETE_TRASH_CHIP = 'Module moved to Trash';
   var CLASSROOM_DELETE_PERMANENT_CHIP = 'Module deleted';
+  // Retell (featrues/15-convert-readable/spec.md §5, §12): the copy deck.
+  var RETELL_TOOLTIP = 'Retell this for listening (Alt+T)';
+  var RETELL_HINT_NO_SELECTION = 'Put the cursor in a section, or select one';
+  var RETELL_HINT_NO_LINE = "This block is not in the document's source";
+  var RETELL_HINT_MS = 3000;
+  var RETELL_HELP_LABEL = 'Retell the section';
+  var RETELL_EDITION_TOOLTIP = 'This spoken edition (Alt+Shift+T)';
+  var RETELL_NOT_EDITION_HINT = 'This preview is not a spoken edition';
+  var RETELL_ANCHOR_MISSING =
+    'That section is not in this version of the document';
+  var RETELL_SHAPE_LINE =
+    'Full: the same content, in the same order, under the same headings.';
+  var RETELL_WIDENED_LINE =
+    'Your selection is part of this section; the whole section is retold.';
+  // §7 — Kokoro `af_heart` at 1× over this prose, against 150 for a module.
+  var RETELL_WORDS_PER_MINUTE = 142;
+  var RETELL_ROWS_SHOWN = 6;
+  var RETELL_TICK_MS = 1000;
+  // §12.5 — the retell marker sits this far under the lowest marker above it.
+  var RETELL_MARKER_BELOW = '1.6em';
+  // The host's cap on an anchor's exact text (`NOTE_CAPS.exact`).
+  var RETELL_ANCHOR_MAX_CHARS = 6000;
+  var RETELL_DELETE_TRASH_CHIP = 'Spoken edition moved to Trash';
+  var RETELL_DELETE_PERMANENT_CHIP = 'Spoken edition deleted';
   var NOTE_MARKER_LINE_TAGS = {
     LI: true,
     TR: true,
@@ -275,6 +299,13 @@
       '<path d="M6.5 5.2h10.4l-2.2 3.8 2.2 3.8H6.5"/></svg>',
     chevronLeft: STROKE + '<path d="m14.6 6.2-5.8 5.8 5.8 5.8"/></svg>',
     chevronRight: STROKE + '<path d="m9.4 6.2 5.8 5.8-5.8 5.8"/></svg>',
+    // Retell (15 §5.1, §12.2, §12.5): an ear, its outline as one stroke with
+    // a short inner curve, for the cluster button, the edition preview's bar
+    // button and the margin marker.
+    retell:
+      STROKE +
+      '<path d="M6.9 9.5a5.1 5.1 0 0 1 10.2 0c0 3.1-2.2 4.2-3 6-.5 1.3-.9 3.1-2.9 3.1-1.4 0-2.3-.9-2.5-2.1"/>' +
+      '<path d="M9.9 9.5a2.1 2.1 0 0 1 4.2 0c0 1.4-1.1 1.9-1.6 3"/></svg>',
   };
 
   // Keys that scroll the document when they reach it (07 §7.3): pressing one
@@ -325,6 +356,11 @@
     classroomAvailable: false,
     classroomMarker: true,
     classroomModule: null,
+    // Retell (15 §14.3): the cluster button and the sheets; and, in an
+    // edition's own preview, what the edition is.
+    retellAvailable: false,
+    retellMarker: true,
+    retellEdition: null,
   };
   try {
     if (
@@ -354,6 +390,7 @@
         applyHelpConfig(parsed);
         applyNotesConfig(parsed);
         applyClassroomConfig(parsed);
+        applyRetellConfig(parsed);
       }
     }
   } catch (error) {
@@ -475,6 +512,8 @@
     // when it opened, and whether the answer on screen has been saved.
     anchor: null,
     saved: false,
+    // Retell (15 §5.5): the passage's blocks, for the cover of the section.
+    els: [],
   };
 
   /**
@@ -556,6 +595,51 @@
       deleteMode: 'trash',
     },
     // The block a marker click opened the sheet for: its modules come first.
+    markerBlockIds: null,
+  };
+  /**
+   * Retell (15 §5, §12): the sheet's state is held here and rendered from
+   * the host's messages; the webview keeps no build state the host has not
+   * sent.
+   */
+  var retell = {
+    open: false,
+    // 'preparing' | 'ready' | 'building' | 'done' | 'error'
+    state: 'preparing',
+    requestId: null,
+    // 'selection' | 'document'
+    scope: 'selection',
+    passage: null,
+    context: null,
+    anchor: null,
+    // The two one-based lines the host resolves into units (§6.1).
+    cover: null,
+    prepared: null,
+    progress: null,
+    progressAt: 0,
+    editionId: null,
+    // What the last Build carried as `editionId`, for Retry.
+    lastEditionId: null,
+    message: '',
+    timer: 0,
+    opener: null,
+    // The Edition sheet of an edition preview (§12.2).
+    editionOpen: false,
+    editionOpener: null,
+    editionProgress: null,
+    // §12.5 — the document's editions as the host last posted them, the
+    // result of the last anchoring pass per edition, the markers by block.
+    editions: {
+      list: [],
+      byId: Object.create(null),
+      results: Object.create(null),
+      markers: new Map(),
+      markerResults: new Map(),
+      anyFound: false,
+      deleting: [],
+      deleteMode: 'trash',
+    },
+    // The block a marker click opened the sheet for: its editions come first.
     markerBlockIds: null,
   };
   var pendingClick = null;
@@ -1847,10 +1931,18 @@
       'mpe-ra-help-action mpe-ra-help-teach',
     );
     teach.hidden = true;
+    // 15 §5.5 — the explanation was too mechanical: retell the section itself.
+    var retellChip = makeHelpButton(
+      'helpRetell',
+      RETELL_HELP_LABEL,
+      'mpe-ra-help-action mpe-ra-help-retell',
+    );
+    retellChip.hidden = true;
     actions.appendChild(back);
     actions.appendChild(again);
     actions.appendChild(save);
     actions.appendChild(teach);
+    actions.appendChild(retellChip);
     actions.appendChild(resume);
 
     footer.appendChild(chips);
@@ -1878,6 +1970,7 @@
       again: again,
       save: save,
       teach: teach,
+      retell: retellChip,
       resume: resume,
     };
   }
@@ -2006,6 +2099,23 @@
     classroomBadge.hidden = true;
     classroomButton.appendChild(classroomBadge);
 
+    // 15 §12.2: the edition preview's own button, between classroom and the
+    // ×, with a progress badge. Absent in every other preview.
+    var retellButton = makeIconButton(
+      'retellEdition',
+      RETELL_EDITION_TOOLTIP,
+      'mpe-ra-bar-btn mpe-ra-bar-retell',
+      'retell',
+    );
+    retellButton.setAttribute('aria-haspopup', 'dialog');
+    retellButton.setAttribute('aria-expanded', 'false');
+    retellButton.hidden = !config.retellEdition;
+    var retellBadge = document.createElement('span');
+    retellBadge.className = 'mpe-ra-bar-badge mpe-ra-bar-retell-badge';
+    retellBadge.setAttribute('aria-hidden', 'true');
+    retellBadge.hidden = true;
+    retellButton.appendChild(retellBadge);
+
     var close = makeIconButton(
       'close',
       'Close the player',
@@ -2020,6 +2130,8 @@
     var noteChip = makeNoteChip();
     var classroomSheet = makeClassroomSheet();
     var moduleSheet = makeModuleSheet();
+    var retellSheet = makeRetellSheet();
+    var editionSheet = makeEditionSheet();
 
     bar.appendChild(progress);
     bar.appendChild(status);
@@ -2032,6 +2144,8 @@
     bar.appendChild(listSheet.root);
     bar.appendChild(classroomSheet.root);
     bar.appendChild(moduleSheet.root);
+    bar.appendChild(retellSheet.root);
+    bar.appendChild(editionSheet.root);
     bar.appendChild(noteChip.root);
     bar.appendChild(volumeButton);
     bar.appendChild(themeButton);
@@ -2042,6 +2156,7 @@
     bar.appendChild(helpButton);
     bar.appendChild(notesButton);
     bar.appendChild(classroomButton);
+    bar.appendChild(retellButton);
     bar.appendChild(close);
     document.body.appendChild(bar);
 
@@ -2081,6 +2196,10 @@
       classroomBadge: classroomBadge,
       classroom: classroomSheet,
       module: moduleSheet,
+      retellButton: retellButton,
+      retellBadge: retellBadge,
+      retell: retellSheet,
+      edition: editionSheet,
       close: close,
     };
 
@@ -2161,6 +2280,9 @@
     syncClassroomBar();
     syncClassroomSheet();
     syncModuleSheet();
+    syncRetellBar();
+    syncRetellSheet();
+    syncEditionSheet();
     renderBar();
     return bar;
   }
@@ -2880,6 +3002,9 @@
       floatParts.classroom.hidden =
         !config.classroomAvailable || floatScope !== root;
     }
+    if (floatParts && floatParts.retell) {
+      floatParts.retell.hidden = !config.retellAvailable || floatScope !== root;
+    }
     // The orphan banner's Re-attach follows the live selection too (12 §11.3).
     syncNoteReattach();
     if (!barParts || !barParts.helpButton) {
@@ -2959,6 +3084,10 @@
     if (sheet.teach) {
       // 13 §5.5 — visible whenever the sheet holds an answer.
       sheet.teach.hidden = !ready || !config.classroomAvailable;
+    }
+    if (sheet.retell) {
+      // 15 §5.5 — the same, for the section itself.
+      sheet.retell.hidden = !ready || !config.retellAvailable;
     }
 
     var resumable = canResume();
@@ -3211,6 +3340,8 @@
     closeNotesList('help');
     closeClassroom('help');
     closeModuleSheet('help');
+    closeRetell('help');
+    closeEditionSheet('help');
 
     help.open = true;
     help.state = 'idle';
@@ -3222,6 +3353,7 @@
     help.context = buildHelpContextFor(passage);
     // 12 §5.4 — the anchor of the passage behind the sheet, for Save as note.
     help.anchor = noteAnchorForPassage(passage);
+    help.els = passage.els ? passage.els.slice() : [];
     help.saved = false;
     barParts.help.root.hidden = false;
     barParts.help.input.value = '';
@@ -3265,6 +3397,7 @@
     help.message = '';
     help.context = null;
     help.anchor = null;
+    help.els = [];
     help.saved = false;
     if (barParts && barParts.help) {
       barParts.help.root.hidden = true;
@@ -3519,6 +3652,15 @@
         closeModuleSheet('escape');
         return;
       }
+      // And the two retell sheets (15 §5.4 step 6, §12.2).
+      if (retell.open) {
+        closeRetell('escape');
+        return;
+      }
+      if (retell.editionOpen) {
+        closeEditionSheet('escape');
+        return;
+      }
       handleStop();
       return;
     }
@@ -3631,7 +3773,7 @@
     return hintElement;
   }
 
-  function showHint(text, rect) {
+  function showHint(text, rect, ms) {
     if (!text) {
       return;
     }
@@ -3647,10 +3789,13 @@
     element.style.top = top + 'px';
     element.style.left = left + 'px';
     hintTimer = clearTimer(hintTimer);
-    hintTimer = setTimeout(function () {
-      hintTimer = 0;
-      element.hidden = true;
-    }, HINT_MS);
+    hintTimer = setTimeout(
+      function () {
+        hintTimer = 0;
+        element.hidden = true;
+      },
+      typeof ms === 'number' && ms > 0 ? ms : HINT_MS,
+    );
   }
 
   /**
@@ -3700,12 +3845,28 @@
     );
     teach.setAttribute('aria-haspopup', 'dialog');
     teach.hidden = !config.classroomAvailable;
+    // 15 §5.1 — the fifth button: Retell, enabled by the help predicate.
+    var retellButton = makeIconButton(
+      'floatRetell',
+      RETELL_TOOLTIP,
+      'mpe-ra-float-btn mpe-ra-float-retell',
+      'retell',
+    );
+    retellButton.setAttribute('aria-haspopup', 'dialog');
+    retellButton.hidden = !config.retellAvailable;
     floatButton.appendChild(read);
     floatButton.appendChild(explain);
     floatButton.appendChild(note);
     floatButton.appendChild(teach);
+    floatButton.appendChild(retellButton);
     floatButton.hidden = true;
-    floatParts = { read: read, help: explain, note: note, classroom: teach };
+    floatParts = {
+      read: read,
+      help: explain,
+      note: note,
+      classroom: teach,
+      retell: retellButton,
+    };
     document.body.appendChild(floatButton);
     return floatButton;
   }
@@ -3833,7 +3994,9 @@
         notes.open ||
         notes.listOpen ||
         classroom.open ||
-        classroom.moduleOpen) &&
+        classroom.moduleOpen ||
+        retell.open ||
+        retell.editionOpen) &&
       scope === root
     ) {
       hideFloat();
@@ -4205,6 +4368,7 @@
     }
     clearNoteDecorations();
     clearModuleMarkers();
+    clearRetellMarkers();
     removeThemeAttributes();
     if (root) {
       root.classList.remove(CLICK_CLASS);
@@ -5873,6 +6037,10 @@
       openClassroomFromHelp();
       return;
     }
+    if (action === 'helpRetell') {
+      openRetellFromHelp();
+      return;
+    }
     if (action === 'helpResume') {
       resumeRead();
       return;
@@ -5887,6 +6055,9 @@
     if (handleClassroomAction(action, element)) {
       return;
     }
+    if (handleRetellAction(action, element)) {
+      return;
+    }
     if (action === 'close') {
       handleStop();
       // Closing the panel closes the sheets (§4 step 7; 12 §11.7; 13 §5.4).
@@ -5895,6 +6066,8 @@
       closeNotesList('panel closed');
       closeClassroom('panel closed');
       closeModuleSheet('panel closed');
+      closeRetell('panel closed');
+      closeEditionSheet('panel closed');
       panelDismissed = true;
       dismissBar();
       return;
@@ -6287,6 +6460,8 @@
       // The module markers ride the same pass (13 §12.5), after the notes'
       // so a module marker can sit under a note marker on the same block.
       moduleMarkersPass();
+      // The retell markers are third in the stack (15 §12.5), under both.
+      retellMarkersPass();
     } catch (error) {
       /* an anchoring failure must never break the preview */
     }
@@ -6297,7 +6472,8 @@
   function gutterWanted() {
     return (
       (notes.anyFound && config.notesDecoration !== 'none') ||
-      classroom.modules.anyFound
+      classroom.modules.anyFound ||
+      retell.editions.anyFound
     );
   }
 
@@ -7344,6 +7520,8 @@
     closeNotesList('note');
     closeClassroom('note');
     closeModuleSheet('note');
+    closeRetell('note');
+    closeEditionSheet('note');
     hideFloat();
     panelDismissed = false;
     if (notes.open && notes.currentId !== id) {
@@ -7682,8 +7860,11 @@
     }
     if (action === 'noteUndo') {
       var undoId = element ? element.getAttribute('data-mpe-ra-note') : null;
-      if (element && element.getAttribute('data-mpe-ra-kind') === 'module') {
+      var undoKind = element ? element.getAttribute('data-mpe-ra-kind') : '';
+      if (undoKind === 'module') {
         undoModuleDelete(undoId);
+      } else if (undoKind === 'edition') {
+        undoEditionDelete(undoId);
       } else {
         undoDelete(undoId);
       }
@@ -7889,6 +8070,8 @@
     closeNote('notes list');
     closeClassroom('notes list');
     closeModuleSheet('notes list');
+    closeRetell('notes list');
+    closeEditionSheet('notes list');
     hideFloat();
     panelDismissed = false;
     notes.listOpen = true;
@@ -7916,7 +8099,7 @@
     }
     syncNotesBar();
     armPanelIdle();
-    if (reason !== 'note') {
+    if (reason !== 'note' && reason !== 'retell' && reason !== 'edition') {
       var target =
         opener && opener.isConnected
           ? opener
@@ -8361,6 +8544,10 @@
 
   function chapterGlyphName(state) {
     if (state.status === 'done') {
+      // 15 §5.2 — a unit copied forward by a Rebuild shows as unchanged.
+      if (state.cached) {
+        return 'check';
+      }
       return state.flagged && state.flagged.length ? 'flag' : 'check';
     }
     if (state.status === 'writing') {
@@ -8373,10 +8560,32 @@
   }
 
   function chapterRowState(state) {
+    if (state.status === 'done' && state.cached) {
+      return 'cached';
+    }
     if (state.status === 'done' && state.flagged && state.flagged.length) {
       return 'flagged';
     }
     return state.status || 'queued';
+  }
+
+  /** The row's title text: `done`, `done, flagged: …`, `unchanged`, … */
+  function chapterStateText(state) {
+    if (state.status === 'done') {
+      if (state.cached) {
+        return 'unchanged';
+      }
+      return state.flagged && state.flagged.length
+        ? 'done, flagged: ' + state.flagged.join(', ')
+        : 'done';
+    }
+    if (state.status === 'writing') {
+      return 'being written';
+    }
+    if (state.status === 'failed') {
+      return 'failed';
+    }
+    return 'queued';
   }
 
   /** One row per planned chapter with its state glyph (§5.4, §12.2). */
@@ -8394,17 +8603,9 @@
       glyph.innerHTML = ICONS[chapterGlyphName(state)];
       var text = document.createElement('span');
       text.className = 'mpe-ra-chapter-title';
-      text.textContent = (state.n ? state.n + '. ' : '') + (state.title || '');
-      var stateText =
-        state.status === 'done'
-          ? state.flagged && state.flagged.length
-            ? 'done, flagged: ' + state.flagged.join(', ')
-            : 'done'
-          : state.status === 'writing'
-            ? 'being written'
-            : state.status === 'failed'
-              ? 'failed'
-              : 'queued';
+      text.textContent =
+        (state.n ? state.n + '. ' : '') + (state.title || state.heading || '');
+      var stateText = chapterStateText(state);
       row.setAttribute('title', stateText);
       row.setAttribute('aria-label', text.textContent + ' (' + stateText + ')');
       row.appendChild(glyph);
@@ -9048,6 +9249,8 @@
     closeNote('classroom');
     closeNotesList('classroom');
     closeModuleSheet('classroom');
+    closeRetell('classroom');
+    closeEditionSheet('classroom');
 
     classroom.open = true;
     classroom.state = 'preparing';
@@ -9119,7 +9322,13 @@
     syncModuleMarkerStates();
     syncHelpButton();
     armPanelIdle();
-    if (reason !== 'help' && reason !== 'note' && reason !== 'notes list') {
+    if (
+      reason !== 'help' &&
+      reason !== 'note' &&
+      reason !== 'notes list' &&
+      reason !== 'retell' &&
+      reason !== 'edition'
+    ) {
       var target = opener && opener.isConnected ? opener : null;
       if (target) {
         try {
@@ -9224,6 +9433,8 @@
     closeNote('module');
     closeNotesList('module');
     closeClassroom('module');
+    closeRetell('module');
+    closeEditionSheet('module');
     hideFloat();
     panelDismissed = false;
     classroom.moduleOpen = true;
@@ -9257,7 +9468,9 @@
       reason !== 'help' &&
       reason !== 'note' &&
       reason !== 'notes list' &&
-      reason !== 'classroom'
+      reason !== 'classroom' &&
+      reason !== 'retell' &&
+      reason !== 'edition'
     ) {
       var target =
         opener && opener.isConnected
@@ -9514,12 +9727,17 @@
     ) {
       return;
     }
+    // 15 §12.4 — an edition's unit reveals the same way, with its own chip.
+    var edition = typeof message.editionId === 'string';
     var found = null;
     try {
       var results = core.anchorNotes(root, [
         {
-          id:
-            typeof message.moduleId === 'string' ? message.moduleId : 'module',
+          id: edition
+            ? message.editionId
+            : typeof message.moduleId === 'string'
+              ? message.moduleId
+              : 'module',
           anchor: message.anchor,
         },
       ]);
@@ -9532,7 +9750,11 @@
       flashBlock(found.el);
       return;
     }
-    showNoteChip(CLASSROOM_ANCHOR_MISSING, NOTE_CHIP_MS, null);
+    showNoteChip(
+      edition ? RETELL_ANCHOR_MISSING : CLASSROOM_ANCHOR_MISSING,
+      NOTE_CHIP_MS,
+      null,
+    );
   }
 
   // ------------------------------------------------------------- actions
@@ -10074,6 +10296,2162 @@
   }
 
   // ---------------------------------------------------------------------------
+  // 12d. Retell (featrues/15-convert-readable/spec.md)
+  //
+  // The fifth cluster button (§5.1), the Retell sheet and its five states
+  // (§5.2–§5.4), _Retell the section_ on the help sheet (§5.5), the cover the
+  // host resolves into h2 units (§6.1), and, in an edition's own preview, the
+  // bar button, the Edition sheet and the message line (§12.2) plus the reveal
+  // of a section (§12.4) and the margin marker (§12.5). The host owns the
+  // build and the files; this layer renders the card from the progress
+  // messages alone and keeps no build state the host has not sent.
+  // ---------------------------------------------------------------------------
+
+  function applyRetellConfig(message) {
+    if (typeof message.retellAvailable === 'boolean') {
+      config.retellAvailable = message.retellAvailable;
+    }
+    if (typeof message.retellMarker === 'boolean') {
+      config.retellMarker = message.retellMarker;
+    }
+    // A broadcast leaves the field out; an edition preview's own config
+    // carries an object, or null for any other document.
+    if (message.retellEdition === null) {
+      config.retellEdition = null;
+    } else if (
+      message.retellEdition &&
+      typeof message.retellEdition === 'object' &&
+      typeof message.retellEdition.id === 'string'
+    ) {
+      var edition = message.retellEdition;
+      config.retellEdition = {
+        id: edition.id,
+        title: typeof edition.title === 'string' ? edition.title : '',
+        status: typeof edition.status === 'string' ? edition.status : 'done',
+        sections: Array.isArray(edition.sections) ? edition.sections : [],
+        documentTitle:
+          typeof edition.documentTitle === 'string'
+            ? edition.documentTitle
+            : '',
+        documentPath:
+          typeof edition.documentPath === 'string' ? edition.documentPath : '',
+      };
+    }
+  }
+
+  function retellNumber(value) {
+    return typeof value === 'number' && isFinite(value) ? value : 0;
+  }
+
+  function retellCount(value) {
+    return retellNumber(value).toLocaleString();
+  }
+
+  /** §7 — the minutes at the measured 142 words a minute, never 0. */
+  function retellMinutes(words) {
+    return Math.max(
+      1,
+      Math.round(retellNumber(words) / RETELL_WORDS_PER_MINUTE),
+    );
+  }
+
+  function retellSectionsText(count) {
+    return count + ' section' + (count === 1 ? '' : 's');
+  }
+
+  // ------------------------------------------------------------- the cover
+
+  /** The direct child of the root that contains (or is) `node`, or null. */
+  function topLevelBlockOf(node) {
+    var el =
+      node && node.nodeType === 1 ? node : node ? node.parentElement : null;
+    while (el && el !== root) {
+      if (el.parentElement === root) {
+        return el;
+      }
+      el = el.parentElement;
+    }
+    return null;
+  }
+
+  /**
+   * §6.1 — the one-based source line of a top-level block, or of the nearest
+   * earlier sibling that has one; null when nothing before it carries one.
+   */
+  function retellLineOf(el) {
+    var node = el;
+    while (node) {
+      var line = core.sourceLineOf(node, node);
+      if (typeof line === 'number') {
+        return Math.max(1, line);
+      }
+      node = node.previousElementSibling;
+    }
+    return null;
+  }
+
+  /**
+   * §6.1 — the cover of a passage: its blocks' top-level blocks, and the
+   * `data-source-line` of the first and the last, which travel as they are
+   * (crossnote's are one-based, and so are the `#L` fragments).
+   */
+  function retellCoverFor(els) {
+    if (!root || !els || !els.length) {
+      return null;
+    }
+    var tops = [];
+    for (var i = 0; i < els.length; i++) {
+      var top = topLevelBlockOf(els[i]);
+      if (top && tops.indexOf(top) < 0) {
+        tops.push(top);
+      }
+    }
+    if (!tops.length) {
+      return null;
+    }
+    var first = retellLineOf(tops[0]);
+    var last = retellLineOf(tops[tops.length - 1]);
+    if (first === null && last === null) {
+      return null;
+    }
+    var startLine = first === null ? last : first;
+    var endLine = last === null ? first : last;
+    if (endLine < startLine) {
+      endLine = startLine;
+    }
+    return { startLine: startLine, endLine: endLine };
+  }
+
+  /**
+   * §6.1 — with no selection: the top-level block around the caret (a
+   * collapsed selection inside the root), else the block being read.
+   */
+  function retellBlockPassage() {
+    var block = null;
+    var selection = window.getSelection();
+    if (selection && selection.rangeCount && selection.isCollapsed) {
+      var range = selection.getRangeAt(0);
+      if (scopeOf(containerElementOf(range)) === root) {
+        block = topLevelBlockOf(range.startContainer);
+      }
+    }
+    if (
+      !block &&
+      record.scope === root &&
+      (record.state === 'playing' ||
+        record.state === 'paused' ||
+        record.state === 'loading') &&
+      record.blockEls.length
+    ) {
+      block = topLevelBlockOf(record.blockEls[0]);
+    }
+    if (!block) {
+      return null;
+    }
+    var text = '';
+    try {
+      text = core.extractText(block).text;
+    } catch (error) {
+      text = '';
+    }
+    return {
+      text: text.slice(0, RETELL_ANCHOR_MAX_CHARS),
+      els: [block],
+      range: null,
+    };
+  }
+
+  /** The anchor of a passage, its exact text held to the host's cap. */
+  function retellAnchorFor(passage) {
+    var anchor = noteAnchorForPassage(passage);
+    if (!anchor) {
+      return null;
+    }
+    if (
+      typeof anchor.exact === 'string' &&
+      anchor.exact.length > RETELL_ANCHOR_MAX_CHARS
+    ) {
+      anchor.exact = anchor.exact.slice(0, RETELL_ANCHOR_MAX_CHARS);
+    }
+    return anchor;
+  }
+
+  /** §13 — the whole-document command has no selection: the title alone. */
+  function retellDocumentFields() {
+    var title = '';
+    try {
+      var h1 = root ? root.querySelector(':scope > h1') : null;
+      if (h1) {
+        title = core.extractText(h1).text;
+      }
+    } catch (error) {
+      title = '';
+    }
+    return {
+      title: title || documentTitleFallback(),
+      breadcrumb: [],
+      before: '',
+      after: '',
+      section: '',
+      enclosing: '',
+      mentions: '',
+      contextMode: config.helpContextMode,
+    };
+  }
+
+  // ------------------------------------------------------------- the sheets
+
+  /** §5.2 — the Retell sheet, in the help sheet's slot. */
+  function makeRetellSheet() {
+    var sheet = document.createElement('div');
+    sheet.className = 'mpe-ra-ui mpe-ra-retell';
+    sheet.setAttribute('role', 'dialog');
+    sheet.setAttribute('aria-label', 'Retell');
+    sheet.setAttribute('tabindex', '-1');
+    sheet.hidden = true;
+
+    var head = document.createElement('div');
+    head.className = 'mpe-ra-retell-head';
+    var title = document.createElement('span');
+    title.className = 'mpe-ra-retell-title';
+    title.textContent = 'Retell';
+    var details = document.createElement('span');
+    details.className = 'mpe-ra-note-details mpe-ra-retell-details';
+    details.setAttribute('role', 'status');
+    details.setAttribute('aria-live', 'polite');
+    var close = makeIconButton(
+      'retellClose',
+      'Close retell',
+      'mpe-ra-bar-btn mpe-ra-sheet-close',
+      'close',
+    );
+    head.appendChild(title);
+    head.appendChild(details);
+    head.appendChild(close);
+
+    var scroll = document.createElement('div');
+    scroll.className = 'mpe-ra-retell-scroll';
+
+    var form = document.createElement('div');
+    form.className = 'mpe-ra-retell-form';
+
+    var sections = document.createElement('div');
+    sections.className = 'mpe-ra-retell-sections';
+    var sectionRows = document.createElement('div');
+    sectionRows.className = 'mpe-ra-retell-section-rows';
+    sectionRows.setAttribute('role', 'list');
+    var more = document.createElement('p');
+    more.className = 'mpe-ra-retell-more';
+    more.hidden = true;
+    sections.appendChild(sectionRows);
+    sections.appendChild(more);
+
+    var widened = document.createElement('p');
+    widened.className = 'mpe-ra-retell-widened';
+    widened.textContent = RETELL_WIDENED_LINE;
+    widened.hidden = true;
+
+    var shape = document.createElement('p');
+    shape.className = 'mpe-ra-retell-shape';
+    shape.textContent = RETELL_SHAPE_LINE;
+
+    var estimate = document.createElement('p');
+    estimate.className = 'mpe-ra-retell-estimate';
+    estimate.hidden = true;
+
+    var engine = makeButton(
+      'helpModel',
+      'Change the help model',
+      'mpe-ra-help-model mpe-ra-retell-engine',
+    );
+    var engineField = document.createElement('div');
+    engineField.className = 'mpe-ra-classroom-field mpe-ra-retell-engine-field';
+    var engineLabel = document.createElement('span');
+    engineLabel.className = 'mpe-ra-classroom-label';
+    engineLabel.textContent = 'Engine';
+    engineField.appendChild(engineLabel);
+    engineField.appendChild(engine);
+
+    var sending = document.createElement('p');
+    sending.className = 'mpe-ra-retell-sending';
+
+    var editions = document.createElement('div');
+    editions.className = 'mpe-ra-retell-editions';
+    editions.hidden = true;
+    var editionsTitle = document.createElement('p');
+    editionsTitle.className = 'mpe-ra-retell-editions-title';
+    editionsTitle.textContent = 'Spoken editions of this document';
+    var editionRows = document.createElement('div');
+    editionRows.className = 'mpe-ra-retell-edition-rows';
+    editionRows.setAttribute('role', 'list');
+    editions.appendChild(editionsTitle);
+    editions.appendChild(editionRows);
+
+    form.appendChild(sections);
+    form.appendChild(widened);
+    form.appendChild(shape);
+    form.appendChild(estimate);
+    form.appendChild(engineField);
+    form.appendChild(sending);
+    form.appendChild(editions);
+
+    var card = document.createElement('div');
+    card.className = 'mpe-ra-retell-card';
+    card.hidden = true;
+    var cardTitle = document.createElement('p');
+    cardTitle.className =
+      'mpe-ra-classroom-card-title mpe-ra-retell-card-title';
+    var rows = document.createElement('div');
+    rows.className = 'mpe-ra-classroom-chapters mpe-ra-retell-card-rows';
+    rows.setAttribute('role', 'list');
+    var elapsed = document.createElement('p');
+    elapsed.className = 'mpe-ra-retell-elapsed';
+    elapsed.hidden = true;
+    var error = document.createElement('p');
+    error.className = 'mpe-ra-retell-error';
+    error.setAttribute('role', 'alert');
+    error.hidden = true;
+    card.appendChild(cardTitle);
+    card.appendChild(rows);
+    card.appendChild(elapsed);
+    card.appendChild(error);
+
+    scroll.appendChild(form);
+    scroll.appendChild(card);
+
+    var footer = document.createElement('div');
+    footer.className = 'mpe-ra-retell-footer';
+    var cancel = makeHelpButton(
+      'retellCancel',
+      'Cancel',
+      'mpe-ra-help-action mpe-ra-retell-cancel',
+    );
+    var open = makeHelpButton(
+      'retellOpen',
+      'Open',
+      'mpe-ra-help-action mpe-ra-retell-open',
+    );
+    var cont = makeHelpButton(
+      'retellContinue',
+      'Continue',
+      'mpe-ra-help-action mpe-ra-retell-continue',
+    );
+    var retry = makeHelpButton(
+      'retellRetry',
+      'Retry',
+      'mpe-ra-help-action mpe-ra-retell-retry',
+    );
+    var another = makeHelpButton(
+      'retellAnother',
+      'Build another',
+      'mpe-ra-help-action mpe-ra-retell-another',
+    );
+    var rebuild = makeHelpButton(
+      'retellRebuild',
+      'Rebuild',
+      'mpe-ra-help-action mpe-ra-retell-rebuild',
+    );
+    var build = makeHelpButton(
+      'retellBuild',
+      'Build',
+      'mpe-ra-help-action mpe-ra-retell-build',
+    );
+    footer.appendChild(cancel);
+    footer.appendChild(open);
+    footer.appendChild(cont);
+    footer.appendChild(retry);
+    footer.appendChild(another);
+    footer.appendChild(rebuild);
+    footer.appendChild(build);
+
+    sheet.appendChild(head);
+    sheet.appendChild(scroll);
+    sheet.appendChild(footer);
+
+    return {
+      root: sheet,
+      details: details,
+      close: close,
+      scroll: scroll,
+      form: form,
+      sections: sections,
+      sectionRows: sectionRows,
+      more: more,
+      widened: widened,
+      shape: shape,
+      estimate: estimate,
+      engine: engine,
+      engineField: engineField,
+      sending: sending,
+      editions: editions,
+      editionRows: editionRows,
+      card: card,
+      cardTitle: cardTitle,
+      rows: rows,
+      elapsed: elapsed,
+      error: error,
+      footer: footer,
+      cancel: cancel,
+      open: open,
+      cont: cont,
+      retry: retry,
+      another: another,
+      rebuild: rebuild,
+      build: build,
+    };
+  }
+
+  /** §12.2 — the Edition sheet of an edition preview. */
+  function makeEditionSheet() {
+    var sheet = document.createElement('div');
+    sheet.className = 'mpe-ra-ui mpe-ra-edition';
+    sheet.setAttribute('role', 'dialog');
+    sheet.setAttribute('aria-label', 'This spoken edition');
+    sheet.setAttribute('tabindex', '-1');
+    sheet.hidden = true;
+
+    var head = document.createElement('div');
+    head.className = 'mpe-ra-edition-head';
+    var title = document.createElement('span');
+    title.className = 'mpe-ra-edition-title';
+    title.textContent = 'This spoken edition';
+    var details = document.createElement('span');
+    details.className = 'mpe-ra-note-details mpe-ra-edition-details';
+    details.setAttribute('role', 'status');
+    details.setAttribute('aria-live', 'polite');
+    var close = makeIconButton(
+      'editionClose',
+      'Close the edition sheet',
+      'mpe-ra-bar-btn mpe-ra-sheet-close',
+      'close',
+    );
+    head.appendChild(title);
+    head.appendChild(details);
+    head.appendChild(close);
+
+    var from = document.createElement('p');
+    from.className = 'mpe-ra-edition-from';
+    from.hidden = true;
+    var name = document.createElement('p');
+    name.className = 'mpe-ra-classroom-card-title mpe-ra-edition-name';
+    var rows = document.createElement('div');
+    rows.className = 'mpe-ra-classroom-chapters mpe-ra-edition-rows';
+    rows.setAttribute('role', 'list');
+    var error = document.createElement('p');
+    error.className = 'mpe-ra-classroom-error mpe-ra-edition-error';
+    error.hidden = true;
+
+    var footer = document.createElement('div');
+    footer.className = 'mpe-ra-edition-footer';
+    var cont = makeHelpButton(
+      'editionContinue',
+      'Continue',
+      'mpe-ra-help-action mpe-ra-edition-continue',
+    );
+    var cancel = makeHelpButton(
+      'editionCancel',
+      'Cancel',
+      'mpe-ra-help-action mpe-ra-edition-cancel',
+    );
+    var source = makeHelpButton(
+      'editionOpenSource',
+      'Open the source section',
+      'mpe-ra-help-action mpe-ra-edition-source',
+    );
+    var folder = makeHelpButton(
+      'editionOpenFolder',
+      'Open editions folder',
+      'mpe-ra-help-action mpe-ra-edition-folder',
+    );
+    // §11.3 — no dialog: the chip's Undo is the safety.
+    var remove = makeHelpButton(
+      'editionDelete',
+      'Delete edition',
+      'mpe-ra-help-action mpe-ra-edition-delete',
+    );
+    footer.appendChild(cont);
+    footer.appendChild(cancel);
+    footer.appendChild(source);
+    footer.appendChild(folder);
+    footer.appendChild(remove);
+
+    sheet.appendChild(head);
+    sheet.appendChild(from);
+    sheet.appendChild(name);
+    sheet.appendChild(rows);
+    sheet.appendChild(error);
+    sheet.appendChild(footer);
+    return {
+      root: sheet,
+      details: details,
+      close: close,
+      from: from,
+      name: name,
+      rows: rows,
+      error: error,
+      cont: cont,
+      cancel: cancel,
+      source: source,
+      folder: folder,
+      remove: remove,
+    };
+  }
+
+  // ------------------------------------------------------------ the rows
+
+  function retellDoneCount(sections) {
+    return doneCount(sections);
+  }
+
+  /** §5.2 — _1,246 words: 655 prose, 242 in 3 tables, 349 in 7 code blocks_. */
+  function retellCountNoun(count, noun) {
+    if (typeof count !== 'number' || !isFinite(count) || count <= 0) {
+      return noun + 's';
+    }
+    return count + ' ' + noun + (count === 1 ? '' : 's');
+  }
+
+  function retellWordsLine(unit) {
+    var words = retellNumber(unit.words);
+    var prose = retellNumber(unit.proseWords);
+    var tableWords = retellNumber(unit.tableWords);
+    var codeWords = retellNumber(unit.codeWords);
+    var parts = [];
+    if (tableWords > 0 || codeWords > 0) {
+      parts.push(retellCount(prose) + ' prose');
+      if (tableWords > 0) {
+        parts.push(
+          retellCount(tableWords) +
+            ' in ' +
+            retellCountNoun(unit.tables, 'table'),
+        );
+      }
+      if (codeWords > 0) {
+        parts.push(
+          retellCount(codeWords) +
+            ' in ' +
+            retellCountNoun(unit.fences, 'code block'),
+        );
+      }
+    }
+    return (
+      retellCount(words) +
+      ' words' +
+      (parts.length ? ': ' + parts.join(', ') : '')
+    );
+  }
+
+  /** The sections a chapter-row renderer wants: `title` from `heading`. */
+  function retellRowStates(sections) {
+    var out = [];
+    for (var i = 0; i < sections.length; i++) {
+      var section = sections[i] || {};
+      out.push({
+        n: section.n,
+        title: section.heading || section.title || '',
+        status: section.status,
+        flagged: Array.isArray(section.flagged) ? section.flagged : [],
+        cached: section.cached === true,
+      });
+    }
+    return out;
+  }
+
+  /** §12.2 — one button per unit: a click opens the source section (§12.4). */
+  function renderEditionRows(container, sections, editionId) {
+    var states = retellRowStates(sections);
+    container.innerHTML = '';
+    for (var i = 0; i < states.length; i++) {
+      var state = states[i];
+      var row = makeButton(
+        'editionOpenSourceUnit',
+        state.title,
+        'mpe-ra-chapter-row mpe-ra-edition-row',
+      );
+      row.setAttribute('role', 'listitem');
+      row.setAttribute('data-state', chapterRowState(state));
+      row.setAttribute('data-mpe-ra-unit', String(state.n || i + 1));
+      if (editionId) {
+        row.setAttribute('data-mpe-ra-edition', editionId);
+      }
+      var glyph = document.createElement('span');
+      glyph.className = 'mpe-ra-chapter-glyph';
+      glyph.setAttribute('aria-hidden', 'true');
+      glyph.innerHTML = ICONS[chapterGlyphName(state)];
+      var text = document.createElement('span');
+      text.className = 'mpe-ra-chapter-title';
+      text.textContent = (state.n ? state.n + '. ' : '') + state.title;
+      var stateText = chapterStateText(state);
+      row.setAttribute('title', stateText + ' · open the source section');
+      row.setAttribute('aria-label', text.textContent + ' (' + stateText + ')');
+      row.appendChild(glyph);
+      row.appendChild(text);
+      container.appendChild(row);
+    }
+  }
+
+  function retellElapsedSeconds() {
+    var progress = retell.progress;
+    if (!progress) {
+      return 0;
+    }
+    var base = typeof progress.elapsedMs === 'number' ? progress.elapsedMs : 0;
+    return Math.max(
+      0,
+      Math.round((base + (Date.now() - retell.progressAt)) / 1000),
+    );
+  }
+
+  /** The details chip and the message line for one progress state (§5.2, §12.2). */
+  function retellProgressChipText(progress) {
+    if (!progress) {
+      return '';
+    }
+    var sections = Array.isArray(progress.sections) ? progress.sections : [];
+    var done = retellDoneCount(sections);
+    if (progress.status === 'queued') {
+      return 'Waiting: another edition is being written';
+    }
+    if (progress.status === 'planning') {
+      return 'Starting the edition…';
+    }
+    if (progress.status === 'writing') {
+      if (progress.section) {
+        return 'Retelling section ' + progress.section + ' of ' + progress.of;
+      }
+      return sections.length && done === sections.length
+        ? 'Finishing the edition…'
+        : 'Retelling the edition…';
+    }
+    if (progress.status === 'done') {
+      return (
+        'Ready · ' +
+        retellSectionsText(sections.length) +
+        ' · about ' +
+        retellMinutes(progress.words || 0) +
+        ' minutes'
+      );
+    }
+    if (progress.status === 'stopped') {
+      return 'Stopped after section ' + done;
+    }
+    if (progress.status === 'failed') {
+      return 'Failed: ' + (progress.error || 'the build did not finish');
+    }
+    return '';
+  }
+
+  // ------------------------------------------------------- the bar button
+
+  /** §12.2 — the edition preview's button: the badge counts the sections. */
+  function syncRetellBar() {
+    if (!barParts || !barParts.retellButton) {
+      return;
+    }
+    var button = barParts.retellButton;
+    var edition = config.retellEdition;
+    button.hidden = !edition || !config.enabled;
+    if (!edition) {
+      retell.editionOpen = false;
+      return;
+    }
+    var progress = retell.editionProgress;
+    var status = progress ? progress.status : edition.status;
+    var sections =
+      progress && Array.isArray(progress.sections)
+        ? progress.sections
+        : edition.sections;
+    var badge = barParts.retellBadge;
+    badge.classList.remove('is-warning');
+    if (status === 'writing' || status === 'planning' || status === 'queued') {
+      var writing = null;
+      for (var w = 0; w < sections.length; w++) {
+        if (sections[w] && sections[w].status === 'writing') {
+          writing = sections[w];
+        }
+      }
+      badge.textContent =
+        (writing ? writing.n : retellDoneCount(sections)) +
+        '/' +
+        sections.length;
+      badge.hidden = false;
+    } else if (status === 'stopped' || status === 'failed') {
+      badge.innerHTML = ICONS.warning;
+      badge.classList.add('is-warning');
+      badge.hidden = false;
+    } else {
+      badge.textContent = '';
+      badge.hidden = true;
+    }
+    button.classList.toggle('is-active', retell.editionOpen);
+    button.setAttribute('aria-expanded', retell.editionOpen ? 'true' : 'false');
+    var label = retell.editionOpen
+      ? 'Close the edition sheet'
+      : RETELL_EDITION_TOOLTIP;
+    button.setAttribute('title', label);
+    button.setAttribute('aria-label', label);
+  }
+
+  // ------------------------------------------------------ the Retell sheet
+
+  /** The sheet's edition rows: the live list, else Prepared's; a marker's block first. */
+  function retellEditionRows() {
+    var prepared = retell.prepared;
+    var source = retell.editions.list.length
+      ? retell.editions.list
+      : prepared && Array.isArray(prepared.editions)
+        ? prepared.editions
+        : [];
+    var deleting = retell.editions.deleting;
+    var rows = [];
+    for (var i = 0; i < source.length; i++) {
+      if (source[i] && deleting.indexOf(source[i].id) < 0) {
+        rows.push(source[i]);
+      }
+    }
+    // A marker click: that block's editions first, newest first, then the
+    // rest in the host's order.
+    var first = retell.markerBlockIds;
+    if (first && first.length) {
+      rows.sort(function (a, b) {
+        var ia = first.indexOf(a.id);
+        var ib = first.indexOf(b.id);
+        if (ia >= 0 && ib >= 0) {
+          return ia - ib;
+        }
+        if (ia >= 0) {
+          return -1;
+        }
+        if (ib >= 0) {
+          return 1;
+        }
+        return 0;
+      });
+    }
+    return rows;
+  }
+
+  function retellEngineText(prepared) {
+    return prepared && prepared.engine
+      ? [prepared.engine.engine, prepared.engine.model, prepared.engine.effort]
+          .filter(function (part) {
+            return part && part !== 'n/a';
+          })
+          .join(' · ')
+      : helpLabelText();
+  }
+
+  function renderRetellForm(sheet) {
+    var prepared = retell.prepared;
+    var units = prepared && Array.isArray(prepared.units) ? prepared.units : [];
+
+    // The section rows: the first six, then _and 12 more_ (§5.2).
+    var rowsKey = prepared
+      ? units
+          .map(function (u) {
+            return u.n + ':' + u.heading + ':' + u.words;
+          })
+          .join('|')
+      : 'preparing';
+    if (sheet.sectionRows.getAttribute('data-key') !== rowsKey) {
+      sheet.sectionRows.innerHTML = '';
+      if (!prepared) {
+        sheet.sectionRows.innerHTML = skeletonHtml(1, true) + skeletonHtml(1);
+      }
+      for (var i = 0; i < units.length && i < RETELL_ROWS_SHOWN; i++) {
+        var unit = units[i] || {};
+        var row = document.createElement('div');
+        row.className = 'mpe-ra-retell-row';
+        row.setAttribute('role', 'listitem');
+        row.setAttribute('data-mpe-ra-unit', String(unit.n || i + 1));
+        var heading = document.createElement('span');
+        heading.className = 'mpe-ra-retell-row-heading';
+        heading.textContent = unit.heading || '';
+        var words = document.createElement('span');
+        words.className = 'mpe-ra-retell-row-words';
+        words.textContent = retellWordsLine(unit);
+        row.appendChild(heading);
+        row.appendChild(words);
+        sheet.sectionRows.appendChild(row);
+      }
+      sheet.sectionRows.setAttribute('data-key', rowsKey);
+    }
+    var rest = units.length - RETELL_ROWS_SHOWN;
+    sheet.more.textContent = rest > 0 ? 'and ' + rest + ' more' : '';
+    sheet.more.hidden = rest <= 0;
+
+    sheet.widened.hidden = !(prepared && prepared.widened);
+    sheet.shape.textContent = RETELL_SHAPE_LINE;
+
+    if (prepared) {
+      sheet.estimate.textContent =
+        'About ' +
+        retellCount(prepared.estimate.words) +
+        ' words · about ' +
+        prepared.estimate.minutes +
+        ' minutes';
+      sheet.estimate.setAttribute(
+        'title',
+        'the build retries once above ' +
+          retellCount(prepared.ceiling) +
+          ' words',
+      );
+      sheet.estimate.hidden = false;
+    } else {
+      sheet.estimate.hidden = true;
+    }
+
+    var engineText = retellEngineText(prepared);
+    sheet.engine.textContent = engineText;
+    sheet.engine.setAttribute('title', 'Help model: ' + engineText);
+    sheet.engine.setAttribute(
+      'aria-label',
+      'Help model: ' + engineText + '. Choose another.',
+    );
+
+    if (!prepared) {
+      sheet.sending.textContent = 'Preparing…';
+      sheet.sending.classList.add('is-skeleton');
+    } else {
+      sheet.sending.classList.remove('is-skeleton');
+      var engineName =
+        prepared.engine && prepared.engine.engine
+          ? prepared.engine.engine
+          : 'the engine';
+      var count = units.length;
+      sheet.sending.textContent =
+        retell.scope === 'document'
+          ? 'Sends all ' +
+            retellSectionsText(count) +
+            ' (' +
+            retellCount(prepared.sourceWords) +
+            ' words) to ' +
+            engineName +
+            '.'
+          : 'Sends ' +
+            retellSectionsText(count) +
+            ' of this document (' +
+            retellCount(prepared.sourceWords) +
+            ' words) to ' +
+            engineName +
+            '.';
+    }
+
+    // Spoken editions of this document (§5.2, §11.3).
+    var editions = retellEditionRows();
+    sheet.editions.hidden = editions.length === 0;
+    var editionsKey = editions
+      .map(function (e) {
+        var result = retell.editions.results[e.id];
+        return (
+          e.id +
+          ':' +
+          e.status +
+          ':' +
+          e.done +
+          ':' +
+          (result ? (result.found ? 'a' : 'o') : '?')
+        );
+      })
+      .join('|');
+    if (sheet.editionRows.getAttribute('data-key') !== editionsKey) {
+      sheet.editionRows.innerHTML = '';
+      for (var m = 0; m < editions.length; m++) {
+        var summary = editions[m];
+        var editionRow = document.createElement('div');
+        editionRow.className = 'mpe-ra-retell-edition-row';
+        editionRow.setAttribute('role', 'listitem');
+        editionRow.setAttribute('data-mpe-ra-edition', summary.id);
+        var titleText = document.createElement('span');
+        titleText.className = 'mpe-ra-retell-edition-title';
+        titleText.textContent = summary.title || 'Spoken edition';
+        var meta = document.createElement('span');
+        meta.className = 'mpe-ra-retell-edition-meta';
+        var metaParts = [];
+        var date = noteDateText(summary.created);
+        if (date) {
+          metaParts.push(date);
+        }
+        metaParts.push(
+          retellNumber(summary.done) +
+            '/' +
+            retellNumber(summary.sections) +
+            ' sections',
+        );
+        meta.textContent = metaParts.join(' · ');
+        var badge = document.createElement('span');
+        badge.className = 'mpe-ra-notes-badge mpe-ra-retell-status';
+        badge.textContent = summary.status;
+        editionRow.appendChild(titleText);
+        editionRow.appendChild(meta);
+        editionRow.appendChild(badge);
+        var result = retell.editions.results[summary.id];
+        if (result && !result.found) {
+          var orphan = document.createElement('span');
+          orphan.className = 'mpe-ra-notes-badge mpe-ra-retell-orphan';
+          orphan.textContent = 'Not in this version';
+          editionRow.appendChild(orphan);
+        }
+        var openButton = makeHelpButton(
+          'retellOpenEdition',
+          'Open',
+          'mpe-ra-help-action mpe-ra-retell-open-edition',
+        );
+        openButton.setAttribute('data-mpe-ra-edition', summary.id);
+        var deleteButton = makeHelpButton(
+          'retellDeleteEdition',
+          'Delete',
+          'mpe-ra-help-action mpe-ra-retell-delete-edition',
+        );
+        deleteButton.setAttribute('data-mpe-ra-edition', summary.id);
+        editionRow.appendChild(openButton);
+        editionRow.appendChild(deleteButton);
+        sheet.editionRows.appendChild(editionRow);
+      }
+      sheet.editionRows.setAttribute('data-key', editionsKey);
+    }
+  }
+
+  function renderRetellCard(sheet) {
+    var progress = retell.progress;
+    var sections =
+      progress && Array.isArray(progress.sections) ? progress.sections : [];
+    sheet.cardTitle.textContent =
+      progress && progress.title ? progress.title : '';
+    sheet.cardTitle.hidden = !sheet.cardTitle.textContent;
+    renderChapterRows(sheet.rows, retellRowStates(sections));
+    var live =
+      progress &&
+      (progress.status === 'writing' ||
+        progress.status === 'planning' ||
+        progress.status === 'queued');
+    if (live) {
+      sheet.elapsed.textContent =
+        retellElapsedSeconds() +
+        ' s' +
+        (progress.status === 'writing' && progress.sectionHeading
+          ? ' · ' + progress.sectionHeading
+          : '');
+      sheet.elapsed.hidden = false;
+    } else {
+      sheet.elapsed.hidden = true;
+    }
+    var failed = progress && progress.status === 'failed';
+    sheet.error.textContent = failed
+      ? 'Failed: ' + (progress.error || 'the build did not finish')
+      : retell.state === 'error'
+        ? retell.message
+        : '';
+    sheet.error.hidden = !sheet.error.textContent;
+  }
+
+  /** §5.2 — render the sheet from its state; nothing is diffed. */
+  function syncRetellSheet() {
+    if (!barParts || !barParts.retell) {
+      return;
+    }
+    var sheet = barParts.retell;
+    if (!retell.open) {
+      stopRetellTicker();
+      return;
+    }
+    var state = retell.state;
+    var progress = retell.progress;
+    var prepared = retell.prepared;
+
+    var chip = '';
+    var chipError = false;
+    if (state === 'preparing') {
+      chip = 'Preparing…';
+    } else if (state === 'ready') {
+      chip = prepared
+        ? retellSectionsText(prepared.units.length) +
+          ' · ' +
+          retellCount(prepared.sourceWords) +
+          ' words'
+        : '';
+    } else if (state === 'error') {
+      chip = retell.message || 'Something went wrong';
+      chipError = true;
+    } else {
+      chip = retellProgressChipText(progress);
+      chipError =
+        !!progress &&
+        (progress.status === 'failed' || progress.status === 'stopped');
+    }
+    sheet.details.textContent = chip;
+    sheet.details.classList.toggle('is-error', chipError);
+
+    var showForm = state === 'preparing' || state === 'ready';
+    sheet.form.hidden = !showForm;
+    sheet.card.hidden = showForm;
+    if (showForm) {
+      renderRetellForm(sheet);
+    } else {
+      renderRetellCard(sheet);
+    }
+
+    // The footer, by state (§5.2).
+    var status = progress ? progress.status : '';
+    var live =
+      status === 'writing' || status === 'planning' || status === 'queued';
+    var halted = status === 'stopped' || status === 'failed';
+    var hasSection = !!(progress && progress.hasSection);
+    var rebuild = !!(prepared && prepared.rebuildOf);
+    sheet.build.hidden = !showForm || rebuild;
+    setEnabled(sheet.build, state === 'ready');
+    sheet.build.setAttribute(
+      'title',
+      state === 'ready' ? 'Build the spoken edition' : 'Preparing',
+    );
+    sheet.rebuild.hidden = !(showForm && rebuild);
+    setEnabled(sheet.rebuild, state === 'ready');
+    sheet.rebuild.setAttribute(
+      'title',
+      state === 'ready' ? 'Retell only the sections that changed' : 'Preparing',
+    );
+    sheet.cancel.hidden = !(state === 'building' && live);
+    sheet.open.hidden = !(
+      (state === 'building' && hasSection) ||
+      (state === 'done' && progress)
+    );
+    sheet.cont.hidden = !(state === 'building' && halted);
+    sheet.retry.hidden = state !== 'error';
+    sheet.another.hidden = !(
+      state === 'done' ||
+      state === 'error' ||
+      (showForm && rebuild) ||
+      (state === 'building' && halted)
+    );
+
+    if (state === 'building' && live) {
+      startRetellTicker();
+    } else {
+      stopRetellTicker();
+    }
+  }
+
+  function startRetellTicker() {
+    if (retell.timer) {
+      return;
+    }
+    retell.timer = setInterval(function () {
+      if (!retell.open || retell.state !== 'building') {
+        stopRetellTicker();
+        return;
+      }
+      if (barParts && barParts.retell && !barParts.retell.elapsed.hidden) {
+        barParts.retell.elapsed.textContent =
+          retellElapsedSeconds() +
+          ' s' +
+          (retell.progress &&
+          retell.progress.status === 'writing' &&
+          retell.progress.sectionHeading
+            ? ' · ' + retell.progress.sectionHeading
+            : '');
+      }
+    }, RETELL_TICK_MS);
+  }
+
+  function stopRetellTicker() {
+    if (retell.timer) {
+      clearInterval(retell.timer);
+      retell.timer = 0;
+    }
+  }
+
+  function focusRetellSheet() {
+    if (!barParts || !barParts.retell) {
+      return;
+    }
+    try {
+      barParts.retell.root.focus();
+    } catch (error) {
+      /* jsdom and detached nodes */
+    }
+  }
+
+  function toggleRetell(scope) {
+    if (retell.open) {
+      closeRetell('button');
+      return;
+    }
+    openRetell(null, null, scope === 'document' ? 'document' : 'selection');
+  }
+
+  /**
+   * §5.1–§5.3, §6.1 — open the sheet for the section the selection sits in
+   * (or the caret's, or the block being read's, or the whole document); post
+   * Prepare at once with the two one-based line numbers.
+   */
+  function openRetell(passageOverride, opener, scope) {
+    if (!config.enabled || !config.retellAvailable) {
+      return;
+    }
+    var documentScope = scope === 'document';
+    var passage = null;
+    var context = null;
+    var anchor = null;
+    var cover = null;
+    if (documentScope) {
+      context = retellDocumentFields();
+      cover = { startLine: 1, endLine: 1 };
+    } else {
+      passage = passageOverride || helpPassage() || retellBlockPassage();
+      if (!passage) {
+        showHint(
+          RETELL_HINT_NO_SELECTION,
+          currentSelectionRect() || floatRect,
+          RETELL_HINT_MS,
+        );
+        return;
+      }
+      context =
+        passageOverride && passageOverride.context
+          ? passageOverride.context
+          : buildHelpContextFor(passage);
+      // A fresh anchor from the blocks when there are any: the host checks
+      // it against the file (§6.3) and refuses one without a block key.
+      anchor =
+        passage.els && passage.els.length
+          ? retellAnchorFor(passage)
+          : passageOverride && passageOverride.anchor
+            ? passageOverride.anchor
+            : null;
+      cover = retellCoverFor(passage.els);
+      if (!cover && anchor && typeof anchor.line === 'number') {
+        var line = Math.max(1, anchor.line);
+        cover = { startLine: line, endLine: line };
+      }
+      if (!cover) {
+        showHint(RETELL_HINT_NO_LINE, currentSelectionRect() || floatRect);
+        return;
+      }
+      if (!anchor) {
+        showHint(
+          RETELL_HINT_NO_SELECTION,
+          currentSelectionRect() || floatRect,
+          RETELL_HINT_MS,
+        );
+        return;
+      }
+    }
+    ensureBar();
+    panelDismissed = false;
+    closePopovers();
+    hideFloat();
+    closeHelp('retell');
+    closeNote('retell');
+    closeNotesList('retell');
+    closeClassroom('retell');
+    closeModuleSheet('retell');
+    closeEditionSheet('retell');
+
+    retell.open = true;
+    retell.state = 'preparing';
+    retell.scope = documentScope ? 'document' : 'selection';
+    retell.passage = passage
+      ? { text: passage.text, els: passage.els ? passage.els.slice() : [] }
+      : null;
+    retell.context = context;
+    retell.anchor = anchor;
+    retell.cover = cover;
+    retell.prepared = null;
+    retell.progress = null;
+    retell.editionId = null;
+    retell.lastEditionId = null;
+    retell.message = '';
+    retell.opener = opener || null;
+    retell.markerBlockIds = null;
+    retell.requestId = nextRequestId();
+    barParts.retell.root.hidden = false;
+    barParts.retell.sectionRows.removeAttribute('data-key');
+    barParts.retell.editionRows.removeAttribute('data-key');
+    syncRetellSheet();
+    syncHelpButton();
+    showBar('');
+    postRetellPrepare();
+    focusRetellSheet();
+  }
+
+  /** §5.3 — nothing leaves the machine on Prepare: two line numbers and the title. */
+  function postRetellPrepare() {
+    if (!retell.context || !retell.cover) {
+      return;
+    }
+    post('readAloudRetellPrepare', [
+      sourceUri,
+      retell.requestId,
+      noteFieldsFrom(retell.context),
+      {
+        startLine: retell.cover.startLine,
+        endLine: retell.cover.endLine,
+        scope: retell.scope,
+      },
+    ]);
+  }
+
+  /** §5.5 — _Retell the section_: the help passage, its material and its anchor. */
+  function openRetellFromHelp() {
+    if (!config.retellAvailable || help.state !== 'ready' || !help.context) {
+      return;
+    }
+    var override = {
+      text: help.context.passage,
+      els: help.els ? help.els.slice() : [],
+      context: help.context,
+      anchor: help.anchor,
+    };
+    closeHelp('retell');
+    openRetell(override, null, 'selection');
+  }
+
+  /** §5.4 step 6 — closing never cancels a build. */
+  function closeRetell(reason) {
+    if (!retell.open) {
+      return;
+    }
+    stopRetellTicker();
+    var opener = retell.opener;
+    retell.open = false;
+    retell.opener = null;
+    retell.requestId = null;
+    if (barParts && barParts.retell) {
+      barParts.retell.root.hidden = true;
+    }
+    retell.markerBlockIds = null;
+    syncRetellMarkerStates();
+    syncHelpButton();
+    armPanelIdle();
+    if (
+      reason !== 'help' &&
+      reason !== 'note' &&
+      reason !== 'notes list' &&
+      reason !== 'classroom' &&
+      reason !== 'module' &&
+      reason !== 'edition'
+    ) {
+      var target = opener && opener.isConnected ? opener : null;
+      if (target) {
+        try {
+          target.focus();
+        } catch (error) {
+          /* the panel may be going away */
+        }
+      }
+    }
+  }
+
+  /** §5.4 step 1 — the Build payload; `editionId` for a Rebuild (§9.8). */
+  function buildRetell(editionId) {
+    if (
+      !retell.open ||
+      retell.state !== 'ready' ||
+      !retell.context ||
+      !retell.cover
+    ) {
+      return;
+    }
+    if (retell.scope !== 'document' && !retell.anchor) {
+      return;
+    }
+    var requestId = nextRequestId();
+    retell.requestId = requestId;
+    retell.state = 'building';
+    retell.progress = null;
+    retell.progressAt = Date.now();
+    retell.editionId = null;
+    retell.lastEditionId = editionId || null;
+    retell.message = '';
+    post('readAloudRetellBuild', [
+      sourceUri,
+      requestId,
+      noteFieldsFrom(retell.context),
+      retell.anchor || null,
+      {
+        startLine: retell.cover.startLine,
+        endLine: retell.cover.endLine,
+        scope: retell.scope,
+        editionId: editionId || null,
+      },
+    ]);
+    syncRetellSheet();
+  }
+
+  function cancelRetellBuild(reason) {
+    if (retell.editionId) {
+      post('readAloudRetellCancel', [
+        sourceUri,
+        retell.editionId,
+        reason || 'sheet',
+      ]);
+    }
+  }
+
+  /**
+   * _Build another_: in Ready with a Rebuild on offer it writes a new file at
+   * once (§9.8, D16); after a build it goes back to Ready through a fresh
+   * Prepare, so the rows and the editions are current.
+   */
+  function retellBuildAnother() {
+    if (retell.state === 'ready') {
+      buildRetell(null);
+      return;
+    }
+    retell.state = 'preparing';
+    retell.prepared = null;
+    retell.progress = null;
+    retell.editionId = null;
+    retell.message = '';
+    retell.requestId = nextRequestId();
+    if (barParts && barParts.retell) {
+      barParts.retell.sectionRows.removeAttribute('data-key');
+      barParts.retell.editionRows.removeAttribute('data-key');
+    }
+    syncRetellSheet();
+    postRetellPrepare();
+  }
+
+  // ------------------------------------------------------ the Edition sheet
+
+  function toggleEditionSheet() {
+    if (!config.retellEdition) {
+      showHint(RETELL_NOT_EDITION_HINT, null);
+      return;
+    }
+    if (retell.editionOpen) {
+      closeEditionSheet('button');
+      return;
+    }
+    openEditionSheet(
+      barParts && barParts.retellButton ? barParts.retellButton : null,
+    );
+  }
+
+  function openEditionSheet(opener) {
+    if (!config.enabled || !config.retellEdition) {
+      return;
+    }
+    ensureBar();
+    closePopovers();
+    closeHelp('edition');
+    closeNote('edition');
+    closeNotesList('edition');
+    closeClassroom('edition');
+    closeModuleSheet('edition');
+    closeRetell('edition');
+    hideFloat();
+    panelDismissed = false;
+    retell.editionOpen = true;
+    retell.editionOpener = opener || null;
+    barParts.edition.root.hidden = false;
+    syncEditionSheet();
+    syncRetellBar();
+    syncHelpButton();
+    showBar(barParts.status.textContent);
+    try {
+      barParts.edition.root.focus();
+    } catch (error) {
+      /* jsdom and detached nodes */
+    }
+  }
+
+  function closeEditionSheet(reason) {
+    if (!retell.editionOpen) {
+      return;
+    }
+    var opener = retell.editionOpener;
+    retell.editionOpen = false;
+    retell.editionOpener = null;
+    if (barParts && barParts.edition) {
+      barParts.edition.root.hidden = true;
+    }
+    syncRetellBar();
+    syncHelpButton();
+    armPanelIdle();
+    if (
+      reason !== 'help' &&
+      reason !== 'note' &&
+      reason !== 'notes list' &&
+      reason !== 'classroom' &&
+      reason !== 'module' &&
+      reason !== 'retell'
+    ) {
+      var target =
+        opener && opener.isConnected
+          ? opener
+          : barParts && barParts.retellButton && !barParts.retellButton.hidden
+            ? barParts.retellButton
+            : null;
+      if (target) {
+        try {
+          target.focus();
+        } catch (error) {
+          /* the panel may be going away */
+        }
+      }
+    }
+  }
+
+  /** §12.2 — the Edition sheet from the config and the last progress. */
+  function syncEditionSheet() {
+    if (!barParts || !barParts.edition) {
+      return;
+    }
+    var sheet = barParts.edition;
+    var edition = config.retellEdition;
+    if (!edition) {
+      if (retell.editionOpen) {
+        closeEditionSheet('not an edition');
+      }
+      return;
+    }
+    if (!retell.editionOpen) {
+      return;
+    }
+    var progress = retell.editionProgress;
+    var status = progress ? progress.status : edition.status;
+    var sections =
+      progress && Array.isArray(progress.sections)
+        ? progress.sections
+        : edition.sections;
+    var words =
+      progress && typeof progress.words === 'number' ? progress.words : 0;
+    var chip;
+    if (progress) {
+      chip = retellProgressChipText(progress);
+    } else if (status === 'done') {
+      chip =
+        'Ready · ' +
+        retellSectionsText(sections.length) +
+        (words ? ' · about ' + retellMinutes(words) + ' minutes' : '');
+    } else if (status === 'stopped') {
+      chip = 'Stopped after section ' + retellDoneCount(sections);
+    } else if (status === 'failed') {
+      chip = 'Failed';
+    } else {
+      chip =
+        'Retelling section ' +
+        (retellDoneCount(sections) + 1) +
+        ' of ' +
+        sections.length;
+    }
+    sheet.details.textContent = chip;
+    sheet.details.classList.toggle(
+      'is-error',
+      status === 'stopped' || status === 'failed',
+    );
+    var from = edition.documentTitle
+      ? 'From "' + edition.documentTitle + '"'
+      : edition.documentPath
+        ? 'From ' + edition.documentPath
+        : '';
+    sheet.from.textContent = from;
+    sheet.from.hidden = !from;
+    sheet.name.textContent =
+      (progress && progress.title) || edition.title || '';
+    renderEditionRows(sheet.rows, sections, edition.id);
+    var error = progress && progress.status === 'failed' ? progress.error : '';
+    sheet.error.textContent = error ? 'Failed: ' + error : '';
+    sheet.error.hidden = !error;
+    var live =
+      status === 'writing' || status === 'planning' || status === 'queued';
+    sheet.cont.hidden = !(status === 'stopped' || status === 'failed');
+    sheet.cancel.hidden = !live;
+  }
+
+  // ------------------------------------------------------ host -> retell
+
+  function onRetellPrepared(message) {
+    if (!retell.open || message.requestId !== retell.requestId) {
+      return;
+    }
+    var estimate =
+      message.estimate && typeof message.estimate === 'object'
+        ? message.estimate
+        : {};
+    retell.prepared = {
+      units: Array.isArray(message.units) ? message.units : [],
+      sourceWords: retellNumber(message.sourceWords),
+      estimate: {
+        words: retellNumber(estimate.words),
+        minutes: Math.max(1, retellNumber(estimate.minutes)),
+      },
+      ceiling: retellNumber(message.ceiling),
+      widened: message.widened === true,
+      shape: typeof message.shape === 'string' ? message.shape : 'full',
+      engine: message.engine || null,
+      editions: Array.isArray(message.editions) ? message.editions : [],
+      rebuildOf:
+        typeof message.rebuildOf === 'string' ? message.rebuildOf : null,
+    };
+    if (message.building && typeof message.building === 'object') {
+      // A build is running for this document: show its card again (§5.4 step 6).
+      retell.state = 'building';
+      retell.progress = message.building;
+      retell.progressAt = Date.now();
+      retell.editionId = message.building.editionId || null;
+    } else if (retell.state === 'preparing') {
+      retell.state = 'ready';
+    }
+    if (barParts && barParts.retell) {
+      barParts.retell.sectionRows.removeAttribute('data-key');
+      barParts.retell.editionRows.removeAttribute('data-key');
+    }
+    syncRetellSheet();
+  }
+
+  /** §5.4 step 3, §12.2 — the whole state, for the sheet and for the edition preview. */
+  function onRetellProgress(message) {
+    if (!message || typeof message.editionId !== 'string') {
+      return;
+    }
+    var mine =
+      typeof message.documentUri === 'string' &&
+      sourceUri &&
+      message.documentUri === sourceUri;
+    if (mine) {
+      noteEditionProgress(message);
+      var tracking =
+        retell.editionId === message.editionId ||
+        (retell.state === 'building' && retell.editionId === null);
+      if (tracking) {
+        retell.editionId = message.editionId;
+        retell.progress = message;
+        retell.progressAt = Date.now();
+        retell.state = message.status === 'done' ? 'done' : 'building';
+        syncRetellSheet();
+      }
+    }
+    var edition = config.retellEdition;
+    if (edition && edition.id === message.editionId) {
+      retell.editionProgress = message;
+      config.retellEdition.status = message.status;
+      if (Array.isArray(message.sections)) {
+        config.retellEdition.sections = message.sections;
+      }
+      if (typeof message.title === 'string' && message.title) {
+        config.retellEdition.title = message.title;
+      }
+      syncRetellBar();
+      syncEditionSheet();
+      // The message line (§12.2): in the status slot's existing style.
+      if (message.status === 'writing' && message.section) {
+        showBar(
+          'Section ' +
+            message.section +
+            ' of ' +
+            message.of +
+            ' is being retold',
+        );
+      } else if (message.status === 'planning') {
+        showBar('Starting the edition…');
+      } else if (message.status === 'stopped') {
+        showBar(
+          'Stopped after section ' +
+            retellDoneCount(message.sections || []) +
+            ' · Continue in the edition sheet',
+        );
+      } else if (message.status === 'failed') {
+        showBar('Failed: ' + (message.error || 'the build did not finish'));
+      } else if (message.status === 'done' && record.state === 'idle') {
+        showBar('');
+      }
+    }
+  }
+
+  function onRetellError(message) {
+    var text =
+      typeof message.message === 'string' && message.message
+        ? message.message
+        : 'The spoken edition could not be built.';
+    if (
+      retell.open &&
+      typeof message.requestId === 'string' &&
+      message.requestId === retell.requestId
+    ) {
+      retell.state = 'error';
+      retell.message = text;
+      syncRetellSheet();
+      showBar(text);
+      return;
+    }
+    if (
+      retell.open &&
+      retell.editionId &&
+      message.editionId === retell.editionId
+    ) {
+      // The progress message carries the failure; the chip is enough.
+      showBar(text);
+      return;
+    }
+    showNoteChip(text, NOTE_ERROR_CHIP_MS, null);
+  }
+
+  // ------------------------------------------------------------- actions
+
+  function handleRetellAction(action, element) {
+    if (action === 'floatRetell') {
+      openRetell(null, element || null, 'selection');
+      return true;
+    }
+    if (action === 'retellClose') {
+      closeRetell('close');
+      return true;
+    }
+    if (action === 'retellBuild') {
+      buildRetell(null);
+      return true;
+    }
+    if (action === 'retellRebuild') {
+      buildRetell(retell.prepared ? retell.prepared.rebuildOf : null);
+      return true;
+    }
+    if (action === 'retellCancel') {
+      cancelRetellBuild('sheet');
+      return true;
+    }
+    if (action === 'retellOpen') {
+      if (retell.editionId) {
+        post('readAloudRetellOpen', [sourceUri, retell.editionId]);
+      }
+      return true;
+    }
+    if (action === 'retellOpenEdition') {
+      var id = element ? element.getAttribute('data-mpe-ra-edition') : null;
+      if (id) {
+        post('readAloudRetellOpen', [sourceUri, id]);
+      }
+      return true;
+    }
+    if (action === 'retellContinue') {
+      if (retell.editionId) {
+        post('readAloudRetellContinue', [sourceUri, retell.editionId]);
+      }
+      return true;
+    }
+    if (action === 'retellRetry') {
+      retell.state = 'ready';
+      retell.message = '';
+      if (!retell.prepared) {
+        retell.state = 'preparing';
+        retell.requestId = nextRequestId();
+        postRetellPrepare();
+        syncRetellSheet();
+        return true;
+      }
+      buildRetell(retell.lastEditionId);
+      return true;
+    }
+    if (action === 'retellAnother') {
+      retellBuildAnother();
+      return true;
+    }
+    if (action === 'retellEdition') {
+      closePopovers();
+      toggleEditionSheet();
+      return true;
+    }
+    if (action === 'editionClose') {
+      closeEditionSheet('close');
+      return true;
+    }
+    if (action === 'editionContinue') {
+      if (config.retellEdition) {
+        post('readAloudRetellContinue', [sourceUri, config.retellEdition.id]);
+      }
+      return true;
+    }
+    if (action === 'editionCancel') {
+      if (config.retellEdition) {
+        post('readAloudRetellCancel', [
+          sourceUri,
+          config.retellEdition.id,
+          'edition sheet',
+        ]);
+      }
+      return true;
+    }
+    if (action === 'editionOpenSource') {
+      if (config.retellEdition) {
+        post('readAloudRetellOpenSource', [
+          sourceUri,
+          config.retellEdition.id,
+          1,
+        ]);
+      }
+      return true;
+    }
+    if (action === 'editionOpenSourceUnit') {
+      var unit = element ? Number(element.getAttribute('data-mpe-ra-unit')) : 0;
+      if (config.retellEdition && unit >= 1) {
+        post('readAloudRetellOpenSource', [
+          sourceUri,
+          config.retellEdition.id,
+          unit,
+        ]);
+      }
+      return true;
+    }
+    if (action === 'editionOpenFolder') {
+      post('readAloudRetellOpenFolder', [sourceUri]);
+      return true;
+    }
+    // §12.5 — the marker: one edition opens, several open the sheet.
+    if (action === 'retellMarker') {
+      var block = element ? element.parentElement : null;
+      var ids = editionIdsOnBlock(block);
+      if (ids.length === 1) {
+        post('readAloudRetellOpen', [sourceUri, ids[0]]);
+      } else if (ids.length > 1) {
+        openRetellForBlock(block, ids, element);
+      }
+      return true;
+    }
+    // §11.3 — Delete from a sheet row or the Edition sheet.
+    if (action === 'retellDeleteEdition') {
+      deleteEdition(
+        element ? element.getAttribute('data-mpe-ra-edition') : null,
+      );
+      return true;
+    }
+    if (action === 'editionDelete') {
+      if (config.retellEdition) {
+        deleteEdition(config.retellEdition.id);
+      }
+      return true;
+    }
+    return false;
+  }
+
+  // ------------------------------------------------- the margin marker
+
+  /** §12.5 — the host's list of this document's editions. */
+  function onRetellEditions(message) {
+    if (
+      typeof message.sourceUri === 'string' &&
+      sourceUri &&
+      message.sourceUri !== sourceUri
+    ) {
+      return;
+    }
+    var previousDeleting = retell.editions.deleting.slice();
+    var list = Array.isArray(message.editions) ? message.editions : [];
+    retell.editions.list = [];
+    retell.editions.byId = Object.create(null);
+    for (var i = 0; i < list.length; i++) {
+      var summary = list[i];
+      if (
+        !summary ||
+        typeof summary !== 'object' ||
+        typeof summary.id !== 'string'
+      ) {
+        continue;
+      }
+      if (!Array.isArray(summary.anchors)) {
+        summary.anchors = [];
+      }
+      if (!Array.isArray(summary.headings)) {
+        summary.headings = [];
+      }
+      retell.editions.list.push(summary);
+      retell.editions.byId[summary.id] = summary;
+    }
+    retell.editions.deleting = Array.isArray(message.deleting)
+      ? message.deleting.filter(function (id) {
+          return typeof id === 'string';
+        })
+      : [];
+    if (message.deleteMode === 'permanent' || message.deleteMode === 'trash') {
+      retell.editions.deleteMode = message.deleteMode;
+    }
+    // A delete that started elsewhere shows the Undo chip here too.
+    for (var d = 0; d < retell.editions.deleting.length; d++) {
+      var id = retell.editions.deleting[d];
+      if (previousDeleting.indexOf(id) < 0 && notes.chipNoteId !== id) {
+        showNoteChip(deleteEditionChipText(), NOTE_UNDO_MS, id, 'edition');
+      }
+    }
+    if (
+      notes.chipNoteId &&
+      barParts &&
+      barParts.noteChip &&
+      barParts.noteChip.undo.getAttribute('data-mpe-ra-kind') === 'edition' &&
+      retell.editions.deleting.indexOf(notes.chipNoteId) < 0
+    ) {
+      hideNoteChip();
+    }
+    if (barParts && barParts.retell) {
+      barParts.retell.editionRows.removeAttribute('data-key');
+    }
+    anchorPass();
+    syncRetellSheet();
+  }
+
+  function deleteEditionChipText() {
+    return retell.editions.deleteMode === 'permanent'
+      ? RETELL_DELETE_PERMANENT_CHIP
+      : RETELL_DELETE_TRASH_CHIP;
+  }
+
+  /** The list as `core.anchorNotes` wants it: the first unit's anchor stands for the edition. */
+  function editionsAsAnchorNotes() {
+    var out = [];
+    for (var i = 0; i < retell.editions.list.length; i++) {
+      var summary = retell.editions.list[i];
+      if (retell.editions.deleting.indexOf(summary.id) >= 0) {
+        continue;
+      }
+      var anchor =
+        summary.anchors.length && summary.anchors[0]
+          ? summary.anchors[0]
+          : null;
+      if (!anchor || typeof anchor !== 'object') {
+        continue;
+      }
+      out.push({
+        id: summary.id,
+        created: summary.created,
+        headings: summary.headings,
+        passage: anchor.exact,
+        anchor: anchor,
+        context: { enclosing: '', before: '', after: '' },
+      });
+    }
+    return out;
+  }
+
+  /** §12.5 — anchor every edition and draw its marker, inside `anchorPass`. */
+  function retellMarkersPass() {
+    var show = config.enabled && config.retellAvailable && config.retellMarker;
+    var wanted = show ? editionsAsAnchorNotes() : [];
+    if (!wanted.length) {
+      retell.editions.results = Object.create(null);
+      clearRetellMarkers();
+      return;
+    }
+    var results = core.anchorNotes(root, wanted);
+    retell.editions.results = Object.create(null);
+    for (var i = 0; i < results.length; i++) {
+      retell.editions.results[results[i].noteId] = results[i];
+    }
+    mutateSilently(function () {
+      drawRetellMarkers(results);
+    });
+  }
+
+  function editionStateOf(summary) {
+    var status = summary && summary.status ? summary.status : 'done';
+    if (status === 'writing' || status === 'planning' || status === 'queued') {
+      return 'writing';
+    }
+    if (status === 'stopped' || status === 'failed') {
+      return 'stopped';
+    }
+    return 'done';
+  }
+
+  /**
+   * §12.5 — the lowest marker already on the block, the module's when there
+   * is one, else the note's: `{ top, count }` as a CSS length the retell
+   * marker is offset from, or null when the block carries neither.
+   */
+  function retellStackBase(el) {
+    var noteMarker = notes.markers.get(el);
+    var moduleMarker = classroom.modules.markers.get(el);
+    var count = 0;
+    var top = null;
+    if (noteMarker && noteMarker.parentNode === el) {
+      count++;
+      top = noteMarker.style.top || '0.1em';
+    }
+    if (moduleMarker && moduleMarker.parentNode === el) {
+      count++;
+      var below = moduleMarker.getAttribute('data-mpe-ra-below');
+      top = below
+        ? 'calc(' + below + ' + ' + CLASSROOM_MARKER_BELOW_NOTE + ')'
+        : moduleMarker.style.top || '0.1em';
+    }
+    return top === null ? null : { top: top, count: count };
+  }
+
+  /** One marker per edition-bearing block, third in the stack (§12.5). */
+  function drawRetellMarkers(results) {
+    var groups = new Map();
+    var anyFound = false;
+    for (var i = 0; i < results.length; i++) {
+      var result = results[i];
+      if (!result.found || !result.el) {
+        continue;
+      }
+      anyFound = true;
+      var list = groups.get(result.el);
+      if (!list) {
+        list = [];
+        groups.set(result.el, list);
+      }
+      list.push(result);
+    }
+    retell.editions.anyFound = anyFound;
+    retell.editions.markers.forEach(function (marker, el) {
+      if (!groups.has(el) || !el.isConnected) {
+        if (marker.parentNode) {
+          marker.parentNode.removeChild(marker);
+        }
+        retell.editions.markers.delete(el);
+        retell.editions.markerResults.delete(el);
+      }
+    });
+    groups.forEach(function (list, el) {
+      // Newest first: the marker names and opens the latest edition.
+      list.sort(function (a, b) {
+        var ca = retell.editions.byId[a.noteId]
+          ? retell.editions.byId[a.noteId].created
+          : '';
+        var cb = retell.editions.byId[b.noteId]
+          ? retell.editions.byId[b.noteId].created
+          : '';
+        return ca < cb ? 1 : ca > cb ? -1 : 0;
+      });
+      var first = list[0];
+      var marker = retell.editions.markers.get(el);
+      if (!marker || marker.parentNode !== el) {
+        marker = null;
+        for (var c = 0; c < el.children.length; c++) {
+          var child = el.children[c];
+          if (
+            child.classList &&
+            child.classList.contains('mpe-ra-retell-marker')
+          ) {
+            marker = child;
+            break;
+          }
+        }
+        if (!marker) {
+          marker = document.createElement('button');
+          marker.type = 'button';
+          marker.className = 'mpe-ra-ui mpe-ra-retell-marker';
+          marker.setAttribute('data-mpe-ra-action', 'retellMarker');
+          marker.innerHTML = ICONS.retell;
+          el.appendChild(marker);
+        }
+        retell.editions.markers.set(el, marker);
+      }
+      el.classList.add('mpe-ra-block');
+      marker.setAttribute('data-mpe-ra-edition', first.noteId);
+      marker.setAttribute(
+        'data-mpe-ra-editions',
+        list
+          .map(function (r) {
+            return r.noteId;
+          })
+          .join(' '),
+      );
+      retell.editions.markerResults.set(el, first);
+      syncRetellMarker(marker, list);
+      positionMarker(marker, first);
+      // Under the lowest of a note marker and a module marker on the same
+      // block (§12.5), recording the base it was offset from.
+      var base = retellStackBase(el);
+      if (base) {
+        marker.classList.add('is-below-note');
+        marker.classList.toggle('is-below-two', base.count > 1);
+        marker.setAttribute('data-mpe-ra-below', base.top);
+        try {
+          marker.style.top =
+            'calc(' + base.top + ' + ' + RETELL_MARKER_BELOW + ')';
+        } catch (error) {
+          /* an engine that refuses calc() keeps the class's own offset */
+        }
+      } else {
+        marker.classList.remove('is-below-note');
+        marker.classList.remove('is-below-two');
+        marker.removeAttribute('data-mpe-ra-below');
+      }
+    });
+    syncGutter();
+  }
+
+  /** The tooltip, the count badge and the state classes of one marker. */
+  function syncRetellMarker(marker, list) {
+    var first = retell.editions.byId[list[0].noteId];
+    var title = first && first.title ? first.title : 'Spoken edition';
+    var count = list.length;
+    var tip = count > 1 ? title + ' · ' + count + ' spoken editions' : title;
+    marker.setAttribute('title', tip);
+    marker.setAttribute('aria-label', tip);
+    var countBadge = marker.querySelector('.mpe-ra-retell-count');
+    if (count > 1) {
+      if (!countBadge) {
+        countBadge = document.createElement('span');
+        countBadge.className = 'mpe-ra-retell-count';
+        countBadge.setAttribute('aria-hidden', 'true');
+        marker.appendChild(countBadge);
+      }
+      if (countBadge.textContent !== String(count)) {
+        countBadge.textContent = String(count);
+      }
+    } else if (countBadge) {
+      marker.removeChild(countBadge);
+    }
+    var writing = null;
+    var stopped = false;
+    for (var i = 0; i < list.length; i++) {
+      var summary = retell.editions.byId[list[i].noteId];
+      var state = editionStateOf(summary);
+      if (state === 'writing' && !writing) {
+        writing = summary;
+      }
+      if (state === 'stopped') {
+        stopped = true;
+      }
+    }
+    var progressBadge = marker.querySelector('.mpe-ra-retell-progress');
+    if (writing) {
+      if (!progressBadge) {
+        progressBadge = document.createElement('span');
+        progressBadge.className = 'mpe-ra-retell-progress';
+        progressBadge.setAttribute('aria-hidden', 'true');
+        marker.appendChild(progressBadge);
+      }
+      var text =
+        (typeof writing.writing === 'number' && writing.writing
+          ? writing.writing
+          : writing.done || 0) +
+        '/' +
+        (writing.sections || 0);
+      if (progressBadge.textContent !== text) {
+        progressBadge.textContent = text;
+      }
+    } else if (progressBadge) {
+      marker.removeChild(progressBadge);
+    }
+    marker.classList.toggle('is-writing', !!writing);
+    marker.classList.toggle('is-stopped', stopped && !writing);
+    var active =
+      retell.open &&
+      !!retell.markerBlockIds &&
+      retell.markerBlockIds.indexOf(list[0].noteId) >= 0;
+    marker.classList.toggle('is-active', active);
+  }
+
+  /** A progress message moves an edition's marker badge (§12.5). */
+  function noteEditionProgress(message) {
+    var summary = retell.editions.byId[message.editionId];
+    if (!summary) {
+      return;
+    }
+    summary.status = message.status || summary.status;
+    if (typeof message.of === 'number' && message.of) {
+      summary.sections = message.of;
+    }
+    if (Array.isArray(message.sections)) {
+      summary.done = retellDoneCount(message.sections);
+    }
+    summary.writing = typeof message.section === 'number' ? message.section : 0;
+    syncRetellMarkerStates();
+  }
+
+  function syncRetellMarkerStates() {
+    retell.editions.markers.forEach(function (marker) {
+      var ids = (marker.getAttribute('data-mpe-ra-editions') || '')
+        .split(' ')
+        .filter(Boolean);
+      var list = [];
+      for (var i = 0; i < ids.length; i++) {
+        var result = retell.editions.results[ids[i]];
+        if (result) {
+          list.push(result);
+        }
+      }
+      if (list.length) {
+        mutateSilently(function () {
+          syncRetellMarker(marker, list);
+        });
+      }
+    });
+  }
+
+  function clearRetellMarkers() {
+    retell.editions.markers.forEach(function (marker) {
+      if (marker.parentNode) {
+        marker.parentNode.removeChild(marker);
+      }
+    });
+    retell.editions.markers.clear();
+    retell.editions.markerResults.clear();
+    retell.editions.anyFound = false;
+    syncGutter();
+  }
+
+  /** The ids of the editions anchored on `el`, newest first. */
+  function editionIdsOnBlock(el) {
+    if (!el) {
+      return [];
+    }
+    var marker = retell.editions.markers.get(el);
+    if (!marker) {
+      return [];
+    }
+    return (marker.getAttribute('data-mpe-ra-editions') || '')
+      .split(' ')
+      .filter(Boolean);
+  }
+
+  /** §12.5 — several editions on one block: the sheet, that block's rows first. */
+  function openRetellForBlock(el, ids, opener) {
+    var newest = retell.editions.byId[ids[0]];
+    if (!newest || !el) {
+      return;
+    }
+    var text = '';
+    try {
+      text = core.extractText(el).text;
+    } catch (error) {
+      text = '';
+    }
+    var passage = {
+      text: text.slice(0, RETELL_ANCHOR_MAX_CHARS),
+      els: [el],
+      range: null,
+    };
+    openRetell(passage, opener, 'selection');
+    if (retell.open) {
+      retell.markerBlockIds = ids.slice();
+      if (barParts && barParts.retell) {
+        barParts.retell.editionRows.removeAttribute('data-key');
+      }
+      syncRetellSheet();
+      syncRetellMarkerStates();
+    }
+  }
+
+  /** §11.3 — post the delete and show the chip with Undo at once. */
+  function deleteEdition(id) {
+    if (!id) {
+      return;
+    }
+    post('readAloudRetellDelete', [sourceUri, id]);
+    if (retell.editions.deleting.indexOf(id) < 0) {
+      retell.editions.deleting = retell.editions.deleting.concat([id]);
+    }
+    showNoteChip(deleteEditionChipText(), NOTE_UNDO_MS, id, 'edition');
+    if (barParts && barParts.retell) {
+      barParts.retell.editionRows.removeAttribute('data-key');
+    }
+    anchorPass();
+    syncRetellSheet();
+  }
+
+  function undoEditionDelete(id) {
+    if (!id) {
+      return;
+    }
+    post('readAloudRetellUndoDelete', [sourceUri, id]);
+    hideNoteChip();
+  }
+
+  // ---------------------------------------------------------------------------
   // 13. Messages from the host (F13)
   // ---------------------------------------------------------------------------
 
@@ -10163,6 +12541,9 @@
     // 13 §12.5 — read before any apply* below, so a change re-runs the pass.
     var markerBefore = config.classroomMarker;
     var classroomBefore = config.classroomAvailable;
+    // 15 §12.5 — the same, for the retell markers.
+    var retellMarkerBefore = config.retellMarker;
+    var retellBefore = config.retellAvailable;
     if (typeof message.enabled === 'boolean') {
       config.enabled = message.enabled;
     }
@@ -10215,6 +12596,7 @@
     var notesBefore = config.notesAvailable;
     applyNotesConfig(message);
     applyClassroomConfig(message);
+    applyRetellConfig(message);
     if (typeof message.speed === 'number') {
       var incoming = normaliseRate(message.speed);
       if (incoming !== rate) {
@@ -10237,6 +12619,8 @@
       closeHelp('read aloud disabled');
       closeClassroom('read aloud disabled');
       closeModuleSheet('read aloud disabled');
+      closeRetell('read aloud disabled');
+      closeEditionSheet('read aloud disabled');
       removeDecorations();
       dismissBar();
       hideFloat();
@@ -10253,6 +12637,10 @@
       closeClassroom('classroom unavailable');
       closeModuleSheet('classroom unavailable');
     }
+    if (!config.retellAvailable) {
+      closeRetell('retell unavailable');
+      closeEditionSheet('retell unavailable');
+    }
     if (!wasEnabled) {
       decorate();
       showBar('');
@@ -10267,7 +12655,9 @@
       decorationBefore !== config.notesDecoration ||
       notesBefore !== config.notesAvailable ||
       markerBefore !== config.classroomMarker ||
-      classroomBefore !== config.classroomAvailable
+      classroomBefore !== config.classroomAvailable ||
+      retellMarkerBefore !== config.retellMarker ||
+      retellBefore !== config.retellAvailable
     ) {
       anchorPass();
     }
@@ -10283,6 +12673,9 @@
     syncClassroomBar();
     syncClassroomSheet();
     syncModuleSheet();
+    syncRetellBar();
+    syncRetellSheet();
+    syncEditionSheet();
   }
 
   function handleControl(action, message) {
@@ -10330,6 +12723,15 @@
       toggleModuleSheet();
       return;
     }
+    // 15 §5.1, §12.2, §13 — `Alt+T`, `Alt+Shift+T`, Retell Document.
+    if (action === 'retell') {
+      toggleRetell(message ? message.scope : undefined);
+      return;
+    }
+    if (action === 'retellEdition') {
+      toggleEditionSheet();
+      return;
+    }
     if (action === 'revealAnchor') {
       revealAnchor(message);
     }
@@ -10369,6 +12771,18 @@
         return;
       case 'readAloudClassroomModules':
         onClassroomModules(message);
+        return;
+      case 'readAloudRetellPrepared':
+        onRetellPrepared(message);
+        return;
+      case 'readAloudRetellProgress':
+        onRetellProgress(message);
+        return;
+      case 'readAloudRetellError':
+        onRetellError(message);
+        return;
+      case 'readAloudRetellEditions':
+        onRetellEditions(message);
         return;
       case 'readAloudAudio':
         if (matchesRecord(message)) {

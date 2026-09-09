@@ -175,6 +175,46 @@ function bodyAfterHeading(prose: string): string {
   return prose.replace(/^\s*#{1,6}[^\n]*\n?/, '').trim();
 }
 
+// ---------------------------------------------------- the rule predicates
+//
+// Exported for `src/retell/checks.ts` (15 §9.3, D17), which runs the same
+// content rules over an edition's prose. Exactly the regexes `checkChapter`
+// uses; nothing about the classroom's behaviour changes.
+
+/** Any U+2014 in the text. */
+export function hasEmDash(text: string): boolean {
+  return /—/.test(text);
+}
+
+/** A line beginning `|`, or ` | ` anywhere. */
+export function hasTable(text: string): boolean {
+  return /^\s*\|/m.test(text) || / \| /.test(text);
+}
+
+/** `](`, `<http`, `[[`. */
+export function hasLink(text: string): boolean {
+  return /\]\(/.test(text) || /<http/i.test(text) || /\[\[/.test(text);
+}
+
+/** A backtick. */
+export function hasInlineCode(text: string): boolean {
+  return /`/.test(text);
+}
+
+/**
+ * `<` followed by a letter, `/` or `!`, autolinks excepted (an autolink,
+ * `<https://…>`, is the link rule's; anything else that opens like a tag is
+ * HTML).
+ */
+export function hasHtml(text: string): boolean {
+  return /<(?!https?:)[A-Za-z/!]/i.test(text);
+}
+
+/** Any `\p{Extended_Pictographic}`. */
+export function hasEmoji(text: string): boolean {
+  return /\p{Extended_Pictographic}/u.test(text);
+}
+
 /** The rule texts of §21.4, with the numbers filled in. */
 export function ruleText(
   code: CheckCode,
@@ -243,24 +283,24 @@ export function checkChapter(markdown: string, brief: CheckBrief): CheckResult {
   const { prose, tags } = maskFences(text);
   const after = bodyAfterHeading(prose);
 
-  if (/—/.test(prose)) {
+  if (hasEmDash(prose)) {
     failures.push({ code: 'em-dash' });
   }
-  if (/^\s*\|/m.test(after) || / \| /.test(after)) {
+  if (hasTable(after)) {
     failures.push({ code: 'table' });
   }
-  if (/\]\(/.test(after) || /<http/i.test(after) || /\[\[/.test(after)) {
+  if (hasLink(after)) {
     failures.push({ code: 'link' });
   }
-  if (/`/.test(after)) {
+  if (hasInlineCode(after)) {
     failures.push({ code: 'inline-code' });
   }
   // An autolink (`<https://…>`) is the link rule's; anything else that opens
   // like a tag is HTML.
-  if (/<(?!https?:)[A-Za-z/!]/i.test(after)) {
+  if (hasHtml(after)) {
     failures.push({ code: 'html' });
   }
-  if (/\p{Extended_Pictographic}/u.test(after)) {
+  if (hasEmoji(after)) {
     failures.push({ code: 'emoji' });
   }
   const headings = prose

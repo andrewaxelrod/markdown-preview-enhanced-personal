@@ -7,6 +7,7 @@ import { ReadAloudController } from './read-aloud/controller';
 import { readAloudLog } from './read-aloud/log';
 import { NotesController } from './notes/notes-controller';
 import { ClassroomController } from './classroom/classroom-controller';
+import { RetellController } from './retell/retell-controller';
 import {
   NOTES_VIEW_ID,
   NotesTreeProvider,
@@ -38,6 +39,15 @@ import {
   parseNoteUpdateArgs,
   parsePlayingArgs,
   parseResetPageArgs,
+  parseRetellBuildArgs,
+  parseRetellCancelArgs,
+  parseRetellContinueArgs,
+  parseRetellDeleteArgs,
+  parseRetellOpenArgs,
+  parseRetellOpenFolderArgs,
+  parseRetellOpenSourceArgs,
+  parseRetellPrepareArgs,
+  parseRetellUndoDeleteArgs,
   parseSetFontArgs,
   parseSetGlobalThemeArgs,
   parseSetHighlightThemeArgs,
@@ -264,6 +274,59 @@ export async function initExtensionCommon(context: vscode.ExtensionContext) {
   readAloud.moduleConfigFor = (sourceUri) =>
     classroom.moduleConfigFor(sourceUri);
 
+  // Retell (`featrues/15-convert-readable/spec.md`): the edition store, the
+  // one build queue per host and the edition previews. Desktop only, like
+  // notes and classroom; the same preview deps.
+  const retell = new RetellController({
+    isWebBuild: isVSCodeWebExtension(),
+    engineDeps: readAloud.engineDeps,
+    getSinkFor: readAloud.previewDeps.getSinkFor,
+    getDocumentText: readAloud.previewDeps.getDocumentText,
+    hasPreview: (uri) => {
+      if (getPreviewMode() === PreviewMode.SinglePreview) {
+        return PreviewProvider.isSinglePreviewShowing(uri);
+      }
+      return getAllPreviewProviders().some((candidate) =>
+        candidate.isPreviewOn(uri),
+      );
+    },
+    openPreview: async (uri) => {
+      const document = await vscode.workspace.openTextDocument(uri);
+      const previewProvider = await getPreviewContentProvider(uri);
+      await previewProvider.initPreview({
+        sourceUri: uri,
+        document,
+        cursorLine: 0,
+        viewOptions: {
+          viewColumn: vscode.ViewColumn.Beside,
+          preserveFocus: true,
+        },
+      });
+    },
+    // 15 §9.5 — after every appended section the edition's preview re-renders.
+    refreshPreview: async (uri) => {
+      const previewProvider = await getPreviewContentProvider(uri);
+      previewProvider.updateMarkdown(uri);
+    },
+    // 15 §11.3 — a deleted edition's own preview has nothing left to show.
+    closePreview: async (uri) => {
+      for (const provider of getAllPreviewProviders()) {
+        const panels = provider.getPreviews(uri);
+        if (panels) {
+          for (const panel of panels) {
+            panel.dispose();
+          }
+        }
+      }
+    },
+    isSinglePreviewMode: () => getPreviewMode() === PreviewMode.SinglePreview,
+    postToAll: (message) => readAloud.previewDeps.postToAll(message),
+  });
+  context.subscriptions.push(retell);
+  readAloud.addConfigListener((sourceUri) => retell.onPreviewReady(sourceUri));
+  readAloud.editionConfigFor = (sourceUri) =>
+    retell.editionConfigFor(sourceUri);
+
   /** 13 §13 — the module the active tab shows, when it is a module preview. */
   function activeModuleUri(): vscode.Uri | undefined {
     try {
@@ -290,6 +353,69 @@ export async function initExtensionCommon(context: vscode.ExtensionContext) {
       }
     } catch {
       /* no tab API, or no active tab */
+    }
+    return undefined;
+  }
+
+  /** 15 §13 — the edition the active tab shows, when it is an edition preview. */
+  function activeEditionUri(): vscode.Uri | undefined {
+    try {
+      const tab = vscode.window.tabGroups.activeTabGroup.activeTab;
+      const input = tab?.input;
+      if (
+        input instanceof vscode.TabInputCustom &&
+        input.uri.scheme === 'file'
+      ) {
+        return retell.editionStore.isEditionPath(input.uri.fsPath)
+          ? input.uri
+          : undefined;
+      }
+      if (
+        input instanceof vscode.TabInputWebview &&
+        getPreviewMode() === PreviewMode.SinglePreview
+      ) {
+        for (const provider of getAllPreviewProviders()) {
+          const target = provider.singlePreviewTarget();
+          if (target && retell.editionStore.isEditionPath(target.fsPath)) {
+            return target;
+          }
+        }
+      }
+    } catch {
+      /* no tab API, or no active tab */
+    }
+    return undefined;
+  }
+
+  /**
+   * 15 §13 — the document _Retell Document for Listening_ acts on: the
+   * active preview's (a custom editor tab, or the single panel's target),
+   * else the active markdown editor's.
+   */
+  function activeMarkdownDocumentUri(): vscode.Uri | undefined {
+    try {
+      const tab = vscode.window.tabGroups.activeTabGroup.activeTab;
+      const input = tab?.input;
+      if (
+        input instanceof vscode.TabInputCustom &&
+        input.uri.scheme === 'file'
+      ) {
+        return input.uri;
+      }
+      if (input instanceof vscode.TabInputWebview) {
+        for (const provider of getAllPreviewProviders()) {
+          const target = provider.singlePreviewTarget();
+          if (target) {
+            return target;
+          }
+        }
+      }
+    } catch {
+      /* no tab API, or no active tab */
+    }
+    const editor = vscode.window.activeTextEditor;
+    if (editor && isMarkdownFile(editor.document)) {
+      return editor.document.uri;
     }
     return undefined;
   }
@@ -2526,6 +2652,160 @@ export async function initExtensionCommon(context: vscode.ExtensionContext) {
           return;
         }
         await classroom.openFolder();
+      },
+    ),
+  );
+
+  // ---------------------------------------------------------------------------
+  // Retell (`featrues/15-convert-readable/spec.md` §13, §14.2): the palette
+  // commands and the `_crossnote.readAloudRetell*` handlers.
+  // ---------------------------------------------------------------------------
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      'markdown-preview-enhanced.readAloud.retell',
+      async () => {
+        await readAloud.control('retell');
+      },
+    ),
+    vscode.commands.registerCommand(
+      'markdown-preview-enhanced.readAloud.retellEdition',
+      async () => {
+        await readAloud.control('retellEdition');
+      },
+    ),
+    vscode.commands.registerCommand(
+      'markdown-preview-enhanced.retell.document',
+      async () => {
+        await retell.documentCommand(activeMarkdownDocumentUri());
+      },
+    ),
+    vscode.commands.registerCommand(
+      'markdown-preview-enhanced.retell.open',
+      async () => {
+        await retell.openQuickPick();
+      },
+    ),
+    vscode.commands.registerCommand(
+      'markdown-preview-enhanced.retell.openFolder',
+      async () => {
+        await retell.openFolder();
+      },
+    ),
+    vscode.commands.registerCommand(
+      'markdown-preview-enhanced.retell.continue',
+      async () => {
+        await retell.continueCommand(activeEditionUri());
+      },
+    ),
+    vscode.commands.registerCommand(
+      'markdown-preview-enhanced.retell.cancel',
+      async () => {
+        await retell.cancelCommand();
+      },
+    ),
+    vscode.commands.registerCommand(
+      'markdown-preview-enhanced.retell.delete',
+      async () => {
+        await retell.deleteCommand(activeEditionUri());
+      },
+    ),
+    vscode.commands.registerCommand(
+      '_crossnote.readAloudRetellPrepare',
+      async (...args: unknown[]) => {
+        const request = parseRetellPrepareArgs(args);
+        if (!request) {
+          readAloudLog('dropped invalid readAloudRetellPrepare message');
+          return;
+        }
+        await retell.prepare(request);
+      },
+    ),
+    vscode.commands.registerCommand(
+      '_crossnote.readAloudRetellBuild',
+      async (...args: unknown[]) => {
+        const request = parseRetellBuildArgs(args);
+        if (!request) {
+          readAloudLog('dropped invalid readAloudRetellBuild message');
+          return;
+        }
+        await retell.build(request);
+      },
+    ),
+    vscode.commands.registerCommand(
+      '_crossnote.readAloudRetellCancel',
+      async (...args: unknown[]) => {
+        const request = parseRetellCancelArgs(args);
+        if (!request) {
+          readAloudLog('dropped invalid readAloudRetellCancel message');
+          return;
+        }
+        await retell.cancel(request);
+      },
+    ),
+    vscode.commands.registerCommand(
+      '_crossnote.readAloudRetellContinue',
+      async (...args: unknown[]) => {
+        const request = parseRetellContinueArgs(args);
+        if (!request) {
+          readAloudLog('dropped invalid readAloudRetellContinue message');
+          return;
+        }
+        await retell.continueEdition(request);
+      },
+    ),
+    vscode.commands.registerCommand(
+      '_crossnote.readAloudRetellOpen',
+      async (...args: unknown[]) => {
+        const request = parseRetellOpenArgs(args);
+        if (!request) {
+          readAloudLog('dropped invalid readAloudRetellOpen message');
+          return;
+        }
+        await retell.open(request);
+      },
+    ),
+    vscode.commands.registerCommand(
+      '_crossnote.readAloudRetellOpenSource',
+      async (...args: unknown[]) => {
+        const request = parseRetellOpenSourceArgs(args);
+        if (!request) {
+          readAloudLog('dropped invalid readAloudRetellOpenSource message');
+          return;
+        }
+        await retell.openSource(request);
+      },
+    ),
+    vscode.commands.registerCommand(
+      '_crossnote.readAloudRetellOpenFolder',
+      async (...args: unknown[]) => {
+        if (!parseRetellOpenFolderArgs(args)) {
+          readAloudLog('dropped invalid readAloudRetellOpenFolder message');
+          return;
+        }
+        await retell.openFolder();
+      },
+    ),
+    vscode.commands.registerCommand(
+      '_crossnote.readAloudRetellDelete',
+      async (...args: unknown[]) => {
+        const request = parseRetellDeleteArgs(args);
+        if (!request) {
+          readAloudLog('dropped invalid readAloudRetellDelete message');
+          return;
+        }
+        await retell.delete(request);
+      },
+    ),
+    vscode.commands.registerCommand(
+      '_crossnote.readAloudRetellUndoDelete',
+      async (...args: unknown[]) => {
+        const request = parseRetellUndoDeleteArgs(args);
+        if (!request) {
+          readAloudLog('dropped invalid readAloudRetellUndoDelete message');
+          return;
+        }
+        await retell.undoDelete(request);
       },
     ),
   );

@@ -111,6 +111,16 @@ const SOURCE_URI_GUARDED_COMMANDS: Set<string> = new Set([
   'readAloudClassroomOpenFolder',
   'readAloudClassroomDelete',
   'readAloudClassroomUndoDelete',
+  // Retell (15 §14.2): the document's or the edition's own `sourceUri` first.
+  'readAloudRetellPrepare',
+  'readAloudRetellBuild',
+  'readAloudRetellCancel',
+  'readAloudRetellContinue',
+  'readAloudRetellOpen',
+  'readAloudRetellOpenSource',
+  'readAloudRetellOpenFolder',
+  'readAloudRetellDelete',
+  'readAloudRetellUndoDelete',
 ]);
 
 /**
@@ -152,6 +162,15 @@ const WEBVIEW_MESSAGE_COMMANDS: Set<string> = new Set([
   'readAloudClassroomUndoDelete',
   'readAloudClassroomOpenSource',
   'readAloudClassroomPrepare',
+  'readAloudRetellBuild',
+  'readAloudRetellCancel',
+  'readAloudRetellContinue',
+  'readAloudRetellDelete',
+  'readAloudRetellOpen',
+  'readAloudRetellOpenFolder',
+  'readAloudRetellOpenSource',
+  'readAloudRetellPrepare',
+  'readAloudRetellUndoDelete',
   'readAloudHelp',
   'readAloudHelpCancel',
   'readAloudHelpChooseModel',

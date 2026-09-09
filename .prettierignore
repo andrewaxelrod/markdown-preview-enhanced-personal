@@ -16,3 +16,6 @@ tsconfig.json
 mume
 crossnote
 package.json
+
+## verbatim engine outputs and source sections of featrues/15-convert-readable/experiment
+test/retell/fixtures

@@ -377,7 +377,8 @@ suite('read-aloud classroom layer (13-classroom)', function () {
     const buttons = qa('.mpe-ra-float > .mpe-ra-float-btn').map(
       (b) => b.className,
     );
-    assert.strictEqual(buttons.length, 4);
+    // 15 §5.1 adds Retell as the fifth; Classroom is still the fourth.
+    assert.strictEqual(buttons.length, 5);
     assert.ok(buttons[3].includes('mpe-ra-float-classroom'), 'after Note');
     assert.strictEqual(
       q('.mpe-ra-float-classroom').hidden,
@@ -1031,14 +1032,15 @@ suite('read-aloud classroom layer (13-classroom)', function () {
     const badge = q('.mpe-ra-bar-classroom-badge');
     assert.strictEqual(badge.hidden, false);
     assert.strictEqual(badge.textContent, '3/6');
-    // The bar order: help, notes, classroom, close.
+    // The bar order: help, notes, classroom, retell (15 §12.2), close.
     const order = qa('.mpe-ra-bar > .mpe-ra-bar-btn').map((b) =>
       b.getAttribute('data-mpe-ra-action'),
     );
-    assert.deepStrictEqual(order.slice(-4), [
+    assert.deepStrictEqual(order.slice(-5), [
       'help',
       'notes',
       'classroomModule',
+      'retellEdition',
       'close',
     ]);
     // Alt+Shift+C opens the Module sheet.

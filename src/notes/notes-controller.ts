@@ -20,6 +20,7 @@ import {
   trimAroundPassage,
   type HelpFields,
 } from '../read-aloud/help-prompt';
+import { helpEngineConfig } from '../read-aloud/controller';
 import { readAloudLog } from '../read-aloud/log';
 import {
   HELP_FIELD_CAPS,
@@ -611,16 +612,7 @@ export class NotesController implements vscode.Disposable {
 
   private async generate(job: GenerationJob): Promise<void> {
     const help = readHelpSettings();
-    const config = {
-      engine: help.engine,
-      claudeModel: help.claudeModel,
-      claudeEffort: help.claudeEffort,
-      codexModel: help.codexModel,
-      codexEffort: help.codexEffort,
-      command: help.command,
-      timeoutSeconds: help.timeoutSeconds,
-      binaryPath: help.binaryPath,
-    };
+    const config = helpEngineConfig(help);
     const label = engineLabel(config);
     const started = Date.now();
     try {

@@ -27,12 +27,15 @@ import {
   CLAUDE_EFFORTS,
   CLAUDE_MODEL_ALIASES,
   CODEX_EFFORTS,
+  detectHelpBinaries,
+  HELP_ENGINES,
   CLAUDE_MODEL_RE,
   defaultHelpEngineDeps,
   engineLabel,
   HelpEngineError,
   runHelpEngine,
   type HelpEngineConfig,
+  type HelpEngineId,
   type HelpEngineDeps,
 } from './help-engine';
 import {
@@ -91,6 +94,7 @@ import {
 import {
   clearPageSettings,
   readHelpSettings,
+  writeHelpEngineSetting,
   readReadAloudSettings,
   writeFontSetting,
   writeGlobalThemeSetting,
@@ -273,6 +277,21 @@ interface Synthesized {
 function metaOfError(error: unknown): ResponseMeta | undefined {
   return error instanceof KokoroHttpError ? error.meta : undefined;
 }
+
+/** The last row of the model pick, and what it returns when chosen. */
+const SWITCH_ENGINE = 'Switch engine…';
+
+/** The second line of each row of the _Choose Help Engine_ quick pick. */
+const HELP_ENGINE_DETAILS: Record<HelpEngineId, string> = {
+  claude:
+    'claude -p, the Claude Code CLI · model and effort from readAloudHelpClaudeModel / readAloudHelpClaudeEffort',
+  codex:
+    'codex exec -, the OpenAI Codex CLI · model and effort from readAloudHelpCodexModel / readAloudHelpCodexEffort',
+  copilot:
+    'copilot -p, the GitHub Copilot CLI · runs the same Claude model and effort as the claude engine',
+  custom:
+    'the argv in readAloudHelpCommand · prompt on stdin, answer on stdout',
+};
 
 /** The settings shape the engine wants (§7.1 -> §7.2); notes reuse it (12 §8.1). */
 export function helpEngineConfig(
@@ -643,7 +662,9 @@ export class ReadAloudController implements vscode.Disposable {
   /**
    * §7.1 — the _Choose Help Model_ quick pick: the model, then the effort,
    * for whichever engine is in use. Writing the settings broadcasts a new
-   * `readAloudConfig`, which is what re-labels an open sheet at once.
+   * `readAloudConfig`, which is what re-labels an open sheet at once. The
+   * model list ends with _Switch engine…_, and a `custom` engine goes
+   * straight to the engine pick, since it has no model to choose.
    */
   public async chooseHelpModelCommand(): Promise<void> {
     if (this.guardWebBuild()) {
@@ -652,13 +673,15 @@ export class ReadAloudController implements vscode.Disposable {
     try {
       const help = readHelpSettings();
       if (help.engine === 'custom') {
-        void vscode.window.showInformationMessage(
-          'The help engine is set to `custom`, which takes its whole command from markdown-preview-enhanced.readAloudHelpCommand. Switch readAloudHelpEngine to claude or codex to choose a model here.',
-        );
+        await this.chooseHelpEngineCommand();
         return;
       }
       const model = await this.pickHelpModel(help);
       if (model === undefined) {
+        return;
+      }
+      if (model === SWITCH_ENGINE) {
+        await this.chooseHelpEngineCommand();
         return;
       }
       const effort = await this.pickHelpEffort(help);
@@ -674,11 +697,64 @@ export class ReadAloudController implements vscode.Disposable {
     }
   }
 
+  /**
+   * The _Choose Help Engine_ quick pick: the four engines, each CLI marked
+   * found (with its path) or not, looked up while the pick is open. One
+   * computer often has one CLI and not the other; this is the switch.
+   */
+  public async chooseHelpEngineCommand(): Promise<void> {
+    if (this.guardWebBuild()) {
+      return;
+    }
+    try {
+      const help = readHelpSettings();
+      const items = detectHelpBinaries(
+        help.binaryPath,
+        this.helpEngineDeps,
+      ).then((found) =>
+        HELP_ENGINES.map((engine) => {
+          const current = engine === help.engine ? ' (current)' : '';
+          if (engine === 'custom') {
+            return {
+              label: engine,
+              description:
+                (help.command.length
+                  ? help.command.join(' ')
+                  : 'readAloudHelpCommand is empty') + current,
+              detail: HELP_ENGINE_DETAILS[engine],
+            };
+          }
+          const found_ = found[engine];
+          return {
+            label: engine,
+            description:
+              (found_?.path
+                ? `found at ${found_.path}`
+                : 'not found on this computer') + current,
+            detail: HELP_ENGINE_DETAILS[engine],
+          };
+        }),
+      );
+      const picked = await vscode.window.showQuickPick(items, {
+        placeHolder: `Help engine (now: ${help.engine})`,
+        matchOnDescription: true,
+      });
+      if (!picked) {
+        return;
+      }
+      const engine = picked.label as HelpEngineId;
+      await writeHelpEngineSetting(engine);
+      readAloudLog(`help engine set ${engine}`);
+    } catch (error) {
+      this.reportCommandError(error);
+    }
+  }
+
   private async pickHelpModel(
     help: ReadAloudHelpSettings,
   ): Promise<string | undefined> {
     const ENTER = 'Enter a model id…';
-    if (help.engine === 'claude') {
+    if (help.engine === 'claude' || help.engine === 'copilot') {
       const items = CLAUDE_MODEL_ALIASES.map((alias) => ({
         label: alias,
         description:
@@ -690,17 +766,32 @@ export class ReadAloudController implements vscode.Disposable {
         [
           ...items,
           { label: ENTER, description: 'a full id, e.g. claude-fable-5' },
+          {
+            label: SWITCH_ENGINE,
+            description: `now ${help.engine}; claude, codex, copilot or custom`,
+          },
         ],
-        { placeHolder: `Help model for claude (now: ${help.claudeModel})` },
+        {
+          placeHolder:
+            help.engine === 'copilot'
+              ? `Claude model for copilot (now: ${help.claudeModel}; the claude engine's setting)`
+              : `Help model for claude (now: ${help.claudeModel})`,
+        },
       );
       if (!picked) {
         return undefined;
+      }
+      if (picked.label === SWITCH_ENGINE) {
+        return SWITCH_ENGINE;
       }
       if (picked.label !== ENTER) {
         return picked.label;
       }
       const typed = await vscode.window.showInputBox({
-        prompt: 'Model id for claude --model',
+        prompt:
+          help.engine === 'copilot'
+            ? 'Claude model id (Claude Code or Copilot form; copilot runs the nearest model in its catalog)'
+            : 'Model id for claude --model',
         value: help.claudeModel,
         validateInput: (value) =>
           CLAUDE_MODEL_RE.test(value.trim())
@@ -734,9 +825,9 @@ export class ReadAloudController implements vscode.Disposable {
       ultra: 'beyond max, where the model accepts it',
     };
     const current =
-      help.engine === 'claude' ? help.claudeEffort : help.codexEffort;
+      help.engine === 'codex' ? help.codexEffort : help.claudeEffort;
     const levels: readonly string[] =
-      help.engine === 'claude' ? CLAUDE_EFFORTS : CODEX_EFFORTS;
+      help.engine === 'codex' ? CODEX_EFFORTS : CLAUDE_EFFORTS;
     const picked = await vscode.window.showQuickPick(
       levels.map((level) => ({
         label: level,

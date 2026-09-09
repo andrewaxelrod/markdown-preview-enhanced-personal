@@ -10,6 +10,7 @@ import {
 } from './kokoro-client';
 import {
   CLAUDE_EFFORTS,
+  CLI_ENGINES,
   CODEX_EFFORTS,
   CLAUDE_MODEL_RE,
   clampHelpTimeout,
@@ -19,6 +20,7 @@ import {
   DEFAULT_HELP_ENGINE,
   HELP_ENGINES,
   type ClaudeEffort,
+  type CliEngineId,
   type CodexEffort,
   type HelpEngineId,
 } from './help-engine';
@@ -71,7 +73,9 @@ export const READ_ALOUD_SETTING_KEYS = [
   'readAloudCacheSizeMB',
   'kokoroBaseUrl',
   // Help (`featrues/04-help-module.md` §7.1). Read per request, so a change
-  // takes effect on the next question with no reload.
+  // takes effect on the next question with no reload. The engine is machine
+  // scope: which CLI a computer has is a fact about that computer, so the
+  // choice is neither synced nor settable by a workspace.
   'readAloudHelpEngine',
   'readAloudHelpClaudeModel',
   'readAloudHelpClaudeEffort',
@@ -134,7 +138,7 @@ export interface ReadAloudHelpSettings {
   audience: string;
   autoPlay: boolean;
   timeoutSeconds: number;
-  binaryPath: { claude?: string; codex?: string };
+  binaryPath: Partial<Record<CliEngineId, string>>;
 }
 
 /** §14.1 — the four notes settings. */
@@ -282,9 +286,9 @@ export function readHelpSettings(): ReadAloudHelpSettings {
   const binaryRaw = getMPEConfig<Record<string, unknown>>(
     'readAloudHelpBinaryPath',
   );
-  const binaryPath: { claude?: string; codex?: string } = {};
+  const binaryPath: Partial<Record<CliEngineId, string>> = {};
   if (binaryRaw && typeof binaryRaw === 'object') {
-    for (const name of ['claude', 'codex'] as const) {
+    for (const name of CLI_ENGINES) {
       const value = (binaryRaw as Record<string, unknown>)[name];
       if (typeof value === 'string' && value.trim()) {
         binaryPath[name] = value.trim();
@@ -569,13 +573,17 @@ export async function clearPageSettings(): Promise<void> {
   await updateMPEConfig('readAloudWordMarker', undefined, true);
 }
 
-/** §7.1 — what the _Choose Help Model_ quick pick writes, per engine. */
+/**
+ * §7.1 — what the _Choose Help Model_ quick pick writes, per engine. The
+ * copilot engine runs the Claude model and effort, so it writes the same two
+ * settings the claude engine does.
+ */
 export async function writeHelpModelSettings(
   engine: HelpEngineId,
   model: string,
   effort: string,
 ): Promise<void> {
-  if (engine === 'claude') {
+  if (engine === 'claude' || engine === 'copilot') {
     await updateMPEConfig('readAloudHelpClaudeModel', model, true);
     await updateMPEConfig('readAloudHelpClaudeEffort', effort, true);
     return;
@@ -584,6 +592,13 @@ export async function writeHelpModelSettings(
     await updateMPEConfig('readAloudHelpCodexModel', model, true);
     await updateMPEConfig('readAloudHelpCodexEffort', effort, true);
   }
+}
+
+/** What the _Choose Help Engine_ quick pick writes (user settings, machine scope). */
+export async function writeHelpEngineSetting(
+  engine: HelpEngineId,
+): Promise<void> {
+  await updateMPEConfig('readAloudHelpEngine', engine, true);
 }
 
 /** 13 §5.4 step 2 — Build writes the instructor and the audience it used. */

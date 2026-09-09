@@ -298,21 +298,39 @@ of explanations back up. Answers are cached by content, so a repeat is instant, 
 
 #### Which engine answers
 
-| Setting                                | Default                             | What it does                                                                        |
-| -------------------------------------- | ----------------------------------- | ----------------------------------------------------------------------------------- |
-| `readAloudHelpEngine`                  | `claude`                            | `claude -p`, `codex exec -`, or `custom`.                                           |
-| `readAloudHelpClaudeModel` / `…Effort` | `sonnet` / `low`                    | `--model` and `--effort` for claude (`fable`/`opus`/`sonnet`/`haiku`, `low`…`max`). |
-| `readAloudHelpCodexModel` / `…Effort`  | empty / `low`                       | `-m` and `model_reasoning_effort` for codex; empty and `default` omit the flag.     |
-| `readAloudHelpCommand`                 | `[]`                                | For `custom`: argv, prompt on stdin, answer on stdout.                              |
-| `readAloudHelpAudience`                | a capable reader new to the subject | Who the explanation is written for.                                                 |
-| `readAloudHelpAutoPlay`                | `true`                              | Read the explanation as soon as it arrives.                                         |
-| `readAloudHelpTimeoutSeconds`          | `90`                                | Kill the command after this.                                                        |
-| `readAloudHelpBinaryPath`              | `{}`                                | Absolute paths to `claude` / `codex`. Machine scope.                                |
+| Setting                                | Default                             | What it does                                                                                               |
+| -------------------------------------- | ----------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `readAloudHelpEngine`                  | `claude`                            | `claude -p`, `codex exec -`, `copilot -p`, or `custom`. Per computer (machine scope).                      |
+| `readAloudHelpClaudeModel` / `…Effort` | `sonnet` / `low`                    | `--model` and `--effort` for claude (`fable`/`opus`/`sonnet`/`haiku`, `low`…`max`); copilot runs the same. |
+| `readAloudHelpCodexModel` / `…Effort`  | empty / `low`                       | `-m` and `model_reasoning_effort` for codex; empty and `default` omit the flag.                            |
+| `readAloudHelpCommand`                 | `[]`                                | For `custom`: argv, prompt on stdin, answer on stdout.                                                     |
+| `readAloudHelpAudience`                | a capable reader new to the subject | Who the explanation is written for.                                                                        |
+| `readAloudHelpAutoPlay`                | `true`                              | Read the explanation as soon as it arrives.                                                                |
+| `readAloudHelpTimeoutSeconds`          | `90`                                | Kill the command after this.                                                                               |
+| `readAloudHelpBinaryPath`              | `{}`                                | Absolute paths to `claude` / `codex` / `copilot`. Machine scope.                                           |
 
 Effort is a trade you feel, because you are waiting with a read paused: `low` answers in a few
 seconds, `high` and above think for longer and cost more per answer. **Markdown Preview
 Enhanced: Choose Help Model** picks the model and the effort in two steps, and the sheet's own
 `claude · sonnet · low` label opens the same quick pick without leaving the preview.
+
+**Switching engines.** One computer often has one CLI and not the other, so the engine is a
+per-computer setting: **Markdown Preview Enhanced: Choose Help Engine** lists the four engines
+with each CLI marked _found at …_ or _not found on this computer_, the model list's last row,
+_Switch engine…_, opens the same pick from the sheet, and Settings Sync leaves the choice alone
+(machine scope). When the configured CLI is missing, the error names the ones that are
+installed and the command that switches.
+
+**Copilot** (`copilot -p`, the GitHub Copilot CLI) runs **the same Claude model and effort as
+the claude engine**: `readAloudHelpClaudeModel` and `readAloudHelpClaudeEffort` are the only
+model settings, mapped onto Copilot's own catalog ids (`sonnet` → `claude-sonnet-5`,
+`claude-fable-5-1` → `claude-fable-5.1`; an id the catalog no longer lists gets the newest of
+its family; the list comes from `copilot help config`). It signs in with `copilot login`, the
+gh CLI's login it finds on its own, or a token in `GH_TOKEN`, and it runs with no tools, no
+custom instructions, no GitHub MCP server and a throwaway `COPILOT_HOME` inside the run's own
+directory, so the session store the CLI keeps never holds the document's text. VS Code's
+Copilot Chat extension puts a `copilot` launcher on the PATH that is not the CLI; it is
+skipped.
 
 The command is spawned with an argv array — never a shell — in a fresh empty directory, so no
 project's `CLAUDE.md` or `AGENTS.md` is pulled into the prompt. If the binary is not on the
@@ -496,7 +514,7 @@ Rebind those two commands in _Keyboard Shortcuts_ if you use Windows.
 - The server must be running; a stopped server is reported inline, not started for you.
 - A read is bounded by a 200,000-character request; a longer document is read up to the last
   block that fits.
-- Help needs a `claude` or `codex` CLI already signed in on this machine; it spawns a process,
+- Help needs a `claude`, `codex` or `copilot` CLI already signed in on this machine; it spawns a process,
   so it is desktop-only too, and the **?** button is not there in VS Code for the Web.
 - Help explains a **selection**. Explaining the block being read without selecting it first is
   not built yet, and neither is asking for help on the explanation itself — use the question

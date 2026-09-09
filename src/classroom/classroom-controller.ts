@@ -1102,16 +1102,19 @@ export class ClassroomController implements vscode.Disposable {
       },
       this.deps.engineDeps,
     );
+    // claude and copilot both report the cache; codex and custom never do.
     const cache =
-      config.engine === 'claude'
-        ? run.cacheRead !== undefined
-          ? run.cacheRead > 0
-            ? 'hit'
-            : 'miss'
-          : 'unknown'
+      run.cacheRead !== undefined
+        ? run.cacheRead > 0
+          ? 'hit'
+          : 'miss'
         : 'unknown';
     const cost =
-      run.costUsd !== undefined ? ` cost $${run.costUsd.toFixed(3)}` : '';
+      run.costUsd !== undefined
+        ? ` cost $${run.costUsd.toFixed(3)}`
+        : run.premiumRequests !== undefined
+          ? ` premium ${run.premiumRequests}`
+          : '';
     readAloudLog(
       `classroom: ${what} ${job.moduleId} in ${run.durationMs} (${countWords(run.markdown)} words, cache ${cache}${cost})`,
     );

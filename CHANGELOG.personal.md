@@ -91,7 +91,7 @@ Categories: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Security`.
     `readAloudHighlightTheme` (`blue`, `pink`, `red`, `green`, `orange`), `readAloudFont`
     (`default`, `system`, `helvetica`, `verdana`, `trebuchet`, `georgia`, `palatino`,
     `baskerville`, `times`, `menlo`), `readAloudCacheSizeMB`; and for help
-    `readAloudHelpEngine` (`claude`, `codex`, `custom`), `readAloudHelpClaudeModel`
+    `readAloudHelpEngine` (`claude`, `codex`, `copilot`, `custom`; machine scope), `readAloudHelpClaudeModel`
     (`sonnet`), `readAloudHelpClaudeEffort` (`low`), `readAloudHelpCodexModel` (empty),
     `readAloudHelpCodexEffort` (`low`), `readAloudHelpCommand` (`[]`),
     `readAloudHelpContext` (`section`), `readAloudHelpAudience`, `readAloudHelpAutoPlay`
@@ -174,8 +174,8 @@ blockId?, blocks? }]`, `readAloudCancel`, `readAloudPlaying`, `readAloudSetSpeed
       `readAloudSetHighlightTheme`.
   - **Help** (`featrues/04-help-module.md`): a `?` button on the panel, between the speed and
     the close ×, enabled when a selection can be read or a selection read is playing. It
-    pauses the read, asks a headless CLI — `claude -p` by default, `codex exec -` or a custom
-    command (`readAloudHelpEngine`, `readAloudHelpCommand`), with the model and effort per
+    pauses the read, asks a headless CLI — `claude -p` by default, `codex exec -`, `copilot -p`
+    (below) or a custom command (`readAloudHelpEngine`, `readAloudHelpCommand`), with the model and effort per
     engine (`readAloudHelpClaudeModel` + `readAloudHelpClaudeEffort`: `fable` / `opus` /
     `sonnet` × `low` … `max`; `readAloudHelpCodexModel` + `readAloudHelpCodexEffort`: a model
     id × `none` … `ultra`; or the _Choose Help Model_ quick pick, also behind the sheet's own
@@ -583,8 +583,86 @@ off` mid-read dropped the page, its properties and every tier class and kept the
     `messages.test.js` and `control-panel.test.js`; `retell=1` and `edition=1` in
     `test/harness/`.
 
+- **Copilot as a help engine** (2026-09-09): `readAloudHelpEngine: copilot` runs the GitHub
+  Copilot CLI (`copilot -p`, verified against 1.0.83) for help, notes, classroom and retell, on
+  a Copilot subscription, with **the same Claude model and effort as the `claude` engine**:
+  `readAloudHelpClaudeModel` and `readAloudHelpClaudeEffort` are the only model settings, so
+  the model is chosen once and either CLI answers with it. Copilot names models in its own
+  catalog (`claude-sonnet-5`, `claude-fable-5.1`, `claude-opus-4.8-fast`), so
+  `src/read-aloud/copilot-models.ts` reads the list `copilot help config` prints (local, no
+  sign-in, about 200 ms, cached per binary for the host's life) and maps the setting onto it:
+  an alias to the newest plain model of its family (`sonnet` → `claude-sonnet-5`, never a
+  `-fast` variant), a Claude Code id to its dotted form (`claude-fable-5-1` →
+  `claude-fable-5.1`, a date suffix dropped), an id the catalog lacks to the newest of its
+  family, anything else through for the CLI to judge; a built-in copy of the 2026-09-09 list
+  stands in when the help text cannot be read. `--effort` takes the same five names.
+  - **The switch**: a new palette command **Markdown Preview Enhanced: Choose Help Engine**
+    (`readAloud.help.chooseEngine`) lists the four engines, each CLI marked with the path it
+    was found at or _not found on this computer_ (looked up while the pick is open), and the
+    model quick pick — the sheet's engine label — ends with a _Switch engine…_ row that opens
+    it; a `custom` engine goes straight there. `readAloudHelpEngine` is now **machine scope**:
+    which CLI a computer has is a fact about that computer, so the choice is neither synced
+    nor settable by a workspace. When the configured CLI is missing, the error names the
+    CLIs that _are_ installed and the command that switches, plus the install line for the
+    missing one.
+  - **Invocation**: `-p` takes the prompt as its own argument (this version ignores piped
+    stdin, and the docs' `copilot -p < file` form is refused), so the one document codex gets
+    goes there as a single argv element; `--silent` makes stdout the answer;
+    `--no-custom-instructions`, `--disable-builtin-mcps`, `--no-auto-update`, `--no-color`,
+    `--no-ask-user`; tools cut to the CLI's irreducible core by `--available-tools=` with a
+    name no tool has (an empty value is no filter at all), then `shell` and `write` denied
+    outright and the temp dir taken out of the readable paths — a prompt asking for a shell
+    command, a file and a read produced no tool event; `--usage-output-file` for the cache
+    column and the premium-request count. An `E2BIG` from the OS (the prompt too long for
+    one argument: about 1 MiB on macOS, 128 KiB on Linux) is reported as such and not
+    retried; a 200 KB prompt ran on macOS.
+  - **A throwaway `COPILOT_HOME`**: the CLI writes every session's prompt and answer into
+    `session-store.db` (a `turns` table) and `session-state/<id>/events.jsonl` under its home
+    and has no flag against it, so each run gets `copilot-home/` inside its own working
+    directory (removed with it; a build keeps it for the build's calls), seeded with the
+    user's `config.json` alone — the file the CLI says a login it could not put in the
+    credential store is kept in as plain text — and nothing else: the user's `settings.json`,
+    MCP servers and hooks do not apply. The keychain, the gh CLI's login and a token in
+    `COPILOT_GITHUB_TOKEN` / `GH_TOKEN` / `GITHUB_TOKEN` are found without it (on this Mac
+    the CLI signed in through the gh CLI's login with nothing else configured).
+  - **The launcher is not the CLI**: VS Code's Copilot Chat extension puts a `copilot` shell
+    script on the login PATH (`…/github.copilot-chat/copilotCli/copilot`) that, when the CLI
+    is absent, asks _Install GitHub Copilot CLI? [y/N]_ on stdin and runs `npm install -g` on
+    a yes. The binary lookup never takes it — on the PATH, from the login shell or as the
+    `readAloudHelpBinaryPath.copilot` override — and says so in the not-found report. The
+    login-shell lookup now asks `which -a` and reads the trailing run of paths, so a shim
+    ahead of the real CLI does not hide it.
+  - The classroom and retell logs' cache column and cost now come from whichever engine
+    reports them (`cache hit/miss`; `cost $` for claude, `premium n` for copilot); the notes
+    controller builds its engine config through `helpEngineConfig` like the others.
+  - Files: `src/read-aloud/copilot-models.ts`, the copilot paths of `help-engine.ts`,
+    `settings.ts` (`writeHelpEngineSetting`, `CLI_ENGINES`), the two quick picks in
+    `controller.ts`, the command in `extension-common.ts` and `package.json`; suites
+    `test/read-aloud/copilot-models.test.js` and new cases in `help-engine.test.js`
+    (99 tests between them). `setup/GUIDE.md` and `README.md` name the second CLI.
+  - **The catalog is not the plan.** `copilot help config` lists what the CLI declares, and
+    the plan may refuse a listed model before any request is made (`Model "…" from --model
+flag is not available`): on this Mac on 2026-09-09 it refused `claude-fable-5.1`,
+    `claude-fable-5`, `claude-opus-5`, `claude-opus-4.8` and `claude-sonnet-4.6` and served
+    `claude-sonnet-5`; `claude-haiku-4.5` answered but refused `--effort` outright. So a
+    refused model is taken out of the catalog and the mapping asked again — the next model of
+    the same family, never another family — up to three times, then the sheet names the models
+    tried and says to pick another with _Choose Help Model_ (not retryable); a model that
+    "does not support reasoning effort configuration" gets the prompt once more without the
+    flag. Each refusal costs a CLI start of about two seconds, not a request.
+  - Measured through the bundled engine against Copilot CLI 1.0.83 from the scratchpad (the
+    real CLI is not installed on this Mac; the `copilot` on its login PATH is the launcher
+    above): the real help prompt (3,818 + 783 characters) answered in 8.5 s on
+    `claude-sonnet-5` at `low` with the four-part shape, cache write 4,997 tokens, one
+    premium request; the run directory was removed and nothing was written under
+    `~/.copilot`; `detectHelpBinaries` found claude and codex and refused the launcher in
+    359 ms; a 200 KB prompt ran; a prompt asking for a shell command, a file and a read
+    produced no tool event in the CLI's own log.
+
 ### Changed
 
+- `readAloudHelpEngine` is machine scope (see _Copilot as a help engine_ above): a value in a
+  workspace's `.vscode/settings.json` is ignored, and Settings Sync leaves it alone.
 - `engines.vscode` raised from `^1.70.0` to `^1.82.0` and `@types/vscode` to `1.82.0`, so the
   extension host can use native `fetch` for the Kokoro calls (no SDK dependency).
 - Changes to the read-aloud settings (all but `readAloudEnabled`) no longer reload every preview

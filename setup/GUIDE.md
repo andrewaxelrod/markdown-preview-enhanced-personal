@@ -12,7 +12,7 @@ manager is installed, and nothing is written to `/usr`, `/Library` or `/Applicat
 | Login agent          | `~/Library/LaunchAgents/com.andrew.kokoro-fastapi.plist`           | starting the server at login    |
 | `uv`                 | `~/.local/bin/uv`                                                  | the server's Python             |
 | Your reading data    | the shared folder, via `configPath`                                | notes, modules, spoken editions |
-| A headless CLI       | `~/.local/bin/claude` or `codex`                                   | help, notes, classroom, retell  |
+| A headless CLI       | `~/.local/bin/claude`, `copilot` or `codex`                        | help, notes, classroom, retell  |
 
 ## Before you start
 
@@ -116,10 +116,14 @@ shell out to a headless CLI, chosen by `markdown-preview-enhanced.readAloudHelpE
 one, those four features are the only things that will not work.
 
 ```bash
-curl -fsSL https://claude.ai/install.sh | bash     # installs to ~/.local/bin, no admin
+curl -fsSL https://claude.ai/install.sh | bash     # Claude Code: installs to ~/.local/bin, no admin
+npm install -g @github/copilot                     # or GitHub Copilot CLI (needs a Copilot plan)
 ```
 
-Then log in once. The Codex CLI works too; set the engine setting accordingly. Both need their
+Then log in once (`claude`, or `copilot login`; Copilot also uses a `gh auth login` the Mac
+already has). Pick the one this Mac has with **Markdown Preview Enhanced: Choose Help
+Engine** — the setting is per computer, so each Mac keeps its own — and Copilot runs the same
+Claude model and effort the claude engine is set to. The Codex CLI works too. Each needs its
 own paid account.
 
 If VS Code cannot find the CLI, set `markdown-preview-enhanced.readAloudHelpBinaryPath` to its

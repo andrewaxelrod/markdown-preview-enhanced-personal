@@ -1056,16 +1056,19 @@ export class RetellController implements vscode.Disposable {
       },
       this.deps.engineDeps,
     );
+    // claude and copilot both report the cache; codex and custom never do.
     const cache =
-      config.engine === 'claude'
-        ? run.cacheRead !== undefined
-          ? run.cacheRead > 0
-            ? 'hit'
-            : 'miss'
-          : 'unknown'
+      run.cacheRead !== undefined
+        ? run.cacheRead > 0
+          ? 'hit'
+          : 'miss'
         : 'unknown';
     const cost =
-      run.costUsd !== undefined ? `, cost $${run.costUsd.toFixed(4)}` : '';
+      run.costUsd !== undefined
+        ? `, cost $${run.costUsd.toFixed(4)}`
+        : run.premiumRequests !== undefined
+          ? `, premium ${run.premiumRequests}`
+          : '';
     return { ...run, cache, cost };
   }
 

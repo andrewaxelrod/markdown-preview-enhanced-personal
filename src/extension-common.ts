@@ -2148,6 +2148,15 @@ export async function initExtensionCommon(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     vscode.commands.registerCommand(
+      'markdown-preview-enhanced.readAloud.help.chooseEngine',
+      async () => {
+        await readAloud.chooseHelpEngineCommand();
+      },
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
       'markdown-preview-enhanced.readAloud.chooseVoice',
       async () => {
         await readAloud.chooseVoiceCommand();

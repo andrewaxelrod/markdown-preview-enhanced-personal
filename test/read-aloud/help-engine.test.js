@@ -412,6 +412,145 @@ suite('read-aloud/help-engine', function () {
     });
   });
 
+  suite('§7.2 buildInvocation — copilot', function () {
+    const CATALOG = [
+      'claude-sonnet-5',
+      'claude-fable-5.1',
+      'claude-opus-5',
+      'claude-sonnet-4.6',
+      'gpt-5.5',
+    ];
+    /** `catalog: null` passes no catalog at all, so the built-in list answers. */
+    function copilotArgs(overrides, catalog) {
+      return engine.buildInvocation(
+        config(Object.assign({ engine: 'copilot' }, overrides)),
+        '/bin/copilot',
+        'SYSTEM',
+        'USER',
+        '/tmp/cwd',
+        'CODEX',
+        catalog === null
+          ? undefined
+          : { catalog: catalog === undefined ? CATALOG : catalog },
+      );
+    }
+
+    test('is the exact argv: the one document as -p, the catalog model, the claude effort, no tools', function () {
+      const invocation = copilotArgs();
+      assert.strictEqual(invocation.file, '/bin/copilot');
+      assert.deepStrictEqual(invocation.args, [
+        '-p',
+        'CODEX',
+        '--model',
+        'claude-sonnet-5',
+        '--effort',
+        'low',
+        '--silent',
+        '--no-color',
+        '--no-auto-update',
+        '--no-custom-instructions',
+        '--disable-builtin-mcps',
+        '--no-ask-user',
+        '--available-tools=mpe_no_tools',
+        '--deny-tool=shell',
+        '--deny-tool=write',
+        '--disallow-temp-dir',
+        '--usage-output-file',
+        path.join('/tmp/cwd', 'copilot-usage.json'),
+      ]);
+      // Nothing on stdin: the CLI ignores it and takes the prompt from -p.
+      assert.strictEqual(invocation.stdin, '');
+      assert.strictEqual(invocation.answerFrom, 'stdout');
+      assert.strictEqual(
+        invocation.usageFile,
+        path.join('/tmp/cwd', 'copilot-usage.json'),
+      );
+      assert.deepStrictEqual(invocation.env, {
+        COPILOT_HOME: path.join('/tmp/cwd', 'copilot-home'),
+      });
+      assert.strictEqual(invocation.resolvedModel, 'claude-sonnet-5');
+      assert.strictEqual(invocation.modelHow, 'alias');
+    });
+
+    test('the whole prompt is one argv element, never split or quoted', function () {
+      const prompt =
+        '<instructions>\nline "one" and $HOME\n</instructions>\n\nwhat is \'this\'?';
+      const invocation = engine.buildInvocation(
+        config({ engine: 'copilot' }),
+        '/bin/copilot',
+        'SYSTEM',
+        'USER',
+        '/tmp/cwd',
+        prompt,
+        { catalog: CATALOG },
+      );
+      assert.strictEqual(invocation.args[0], '-p');
+      assert.strictEqual(invocation.args[1], prompt);
+      assert.strictEqual(invocation.args.length, copilotArgs().args.length);
+    });
+
+    test('the claude model and effort settings drive it; the codex ones are ignored', function () {
+      const fable = copilotArgs({
+        claudeModel: 'fable',
+        claudeEffort: 'max',
+        codexModel: 'gpt-5.5',
+        codexEffort: 'high',
+      });
+      assert.strictEqual(
+        fable.args[fable.args.indexOf('--model') + 1],
+        'claude-fable-5.1',
+      );
+      assert.strictEqual(fable.args[fable.args.indexOf('--effort') + 1], 'max');
+      assert.ok(!fable.args.includes('gpt-5.5') && !fable.args.includes('-m'));
+      assert.ok(!fable.args.includes('high'));
+
+      const pinned = copilotArgs({ claudeModel: 'claude-fable-5-1' });
+      assert.strictEqual(pinned.resolvedModel, 'claude-fable-5.1');
+      assert.strictEqual(pinned.modelHow, 'exact');
+
+      const stale = copilotArgs({ claudeModel: 'claude-sonnet-4-5-20250929' });
+      assert.strictEqual(stale.resolvedModel, 'claude-sonnet-5');
+      assert.strictEqual(stale.modelHow, 'family');
+    });
+
+    test('omitEffort drops the flag and nothing else', function () {
+      const without = engine.buildInvocation(
+        config({ engine: 'copilot' }),
+        '/bin/copilot',
+        'SYSTEM',
+        'USER',
+        '/tmp/cwd',
+        'CODEX',
+        { catalog: CATALOG, omitEffort: true },
+      );
+      const withEffort = copilotArgs();
+      assert.ok(!without.args.includes('--effort'));
+      assert.ok(!without.args.includes('low'));
+      assert.deepStrictEqual(
+        without.args,
+        withEffort.args.filter((arg) => arg !== '--effort' && arg !== 'low'),
+      );
+    });
+
+    test('every claude effort level rides through as one argv element', function () {
+      for (const effort of engine.CLAUDE_EFFORTS) {
+        const invocation = copilotArgs({ claudeEffort: effort });
+        assert.strictEqual(
+          invocation.args[invocation.args.indexOf('--effort') + 1],
+          effort,
+        );
+      }
+    });
+
+    test('without a catalog the built-in list answers, and an empty model is the default alias', function () {
+      const opus = copilotArgs({ claudeModel: 'opus' }, null);
+      assert.strictEqual(opus.resolvedModel, 'claude-opus-5');
+      assert.strictEqual(opus.modelHow, 'alias');
+      const empty = copilotArgs({ claudeModel: '' }, null);
+      assert.strictEqual(empty.resolvedModel, 'claude-sonnet-5');
+    });
+  });
+
   suite('§7.2 buildInvocation — custom', function () {
     test('the argv is the setting, verbatim', function () {
       const command = ['/usr/local/bin/my llm', '--flag', 'a b c', ''];
@@ -619,13 +758,38 @@ suite('read-aloud/help-engine', function () {
       );
     });
 
-    test('HELP_ENGINES is the three-engine list with claude the default', function () {
+    test('copilot names the claude model and effort it will run', function () {
+      assert.deepStrictEqual(
+        engine.engineLabel(
+          config({
+            engine: 'copilot',
+            claudeModel: 'fable',
+            claudeEffort: 'high',
+          }),
+        ),
+        { engine: 'copilot', model: 'fable', effort: 'high' },
+      );
+      assert.deepStrictEqual(
+        engine.engineLabel(config({ engine: 'copilot', claudeModel: '' })),
+        { engine: 'copilot', model: 'sonnet', effort: 'low' },
+      );
+    });
+
+    test('HELP_ENGINES is the four-engine list with claude the default', function () {
       assert.deepStrictEqual(Array.from(engine.HELP_ENGINES), [
         'claude',
         'codex',
+        'copilot',
         'custom',
       ]);
+      assert.deepStrictEqual(Array.from(engine.CLI_ENGINES), [
+        'claude',
+        'codex',
+        'copilot',
+      ]);
       assert.strictEqual(engine.DEFAULT_HELP_ENGINE, 'claude');
+      assert.ok(engine.isCliEngine('copilot'));
+      assert.ok(!engine.isCliEngine('custom'));
     });
   });
 
@@ -735,6 +899,392 @@ suite('read-aloud/help-engine', function () {
       });
       assert.strictEqual(spawn.calls[0].file, fakeBinary);
       assert.deepStrictEqual(spawn.calls[0].args, ['--one', 'two']);
+    });
+  });
+
+  suite('runHelpEngine — copilot', function () {
+    const HELP_CONFIG =
+      'Configuration Settings:\n\n  `model`: AI model to use.\n    - "claude-sonnet-5"\n    - "claude-fable-5.1"\n    - "gpt-5.5"\n\n  `theme`: x\n';
+
+    function loggingDeps(spawn, lines) {
+      return {
+        spawn,
+        log: function (line) {
+          lines.push(line);
+        },
+        env: { PATH: '/usr/bin', SHELL: '/bin/zsh' },
+      };
+    }
+
+    test('`help config` first, then the run; the answer is stdout and the usage file is read', async function () {
+      let homeSeen;
+      let homeExisted;
+      let cwdSeen;
+      const spawn = makeSpawn(function (call) {
+        if (call.args[0] === 'help') {
+          assert.deepStrictEqual(call.args, ['help', 'config']);
+          call.finish({ stdout: HELP_CONFIG, code: 0 });
+          return;
+        }
+        cwdSeen = call.options.cwd;
+        homeSeen = call.options.env.COPILOT_HOME;
+        homeExisted = fs.existsSync(homeSeen);
+        const usage = call.args[call.args.indexOf('--usage-output-file') + 1];
+        fs.writeFileSync(
+          usage,
+          JSON.stringify({
+            totalPremiumRequestCost: 1,
+            tokenDetails: {
+              cache_read: { tokenCount: 1630 },
+              cache_write: { tokenCount: 2053 },
+              output: { tokenCount: 50 },
+            },
+          }),
+          'utf8',
+        );
+        call.finish({ stdout: '### What it says\nHello\n\n', code: 0 });
+      });
+      const lines = [];
+      const result = await engine.runHelpEngine(
+        request({
+          config: config({
+            engine: 'copilot',
+            claudeModel: 'fable',
+            claudeEffort: 'medium',
+            binaryPath: { copilot: fakeBinary },
+          }),
+        }),
+        loggingDeps(spawn, lines),
+      );
+      assert.strictEqual(result.markdown, '### What it says\nHello\n\n');
+      assert.deepStrictEqual(result.label, {
+        engine: 'copilot',
+        model: 'fable',
+        effort: 'medium',
+      });
+      assert.strictEqual(result.model, 'claude-fable-5.1');
+      assert.strictEqual(result.cacheRead, 1630);
+      assert.strictEqual(result.cacheCreation, 2053);
+      assert.strictEqual(result.premiumRequests, 1);
+      assert.strictEqual(result.costUsd, undefined);
+
+      assert.strictEqual(spawn.calls.length, 2);
+      const run = spawn.calls[1];
+      assert.strictEqual(run.file, fakeBinary);
+      assert.strictEqual(run.args[0], '-p');
+      assert.strictEqual(run.args[1], request().codexPrompt);
+      assert.ok(run.args.includes('claude-fable-5.1'));
+      assert.ok(run.args.includes('medium'));
+      assert.strictEqual(run.stdin, '');
+      assert.ok(run.stdinEnded, 'stdin is closed at once');
+      assert.strictEqual(run.options.shell, undefined);
+      assert.strictEqual(homeSeen, path.join(cwdSeen, 'copilot-home'));
+      assert.ok(homeExisted, 'the throwaway home is made before the run');
+      assert.strictEqual(
+        spawn.calls[0].options.env.COPILOT_HOME,
+        homeSeen,
+        'help config runs against the throwaway home too',
+      );
+      assert.strictEqual(
+        fs.existsSync(cwdSeen),
+        false,
+        'the cwd, home included, is removed',
+      );
+      assert.ok(
+        lines.some((line) => line.includes('fable → claude-fable-5.1 (alias)')),
+        lines.join('\n'),
+      );
+    });
+
+    test('an unreadable catalog falls back to the built-in list, and says so', async function () {
+      const spawn = makeSpawn(function (call) {
+        if (call.args[0] === 'help') {
+          call.finish({ stderr: 'boom', code: 1 });
+          return;
+        }
+        call.finish({ stdout: 'ok', code: 0 });
+      });
+      const lines = [];
+      const result = await engine.runHelpEngine(
+        request({
+          config: config({
+            engine: 'copilot',
+            binaryPath: { copilot: fakeBinary },
+          }),
+        }),
+        loggingDeps(spawn, lines),
+      );
+      assert.strictEqual(result.markdown, 'ok');
+      assert.strictEqual(result.model, 'claude-sonnet-5');
+      assert.strictEqual(
+        result.cacheRead,
+        undefined,
+        'no usage file, no cache column',
+      );
+      assert.ok(lines.some((line) => line.includes('built-in list')));
+    });
+
+    test('the catalog is cached per binary until clearHelpBinaryCache', async function () {
+      const spawn = makeSpawn(function (call) {
+        if (call.args[0] === 'help') {
+          call.finish({ stdout: HELP_CONFIG, code: 0 });
+          return;
+        }
+        call.finish({ stdout: 'ok', code: 0 });
+      });
+      const req = request({
+        config: config({
+          engine: 'copilot',
+          binaryPath: { copilot: fakeBinary },
+        }),
+      });
+      await engine.runHelpEngine(req, deps(spawn));
+      await engine.runHelpEngine(req, deps(spawn));
+      assert.deepStrictEqual(
+        spawn.calls.map((call) => call.args[0]),
+        ['help', '-p', '-p'],
+      );
+      engine.clearHelpBinaryCache();
+      await engine.runHelpEngine(req, deps(spawn));
+      assert.deepStrictEqual(
+        spawn.calls.map((call) => call.args[0]),
+        ['help', '-p', '-p', 'help', '-p'],
+      );
+    });
+
+    test('a caller-owned cwd keeps the home across calls and seeds it once', async function () {
+      const own = fs.mkdtempSync(path.join(os.tmpdir(), 'mpe-retell-test-'));
+      try {
+        const spawn = makeSpawn(function (call) {
+          if (call.args[0] === 'help') {
+            call.finish({ stdout: HELP_CONFIG, code: 0 });
+            return;
+          }
+          fs.writeFileSync(
+            path.join(call.options.env.COPILOT_HOME, 'marker'),
+            'x',
+          );
+          call.finish({ stdout: 'ok', code: 0 });
+        });
+        const req = request({
+          config: config({
+            engine: 'copilot',
+            binaryPath: { copilot: fakeBinary },
+          }),
+          cwd: own,
+        });
+        await engine.runHelpEngine(req, deps(spawn));
+        await engine.runHelpEngine(req, deps(spawn));
+        assert.ok(fs.existsSync(path.join(own, 'copilot-home', 'marker')));
+        assert.ok(fs.existsSync(own), 'not removed');
+      } finally {
+        fs.rmSync(own, { recursive: true, force: true });
+      }
+    });
+
+    const FAMILY_CONFIG =
+      'Configuration Settings:\n\n  `model`: AI model to use.\n    - "claude-sonnet-5"\n    - "claude-fable-5.1"\n    - "claude-fable-5"\n    - "claude-opus-5"\n    - "claude-haiku-4.5"\n\n  `theme`: x\n';
+    const REFUSAL = (model) =>
+      `Error: Model "${model}" from --model flag is not available.\n`;
+
+    /**
+     * A CLI whose plan serves only `served`; every other model is refused at
+     * once. `noEffort` models refuse the flag instead, the way haiku does.
+     */
+    function planSpawn(served, noEffort) {
+      return makeSpawn(function (call) {
+        if (call.args[0] === 'help') {
+          call.finish({ stdout: FAMILY_CONFIG, code: 0 });
+          return;
+        }
+        const model = call.args[call.args.indexOf('--model') + 1];
+        if (
+          (noEffort || []).includes(model) &&
+          call.args.includes('--effort')
+        ) {
+          call.finish({
+            stderr: `Error: Model "${model}" does not support reasoning effort configuration (requested low).\n`,
+            code: 1,
+          });
+          return;
+        }
+        if (served.includes(model)) {
+          call.finish({ stdout: `answer from ${model}`, code: 0 });
+        } else {
+          call.finish({ stderr: REFUSAL(model), code: 1 });
+        }
+      });
+    }
+
+    function modelsTried(spawn) {
+      return spawn.calls
+        .filter((call) => call.args[0] === '-p')
+        .map((call) => call.args[call.args.indexOf('--model') + 1]);
+    }
+
+    test('a model the plan refuses is stepped down within its family, and logged', async function () {
+      const spawn = planSpawn(['claude-fable-5', 'claude-sonnet-5']);
+      const lines = [];
+      const result = await engine.runHelpEngine(
+        request({
+          config: config({
+            engine: 'copilot',
+            claudeModel: 'fable',
+            binaryPath: { copilot: fakeBinary },
+          }),
+        }),
+        loggingDeps(spawn, lines),
+      );
+      assert.strictEqual(result.model, 'claude-fable-5');
+      assert.strictEqual(result.markdown, 'answer from claude-fable-5');
+      assert.deepStrictEqual(modelsTried(spawn), [
+        'claude-fable-5.1',
+        'claude-fable-5',
+      ]);
+      assert.ok(
+        lines.some((line) =>
+          line.includes(
+            'claude-fable-5.1 is not available on this Copilot plan; trying the next fable model',
+          ),
+        ),
+        lines.join('\n'),
+      );
+    });
+
+    test('a pinned id the plan refuses steps down the same way', async function () {
+      const spawn = planSpawn(['claude-fable-5']);
+      const result = await engine.runHelpEngine(
+        request({
+          config: config({
+            engine: 'copilot',
+            claudeModel: 'claude-fable-5-1',
+            binaryPath: { copilot: fakeBinary },
+          }),
+        }),
+        deps(spawn),
+      );
+      assert.strictEqual(result.model, 'claude-fable-5');
+    });
+
+    test('when the whole family is refused the error names the models and is not retryable', async function () {
+      const spawn = planSpawn(['claude-sonnet-5']);
+      const error = await rejection(
+        engine.runHelpEngine(
+          request({
+            config: config({
+              engine: 'copilot',
+              claudeModel: 'fable',
+              binaryPath: { copilot: fakeBinary },
+            }),
+          }),
+          deps(spawn),
+        ),
+      );
+      assert.strictEqual(error.code, 'engine_failed');
+      assert.strictEqual(error.retryable, false);
+      assert.ok(
+        error.message.includes(
+          'claude-fable-5.1, claude-fable-5 are not available on this Copilot plan',
+        ),
+        error.message,
+      );
+      assert.ok(error.message.includes('Choose Help Model'), error.message);
+      // One run per fable model, then nothing left to try: sonnet is never
+      // reached on its own.
+      assert.deepStrictEqual(modelsTried(spawn), [
+        'claude-fable-5.1',
+        'claude-fable-5',
+      ]);
+    });
+
+    test('an id outside the catalog is tried once and never crosses into another family', async function () {
+      const spawn = planSpawn(['claude-sonnet-5']);
+      const error = await rejection(
+        engine.runHelpEngine(
+          request({
+            config: config({
+              engine: 'copilot',
+              claudeModel: 'claude-mythos-6',
+              binaryPath: { copilot: fakeBinary },
+            }),
+          }),
+          deps(spawn),
+        ),
+      );
+      assert.strictEqual(error.code, 'engine_failed');
+      assert.ok(
+        error.message.includes('claude-mythos-6 is not available'),
+        error.message,
+      );
+      assert.deepStrictEqual(modelsTried(spawn), ['claude-mythos-6']);
+    });
+
+    test('a model that takes no --effort gets the prompt again without one', async function () {
+      const spawn = planSpawn(['claude-haiku-4.5'], ['claude-haiku-4.5']);
+      const lines = [];
+      const result = await engine.runHelpEngine(
+        request({
+          config: config({
+            engine: 'copilot',
+            claudeModel: 'haiku',
+            binaryPath: { copilot: fakeBinary },
+          }),
+        }),
+        loggingDeps(spawn, lines),
+      );
+      assert.strictEqual(result.model, 'claude-haiku-4.5');
+      assert.strictEqual(result.markdown, 'answer from claude-haiku-4.5');
+      const runs = spawn.calls.filter((call) => call.args[0] === '-p');
+      assert.strictEqual(runs.length, 2);
+      assert.ok(runs[0].args.includes('--effort'));
+      assert.ok(!runs[1].args.includes('--effort'));
+      assert.ok(
+        lines.some((line) => line.includes('takes no --effort')),
+        lines.join('\n'),
+      );
+    });
+
+    test('any other non-zero exit is the ordinary engine_failed, tried once', async function () {
+      const spawn = makeSpawn(function (call) {
+        if (call.args[0] === 'help') {
+          call.finish({ stdout: FAMILY_CONFIG, code: 0 });
+          return;
+        }
+        call.finish({ stderr: 'rate limited', code: 1 });
+      });
+      const error = await rejection(
+        engine.runHelpEngine(
+          request({
+            config: config({
+              engine: 'copilot',
+              claudeModel: 'fable',
+              binaryPath: { copilot: fakeBinary },
+            }),
+          }),
+          deps(spawn),
+        ),
+      );
+      assert.strictEqual(error.code, 'engine_failed');
+      assert.strictEqual(error.retryable, true);
+      assert.strictEqual(spawn.calls.length, 2);
+    });
+
+    test('parseCopilotUsage reads the usage file and ignores anything else', function () {
+      assert.deepStrictEqual(
+        engine.parseCopilotUsage(
+          JSON.stringify({
+            totalPremiumRequestCost: 2,
+            tokenDetails: {
+              cache_read: { tokenCount: 5 },
+              cache_write: { tokenCount: 0 },
+            },
+          }),
+        ),
+        { cacheRead: 5, cacheCreation: 0, premiumRequests: 2 },
+      );
+      assert.strictEqual(engine.parseCopilotUsage('{}'), undefined);
+      assert.strictEqual(engine.parseCopilotUsage('not json'), undefined);
+      assert.strictEqual(engine.parseCopilotUsage('[1]'), undefined);
     });
   });
 
@@ -905,6 +1455,34 @@ suite('read-aloud/help-engine', function () {
     });
   });
 
+  suite('runHelpEngine — the argument ceiling', function () {
+    test('a prompt too long for one argument (E2BIG) is engine_failed and not retryable', async function () {
+      const spawn = makeSpawn(function (call) {
+        if (call.args[0] === 'help') {
+          call.finish({ code: 1 });
+          return;
+        }
+        const error = new Error('spawn E2BIG');
+        error.code = 'E2BIG';
+        call.child.emit('error', error);
+      });
+      const error = await rejection(
+        engine.runHelpEngine(
+          request({
+            config: config({
+              engine: 'copilot',
+              binaryPath: { copilot: fakeBinary },
+            }),
+          }),
+          deps(spawn),
+        ),
+      );
+      assert.strictEqual(error.code, 'engine_failed');
+      assert.strictEqual(error.retryable, false);
+      assert.ok(/too long/.test(error.message), error.message);
+    });
+  });
+
   suite('runHelpEngine — the kill paths', function () {
     test('a timeout is engine_timeout and SIGTERMs the child', async function () {
       const spawn = makeHangingSpawn();
@@ -1030,7 +1608,7 @@ suite('read-aloud/help-engine', function () {
         );
         assert.ok(error.message.includes(`PATH (${emptyDir})`), error.message);
         assert.ok(
-          error.message.includes(`${missingShell} -lic "command -v claude"`),
+          error.message.includes(`${missingShell} -lic "which -a claude"`),
           error.message,
         );
         assert.ok(
@@ -1040,13 +1618,20 @@ suite('read-aloud/help-engine', function () {
           error.message,
         );
 
-        // The one spawn was the login-shell lookup, with our own constants.
-        assert.strictEqual(spawn.calls.length, 1);
-        assert.strictEqual(spawn.calls[0].file, missingShell);
+        // The spawns were login-shell lookups, with our own constants:
+        // claude's, then the other two CLIs' for the "installed here" line.
+        assert.strictEqual(spawn.calls.length, 3);
+        assert.ok(spawn.calls.every((call) => call.file === missingShell));
         assert.deepStrictEqual(spawn.calls[0].args, [
           '-lic',
-          'command -v claude',
+          'which -a claude',
         ]);
+        assert.deepStrictEqual(spawn.calls.map((call) => call.args[1]).sort(), [
+          'which -a claude',
+          'which -a codex',
+          'which -a copilot',
+        ]);
+        assert.ok(!error.message.includes('Installed here'), error.message);
       } finally {
         fs.rmSync(emptyDir, { recursive: true, force: true });
       }
@@ -1137,9 +1722,171 @@ suite('read-aloud/help-engine', function () {
       );
       assert.strictEqual(lookup.path, fakeBinary);
       assert.strictEqual(spawn.calls[0].file, '/bin/zsh');
-      assert.deepStrictEqual(spawn.calls[0].args, [
-        '-lic',
-        'command -v claude',
+      assert.deepStrictEqual(spawn.calls[0].args, ['-lic', 'which -a claude']);
+    });
+
+    test("VS Code's Copilot Chat launcher is never the copilot binary", async function () {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mpe-help-shim-'));
+      const shimDir = path.join(root, 'github.copilot-chat', 'copilotCli');
+      const realDir = path.join(root, 'real');
+      fs.mkdirSync(shimDir, { recursive: true });
+      fs.mkdirSync(realDir);
+      const shim = path.join(shimDir, 'copilot');
+      const real = path.join(realDir, 'copilot');
+      for (const file of [shim, real]) {
+        fs.writeFileSync(file, '#!/bin/sh\nexit 0\n', 'utf8');
+        fs.chmodSync(file, 0o755);
+      }
+      try {
+        const spawn = makeSpawn(function (call) {
+          call.finish({ code: 1 });
+        });
+        // The shim ahead of the real CLI on the PATH: the real one wins.
+        const both = await engine.resolveHelpBinary(
+          'copilot',
+          undefined,
+          deps(spawn, {
+            PATH: `${shimDir}${path.delimiter}${realDir}`,
+            SHELL: '/no/shell',
+          }),
+        );
+        assert.strictEqual(both.path, real);
+
+        // The shim alone (on the PATH twice): not found, and the report
+        // says why, naming it once.
+        engine.clearHelpBinaryCache();
+        const alone = await engine.resolveHelpBinary(
+          'copilot',
+          undefined,
+          deps(spawn, {
+            PATH: `${shimDir}${path.delimiter}${shimDir}`,
+            SHELL: '/no/shell',
+          }),
+        );
+        assert.strictEqual(alone.path, undefined);
+        assert.strictEqual(
+          alone.tried.join(' ').split(shim).length - 1,
+          1,
+          'the launcher is named once',
+        );
+        assert.ok(
+          alone.tried.some(
+            (entry) =>
+              entry.includes('Copilot Chat launcher') && entry.includes(shim),
+          ),
+          alone.tried.join('; '),
+        );
+
+        // As the override it is refused too.
+        engine.clearHelpBinaryCache();
+        const override = await engine.resolveHelpBinary(
+          'copilot',
+          shim,
+          deps(spawn, { PATH: '', SHELL: '/no/shell' }),
+        );
+        assert.strictEqual(override.path, undefined);
+
+        // And the login shell's `which -a` lists it first: skipped, the
+        // real CLI after it taken.
+        engine.clearHelpBinaryCache();
+        const shellSpawn = makeSpawn(function (call) {
+          call.finish({ stdout: `${shim}\n${real}\n`, code: 0 });
+        });
+        const fromShell = await engine.resolveHelpBinary(
+          'copilot',
+          undefined,
+          deps(shellSpawn, { PATH: '', SHELL: '/bin/zsh' }),
+        );
+        assert.strictEqual(fromShell.path, real);
+        assert.deepStrictEqual(shellSpawn.calls[0].args, [
+          '-lic',
+          'which -a copilot',
+        ]);
+
+        // A claude at that path would be fine: the rule is copilot's alone.
+        engine.clearHelpBinaryCache();
+        const claudeShim = path.join(shimDir, 'claude');
+        fs.copyFileSync(shim, claudeShim);
+        const claude = await engine.resolveHelpBinary(
+          'claude',
+          undefined,
+          deps(spawn, { PATH: shimDir, SHELL: '/no/shell' }),
+        );
+        assert.strictEqual(claude.path, claudeShim);
+      } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+    test('the login shell answer is read from the end: rc-file noise, then the paths', async function () {
+      const spawn = makeSpawn(function (call) {
+        call.finish({
+          stdout: `Welcome!\nnot a path\n${fakeBinary}\n`,
+          code: 0,
+        });
+      });
+      const lookup = await engine.resolveHelpBinary(
+        'claude',
+        undefined,
+        deps(spawn, { PATH: '', SHELL: '/bin/zsh' }),
+      );
+      assert.strictEqual(lookup.path, fakeBinary);
+    });
+
+    test('a missing engine names the CLIs that are installed and the command that switches', async function () {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpe-help-other-'));
+      const copilot = path.join(dir, 'copilot');
+      fs.writeFileSync(copilot, '#!/bin/sh\nexit 0\n', 'utf8');
+      fs.chmodSync(copilot, 0o755);
+      try {
+        const spawn = makeSpawn(function (call) {
+          call.finish({ code: 1 });
+        });
+        const error = await rejection(
+          engine.runHelpEngine(
+            request({ config: config({ engine: 'claude' }) }),
+            deps(spawn, { PATH: dir, SHELL: '/no/shell' }),
+          ),
+        );
+        assert.strictEqual(error.code, 'engine_not_found');
+        assert.ok(error.message.includes('Could not find the claude command'));
+        assert.ok(
+          error.message.includes('claude.ai/install.sh'),
+          error.message,
+        );
+        assert.ok(
+          error.message.includes(`Installed here: copilot (${copilot})`),
+          error.message,
+        );
+        assert.ok(error.message.includes('Choose Help Engine'), error.message);
+        assert.ok(
+          !error.message.includes('codex ('),
+          'codex is not installed here',
+        );
+        // copilot came off the PATH; claude and codex asked the login shell.
+        assert.deepStrictEqual(spawn.calls.map((call) => call.args[1]).sort(), [
+          'which -a claude',
+          'which -a codex',
+        ]);
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    test('detectHelpBinaries looks every CLI engine up at once', async function () {
+      const spawn = makeSpawn(function (call) {
+        call.finish({ code: 1 });
+      });
+      const found = await engine.detectHelpBinaries(
+        { claude: fakeBinary },
+        deps(spawn, { PATH: '', SHELL: '/no/shell' }),
+      );
+      assert.strictEqual(found.claude.path, fakeBinary);
+      assert.strictEqual(found.codex.path, undefined);
+      assert.strictEqual(found.copilot.path, undefined);
+      assert.deepStrictEqual(spawn.calls.map((call) => call.args[1]).sort(), [
+        'which -a codex',
+        'which -a copilot',
       ]);
     });
 

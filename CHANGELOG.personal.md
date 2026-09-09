@@ -639,7 +639,10 @@ off` mid-read dropped the page, its properties and every tier class and kept the
     `settings.ts` (`writeHelpEngineSetting`, `CLI_ENGINES`), the two quick picks in
     `controller.ts`, the command in `extension-common.ts` and `package.json`; suites
     `test/read-aloud/copilot-models.test.js` and new cases in `help-engine.test.js`
-    (99 tests between them). `setup/GUIDE.md` and `README.md` name the second CLI.
+    (99 tests between them). `setup/GUIDE.md` and `README.md` name the second CLI, and
+    `SETUP-NEW-MAC.md` at the repo root is the copy-paste runbook for a fresh Mac — zip
+    instead of git, the server behind a company proxy (`UV_SYSTEM_CERTS`, the model by
+    `curl` with pinned checksums), the `.vsix` three ways, the CLI, `NODE_EXTRA_CA_CERTS`.
   - **The catalog is not the plan.** `copilot help config` lists what the CLI declares, and
     the plan may refuse a listed model before any request is made (`Model "…" from --model
 flag is not available`): on this Mac on 2026-09-09 it refused `claude-fable-5.1`,

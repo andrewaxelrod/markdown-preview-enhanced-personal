@@ -1,5 +1,8 @@
 # Setting this up on another Mac
 
+For the order of commands alone, as run on a managed Mac on 2026-09-09, see
+[`../SETUP-NEW-MAC.md`](../SETUP-NEW-MAC.md); this file is the reasoning behind them.
+
 Everything here installs under your home folder. No step needs an administrator, no package
 manager is installed, and nothing is written to `/usr`, `/Library` or `/Applications`.
 

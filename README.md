@@ -34,8 +34,9 @@ preview webview; the synthesis requests are made by the extension host.
 
 ### Kokoro server setup (once)
 
-**[`setup/GUIDE.md`](setup/GUIDE.md) does all of this in one run**, on a Mac where you have no
-administrator rights, and covers the rest of a fresh machine too:
+**[`SETUP-NEW-MAC.md`](SETUP-NEW-MAC.md) is the copy-paste runbook for a fresh Mac** (no
+administrator, no git, a company proxy, the Copilot or Claude CLI), and
+[`setup/GUIDE.md`](setup/GUIDE.md) the walkthrough behind it. The server alone:
 
 ```bash
 ./setup/setup-new-mac.sh --server-only

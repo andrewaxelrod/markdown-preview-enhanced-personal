@@ -380,6 +380,12 @@ export class PreviewProvider {
   private static singlePreviewLocked = false;
 
   /**
+   * Single panels that a cross-root switch is replacing (see `initPreview`):
+   * their dispose must leave the replacement's state alone.
+   */
+  private static replacedSinglePreviews = new WeakSet<vscode.WebviewPanel>();
+
+  /**
    * The key is markdown file fsPath
    * value is JSAndCssFiles
    */
@@ -645,17 +651,43 @@ export class PreviewProvider {
         : undefined;
       const newResourceRoot = getWorkspaceFolderUri(sourceUri);
       if (oldResourceRoot?.fsPath !== newResourceRoot.fsPath) {
+        // A new resource root needs a new panel.
         const singlePreview = PreviewProvider.singlePreviewPanel;
         PreviewProvider.singlePreviewPanel = null;
         PreviewProvider.singlePreviewPanelSourceUriTarget = null;
-        singlePreview.dispose();
-        return await this.initPreview({
-          sourceUri,
-          document,
-          viewOptions,
-          cursorLine,
-          inputStringOverride,
-        });
+        if (!singlePreview.active) {
+          singlePreview.dispose();
+          return await this.initPreview({
+            sourceUri,
+            document,
+            viewOptions,
+            cursorLine,
+            inputStringOverride,
+          });
+        }
+        // The panel has the focus (a click on a spoken edition's ear marker).
+        // Disposing it first hands the focus to the previous file's text
+        // editor, and the listener that makes the single preview follow the
+        // active editor then retargets the new panel back to that file. So
+        // open the new panel in the old one's column, then dispose the old
+        // one. Only here: a panel opened first takes the focus from a text
+        // editor that has it.
+        PreviewProvider.replacedSinglePreviews.add(singlePreview);
+        try {
+          await this.initPreview({
+            sourceUri,
+            document,
+            viewOptions: {
+              ...viewOptions,
+              viewColumn: singlePreview.viewColumn ?? viewOptions.viewColumn,
+            },
+            cursorLine,
+            inputStringOverride,
+          });
+        } finally {
+          singlePreview.dispose();
+        }
+        return;
       } else {
         previewPanel = PreviewProvider.singlePreviewPanel;
         PreviewProvider.singlePreviewPanelSourceUriTarget = sourceUri;
@@ -761,6 +793,16 @@ export class PreviewProvider {
         // unregister previewPanel.
         previewPanel.onDidDispose(
           () => {
+            // Replaced by a cross-root switch: the single panel, its target,
+            // the lock and any read now belong to the replacement.
+            if (PreviewProvider.replacedSinglePreviews.delete(previewPanel)) {
+              this.previewToDocumentMap.delete(previewPanel);
+              for (const previews of this.previewMaps.values()) {
+                previews.delete(previewPanel);
+              }
+              this.initializedPreviews.delete(previewPanel);
+              return;
+            }
             ReadAloudController.getIfInitialized()?.cancelForSource(
               (getPreviewMode() === PreviewMode.SinglePreview
                 ? PreviewProvider.singlePreviewPanelSourceUriTarget

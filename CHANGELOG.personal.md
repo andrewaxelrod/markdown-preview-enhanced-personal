@@ -718,6 +718,19 @@ flag is not available`): on this Mac on 2026-09-09 it refused `claude-fable-5.1`
 
 ### Fixed
 
+- **A spoken edition's ear marker opened the document again, not the edition** (2026-09-12, in
+  the default single-preview mode). An edition lives under `configPath`, outside the workspace,
+  so its preview has another resource root, and upstream's `initPreview` meets a new root by
+  disposing the single panel and creating another. Disposing the focused panel handed its group
+  back to the document's text editor, and the listener that makes the single preview follow the
+  active editor retargeted the new panel to that document before the edition had loaded (the
+  log showed a fresh handshake for the source on every click and none for the edition). When the
+  panel being replaced has the focus (`WebviewPanel.active`), the new panel is now opened in its
+  column before it is disposed, and that dispose leaves the new panel's target, lock and read
+  alone. A panel without the focus is still disposed first, as upstream does: opening first there
+  took the focus from the text editor the preview was following. Classroom modules and notes open
+  their previews through the same path.
+
 - **`setup/setup-new-mac.sh` on a managed Mac** (2026-09-09, run for real on one): behind a
   TLS-inspecting proxy `uv` failed with _invalid peer certificate: UnknownIssuer_ fetching
   torch, so the script sets `UV_SYSTEM_CERTS=1` and fetches the voice model with `curl`
